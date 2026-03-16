@@ -67,6 +67,9 @@ class LocationTracker: NSObject {
     private var locationCallback: (([String: Any]) -> Void)?
     private var geofenceCallback: (([String: Any]) -> Void)?
 
+    // Core delegate for platform bridge communication
+    weak var coreDelegate: PolyfenceCoreDelegate?
+
     // Smart GPS Configuration
     private var smartConfig = SmartGpsConfig()
     private var currentGpsInterval: TimeInterval = 5.0
@@ -1702,7 +1705,7 @@ extension LocationTracker: CLLocationManagerDelegate {
                 "type": "runtime_status",
                 "data": status
             ]
-            PolyfencePlugin.sendPerformanceEvent(event: event)
+            coreDelegate?.onPerformanceEvent(event)
             lastEmittedStatus = status
             lastStatusEmitTime = currentTime
             NSLog("[LocationTracker] Runtime status emitted: \(status)")
