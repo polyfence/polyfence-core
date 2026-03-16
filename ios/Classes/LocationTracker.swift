@@ -201,6 +201,7 @@ class LocationTracker: NSObject {
             ]
             // Send health timer data on main thread
             DispatchQueue.main.async {
+                self.coreDelegate?.onPerformanceEvent(payload)
             }
         }
         RunLoop.main.add(healthTimer!, forMode: .common)
@@ -504,6 +505,7 @@ class LocationTracker: NSObject {
         // Send event to delegate on main thread
         DispatchQueue.main.async {
             self.geofenceCallback?(eventData)
+            self.coreDelegate?.onGeofenceEvent(eventData)
         }
 
         // Show notification with proper zone name
@@ -524,6 +526,7 @@ class LocationTracker: NSObject {
         ]
         // Send health data on main thread
         DispatchQueue.main.async {
+            self.coreDelegate?.onPerformanceEvent(health)
         }
     }
 
@@ -544,6 +547,7 @@ class LocationTracker: NSObject {
         // CRITICAL: Send on main thread
         DispatchQueue.main.async {
             self.locationCallback?(locationData)
+            self.coreDelegate?.onLocationUpdate(locationData)
         }
     }
 
