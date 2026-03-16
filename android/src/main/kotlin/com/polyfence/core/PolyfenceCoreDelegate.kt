@@ -16,4 +16,7 @@ interface PolyfenceCoreDelegate {
 
     /** Called when an error occurs */
     fun onError(errorData: Map<String, Any>)
+
+    /** Check if tracking is currently enabled in the bridge layer */
+    fun isTrackingEnabled(): Boolean
 }
