@@ -1,0 +1,31 @@
+# Android
+android/.gradle/
+android/build/
+android/local.properties
+android/.idea/
+*.iml
+
+# iOS
+ios/Pods/
+ios/.build/
+ios/DerivedData/
+*.xcworkspace
+*.xcuserdata
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.class
+*.jar
+*.aar
+*.framework
+*.xcframework
