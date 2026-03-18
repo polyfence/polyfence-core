@@ -1,0 +1,44 @@
+name: Question
+description: Ask a question about Polyfence Core
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have a question? We're here to help!
+
+        **Note:** For commercial support, visit [polyfence.io](https://polyfence.io)
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your Question
+      description: What would you like to know?
+      placeholder: How do I configure SmartGPS for battery-optimal tracking?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What are you trying to accomplish?
+      placeholder: I'm integrating Polyfence Core into a native iOS app and need...
+
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What Have You Tried?
+      description: Have you already attempted a solution?
+      placeholder: I tried configuring SmartGpsConfig with...
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have read the README documentation
+          required: true
+        - label: I have checked existing issues for similar questions
+          required: true

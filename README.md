@@ -1,5 +1,7 @@
 # Polyfence Core
 
+[![CI](https://github.com/blackabass/polyfence-core/actions/workflows/ci.yml/badge.svg)](https://github.com/blackabass/polyfence-core/actions/workflows/ci.yml)
+
 Privacy-first polygon and circle geofencing engine for iOS and Android. Platform-agnostic native SDK — no Flutter, no React Native dependencies.
 
 ## What It Does

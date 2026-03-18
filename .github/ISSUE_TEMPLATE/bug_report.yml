@@ -1,0 +1,118 @@
+name: Bug Report
+description: File a bug report to help us improve Polyfence Core
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the sections below.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of the bug
+      placeholder: When initializing GeofenceEngine, it crashes on Android 12...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Initialize GeofenceEngine with default config
+        2. Add a polygon zone
+        3. Start monitoring
+        4. App crashes
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: The engine should start monitoring without crashing
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+      placeholder: The app crashes with error...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Which platform does this affect?
+      multiple: true
+      options:
+        - iOS
+        - Android
+        - Both
+    validations:
+      required: true
+
+  - type: dropdown
+    id: integration
+    attributes:
+      label: Integration Method
+      description: How are you integrating Polyfence Core?
+      options:
+        - CocoaPods
+        - Maven / Gradle
+        - Direct source import
+    validations:
+      required: true
+
+  - type: input
+    id: polyfence-version
+    attributes:
+      label: Polyfence Core Version
+      description: Which version of Polyfence Core are you using?
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device / OS Version
+      description: What device and OS version are you testing on?
+      placeholder: iPhone 14 Pro (iOS 17.2) or Pixel 7 (Android 14)
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Code Sample
+      description: Minimal code to reproduce the issue
+      render: kotlin
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Stack Trace
+      description: Paste any error messages or stack traces
+      render: shell
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues to avoid duplicates
+          required: true
+        - label: I have tested on a physical device (not just simulator)
+          required: false
+        - label: I have included logs/stack traces
+          required: false
