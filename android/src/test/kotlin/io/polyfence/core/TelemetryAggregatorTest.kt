@@ -46,6 +46,7 @@ class TelemetryAggregatorTest {
 
     @Test
     fun `activity distribution tracks multiple activities`() {
+        Thread.sleep(10) // Ensure "unknown" initial state accumulates time
         aggregator.recordActivityChange("still")
         Thread.sleep(30)
         aggregator.recordActivityChange("walking")
