@@ -1,4 +1,4 @@
-package com.polyfence.core
+package io.polyfence.core
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -24,8 +24,8 @@ class TrackingScheduler(private val context: Context) {
         private const val KEY_TIME_WINDOWS = "time_windows"
         private const val KEY_START_IMMEDIATELY = "start_immediately_if_in_window"
 
-        const val ACTION_SCHEDULE_START = "com.polyfence.SCHEDULE_START"
-        const val ACTION_SCHEDULE_STOP = "com.polyfence.SCHEDULE_STOP"
+        const val ACTION_SCHEDULE_START = "io.polyfence.SCHEDULE_START"
+        const val ACTION_SCHEDULE_STOP = "io.polyfence.SCHEDULE_STOP"
 
         private const val REQUEST_CODE_START = 1001
         private const val REQUEST_CODE_STOP = 1002

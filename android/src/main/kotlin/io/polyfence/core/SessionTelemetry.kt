@@ -1,4 +1,4 @@
-package com.polyfence.core
+package io.polyfence.core
 
 /**
  * Data class representing a complete session telemetry snapshot.

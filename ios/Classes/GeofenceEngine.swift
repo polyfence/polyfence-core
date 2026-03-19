@@ -25,7 +25,7 @@ class GeofenceEngine {
 
     // MARK: - Properties
     // Synchronization for thread-safe access to zone data/state
-    private let syncQueue = DispatchQueue(label: "com.polyfence.GeofenceEngine.sync")
+    private let syncQueue = DispatchQueue(label: "io.polyfence.GeofenceEngine.sync")
     private var zones: [String: ZoneData] = [:]
     private var zoneStates: [String: Bool] = [:]
     private var zoneConfidence: [String: ZoneConfidence] = [:]

@@ -1,4 +1,4 @@
-package com.polyfence.core
+package io.polyfence.core
 
 import org.junit.Assert.*
 import org.junit.Before

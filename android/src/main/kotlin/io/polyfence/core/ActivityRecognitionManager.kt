@@ -1,4 +1,4 @@
-package com.polyfence.core
+package io.polyfence.core
 
 import android.Manifest
 import android.app.PendingIntent
@@ -16,8 +16,8 @@ import com.google.android.gms.location.ActivityRecognition
 import com.google.android.gms.location.ActivityRecognitionClient
 import com.google.android.gms.location.ActivityRecognitionResult
 import com.google.android.gms.location.DetectedActivity
-import com.polyfence.core.configuration.ActivitySettings
-import com.polyfence.core.configuration.ActivityType
+import io.polyfence.core.configuration.ActivitySettings
+import io.polyfence.core.configuration.ActivityType
 
 /**
  * Manages activity recognition using Google Play Services
@@ -28,7 +28,7 @@ class ActivityRecognitionManager(private val context: Context) {
 
     companion object {
         private const val TAG = "ActivityRecognition"
-        private const val ACTION_ACTIVITY_UPDATE = "com.polyfence.ACTIVITY_UPDATE"
+        private const val ACTION_ACTIVITY_UPDATE = "io.polyfence.ACTIVITY_UPDATE"
         private const val DETECTION_INTERVAL_MS = 10_000L // 10 seconds
     }
 

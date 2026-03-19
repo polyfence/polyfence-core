@@ -1,4 +1,4 @@
-package com.polyfence.core.utils
+package io.polyfence.core.utils
 
 import android.content.Context
 import android.content.SharedPreferences

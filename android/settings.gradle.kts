@@ -1,4 +1,8 @@
 pluginManagement {
+    plugins {
+        id("com.android.library") version "8.1.4"
+        id("org.jetbrains.kotlin.android") version "1.9.10"
+    }
     repositories {
         google()
         mavenCentral()
@@ -6,7 +10,7 @@ pluginManagement {
     }
 }
 
-dependencyResolution {
+dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()

@@ -1,4 +1,4 @@
-package com.polyfence.core
+package io.polyfence.core
 
 import android.os.Build
 import java.util.concurrent.ConcurrentHashMap

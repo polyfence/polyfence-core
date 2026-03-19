@@ -1,4 +1,4 @@
-package com.polyfence.core.configuration
+package io.polyfence.core.configuration
 
 import android.os.Build
 import android.util.Log

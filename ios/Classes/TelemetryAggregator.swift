@@ -8,7 +8,7 @@ import UIKit
 /// Thread-safe: all mutable state accessed via syncQueue.
 class TelemetryAggregator {
 
-    private let syncQueue = DispatchQueue(label: "com.polyfence.telemetryAggregator", attributes: .concurrent)
+    private let syncQueue = DispatchQueue(label: "io.polyfence.telemetryAggregator", attributes: .concurrent)
 
     // --- Activity distribution ---
     private var activityTimeMs: [String: Int64] = [:]

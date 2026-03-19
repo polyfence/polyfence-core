@@ -1,4 +1,4 @@
-package com.polyfence.core.utils
+package io.polyfence.core.utils
 
 import android.content.Context
 import android.content.Intent
@@ -9,7 +9,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import android.Manifest
-import com.polyfence.core.PolyfenceErrorManager
+import io.polyfence.core.PolyfenceErrorManager
 
 /**
  * Handles error recovery and resilience for Polyfence

@@ -30,7 +30,7 @@ pod 'PolyfenceCore', '~> 1.0.0'
 ### Android (Maven)
 
 ```kotlin
-implementation("com.polyfence:polyfence-core:1.0.0")
+implementation("io.polyfence:polyfence-core:1.0.0")
 ```
 
 ## Architecture

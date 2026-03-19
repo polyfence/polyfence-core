@@ -1,15 +1,15 @@
 plugins {
     id("com.android.library")
-    id("kotlin-android")
+    id("org.jetbrains.kotlin.android")
     id("maven-publish")
     id("signing")
 }
 
-group = "com.polyfence"
+group = "io.polyfence"
 version = "1.0.0"
 
 android {
-    namespace = "com.polyfence.core"
+    namespace = "io.polyfence.core"
     compileSdk = 34
 
     defaultConfig {
@@ -57,7 +57,7 @@ dependencies {
 publishing {
     publications {
         create<MavenPublication>("release") {
-            groupId = "com.polyfence"
+            groupId = "io.polyfence"
             artifactId = "polyfence-core"
             version = project.version.toString()
 
@@ -75,7 +75,44 @@ publishing {
                         url.set("https://opensource.org/licenses/MIT")
                     }
                 }
+                developers {
+                    developer {
+                        id.set("polyfence")
+                        name.set("Polyfence")
+                        email.set("hello@polyfence.io")
+                    }
+                }
+                scm {
+                    connection.set("scm:git:git://github.com/polyfence/polyfence-core.git")
+                    developerConnection.set("scm:git:ssh://github.com/polyfence/polyfence-core.git")
+                    url.set("https://github.com/polyfence/polyfence-core")
+                }
             }
         }
     }
+
+    repositories {
+        maven {
+            name = "OSSRH"
+            val releasesUrl = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
+            val snapshotsUrl = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
+            url = if (version.toString().endsWith("SNAPSHOT")) snapshotsUrl else releasesUrl
+            credentials {
+                username = findProperty("ossrhUsername") as String? ?: System.getenv("OSSRH_USERNAME") ?: ""
+                password = findProperty("ossrhPassword") as String? ?: System.getenv("OSSRH_PASSWORD") ?: ""
+            }
+        }
+    }
+}
+
+signing {
+    val signingKeyId = findProperty("signing.keyId") as String? ?: System.getenv("SIGNING_KEY_ID")
+    val signingKey = System.getenv("SIGNING_KEY")
+    val signingPassword = findProperty("signing.password") as String? ?: System.getenv("SIGNING_PASSWORD")
+
+    if (signingKey != null) {
+        useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
+    }
+
+    sign(publishing.publications["release"])
 }

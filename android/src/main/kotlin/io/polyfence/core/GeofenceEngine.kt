@@ -1,4 +1,4 @@
-package com.polyfence.core
+package io.polyfence.core
 
 import android.location.Location
 import android.util.Log

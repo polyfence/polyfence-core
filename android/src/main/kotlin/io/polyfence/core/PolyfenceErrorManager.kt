@@ -1,4 +1,4 @@
-package com.polyfence.core
+package io.polyfence.core
 
 import android.content.Context
 import android.os.PowerManager

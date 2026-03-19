@@ -33,7 +33,7 @@ class ActivityRecognitionManager {
     private var lastTrackedActivity: String = "unknown"
 
     init() {
-        operationQueue.name = "com.polyfence.activityRecognition"
+        operationQueue.name = "io.polyfence.activityRecognition"
         operationQueue.maxConcurrentOperationCount = 1
     }
 

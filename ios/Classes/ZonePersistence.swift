@@ -19,7 +19,7 @@ class ZonePersistence {
     // Synchronization queue for thread-safe read-modify-write operations
     // Concurrent queue allows parallel reads, barrier flag serializes writes
     private let persistenceQueue = DispatchQueue(
-        label: "com.polyfence.zonePersistence",
+        label: "io.polyfence.zonePersistence",
         attributes: .concurrent
     )
 

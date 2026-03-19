@@ -1,4 +1,4 @@
-package com.polyfence.core
+package io.polyfence.core
 
 import android.Manifest
 import android.app.*
@@ -14,15 +14,15 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.*
-import com.polyfence.core.utils.PolyfenceConfig
-import com.polyfence.core.utils.PolyfenceErrorRecovery
-import com.polyfence.core.configuration.SmartGpsConfig
-import com.polyfence.core.configuration.SmartGpsConfigFactory
-import com.polyfence.core.configuration.DeviceOptimization
-import com.polyfence.core.configuration.ActivitySettings
-import com.polyfence.core.configuration.ActivityType
-import com.polyfence.core.GeofenceEngine.LatLng
-import com.polyfence.core.GeofenceEngine.ZoneType
+import io.polyfence.core.utils.PolyfenceConfig
+import io.polyfence.core.utils.PolyfenceErrorRecovery
+import io.polyfence.core.configuration.SmartGpsConfig
+import io.polyfence.core.configuration.SmartGpsConfigFactory
+import io.polyfence.core.configuration.DeviceOptimization
+import io.polyfence.core.configuration.ActivitySettings
+import io.polyfence.core.configuration.ActivityType
+import io.polyfence.core.GeofenceEngine.LatLng
+import io.polyfence.core.GeofenceEngine.ZoneType
 import kotlin.math.*
 
 /**

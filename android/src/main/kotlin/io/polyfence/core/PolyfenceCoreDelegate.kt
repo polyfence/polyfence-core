@@ -1,4 +1,4 @@
-package com.polyfence.core
+package io.polyfence.core
 
 /**
  * Interface for platform bridges (Flutter, React Native, etc.) to receive
