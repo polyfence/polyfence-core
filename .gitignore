@@ -23,6 +23,11 @@ ios/DerivedData/
 .DS_Store
 Thumbs.db
 
+# Credentials & secrets
+*.jks
+*.keystore
+secring.gpg
+
 # Build artifacts
 *.class
 *.jar

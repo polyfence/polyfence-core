@@ -1,0 +1,15 @@
+# Polyfence Core — Maven Central Publishing Credentials
+#
+# Copy this file to ~/.gradle/gradle.properties (global) or keep in this
+# directory as gradle.properties (local, already gitignored).
+#
+# For CI, these are set as environment variables in GitHub Secrets instead.
+
+# Sonatype OSSRH credentials
+ossrhUsername=your-sonatype-username
+ossrhPassword=your-sonatype-password
+
+# GPG signing
+signing.keyId=LAST8CHARS
+signing.password=your-gpg-passphrase
+signing.secretKeyRingFile=/path/to/.gnupg/secring.gpg
