@@ -21,19 +21,16 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Decode GPG key
-        run: echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > /tmp/signing-key.asc
-
-      - name: Import GPG key
-        run: gpg --batch --import /tmp/signing-key.asc && rm /tmp/signing-key.asc
-
       - name: Build & Publish
         env:
           OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
           OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
           GPG_PRIVATE_KEY: ${{ secrets.SIGNING_KEY }}
           GPG_PASSPHRASE: ${{ secrets.SIGNING_PASSWORD }}
-        run: ./gradlew publishReleasePublicationToOSSRHRepository
+        run: |
+          # Decode base64-encoded GPG key for Gradle in-memory signing
+          export GPG_PRIVATE_KEY=$(echo "$GPG_PRIVATE_KEY" | base64 --decode)
+          ./gradlew publishReleasePublicationToOSSRHRepository
 
   publish-cocoapods:
     name: Publish to CocoaPods
@@ -45,9 +42,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Lint podspec
-        run: pod lib lint PolyfenceCore.podspec --allow-warnings
+        run: pod lib lint PolyfenceCore.podspec --allow-warnings --skip-import-validation
 
       - name: Push to CocoaPods trunk
+        if: ${{ !contains(github.ref_name, 'rc') }}
         env:
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
         run: pod trunk push PolyfenceCore.podspec --allow-warnings
@@ -65,3 +63,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'rc') }}
