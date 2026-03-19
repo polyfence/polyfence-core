@@ -26,7 +26,15 @@ Thumbs.db
 # Credentials & secrets
 *.jks
 *.keystore
+*.p12
 secring.gpg
+.env
+.env.*
+
+# Agent / editor instructions
+CLAUDE.md
+.cursorrules
+tasks/
 
 # Build artifacts
 *.class

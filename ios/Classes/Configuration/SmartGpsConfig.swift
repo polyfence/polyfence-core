@@ -112,15 +112,15 @@ struct SmartGpsConfig {
      */
     func logConfiguration(tag: String) {
         if enableDebugLogging {
-            print("\(tag): Smart GPS Config - profile: \(accuracyProfile), strategy: \(updateStrategy)")
+            NSLog("%@", "\(tag): Smart GPS Config - profile: \(accuracyProfile), strategy: \(updateStrategy)")
             if let proximity = proximitySettings {
-                print("\(tag): Proximity - near: \(proximity.nearZoneThresholdMeters)m, far: \(proximity.farZoneThresholdMeters)m")
+                NSLog("%@", "\(tag): Proximity - near: \(proximity.nearZoneThresholdMeters)m, far: \(proximity.farZoneThresholdMeters)m")
             }
             if let movement = movementSettings {
-                print("\(tag): Movement - stationary: \(movement.stationaryThresholdMs)ms, moving: \(movement.movingUpdateIntervalMs)ms")
+                NSLog("%@", "\(tag): Movement - stationary: \(movement.stationaryThresholdMs)ms, moving: \(movement.movingUpdateIntervalMs)ms")
             }
             if let battery = batterySettings {
-                print("\(tag): Battery - low: \(battery.lowBatteryThreshold)%, critical: \(battery.criticalBatteryThreshold)%")
+                NSLog("%@", "\(tag): Battery - low: \(battery.lowBatteryThreshold)%, critical: \(battery.criticalBatteryThreshold)%")
             }
         }
     }

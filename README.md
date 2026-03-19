@@ -135,4 +135,4 @@ See [polyfence-flutter CONTRIBUTING.md](https://github.com/blackabass/polyfence-
 
 MIT — see [LICENSE](LICENSE)
 
-Copyright (c) 2026 Sector7 / Polyfence
+Copyright (c) 2026 Polyfence

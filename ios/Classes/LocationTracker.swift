@@ -729,7 +729,7 @@ class LocationTracker: NSObject {
             if secondsSinceLast > 30.0 {
                 // Only request if truly stale (30s without update)
                 if self.smartConfig.enableDebugLogging {
-                    print("\(Self.TAG): Fallback timer triggered - requesting location")
+                    NSLog("%@", "\(Self.TAG): Fallback timer triggered - requesting location")
                 }
                 self.locationManager?.requestLocation()
             }
@@ -1080,7 +1080,7 @@ extension LocationTracker: CLLocationManagerDelegate {
         currentGpsInterval = calculateCurrentInterval()
 
         if smartConfig.enableDebugLogging {
-            print("\(Self.TAG): Updated GPS settings - accuracy: \(accuracy), distanceFilter: \(distanceFilter)")
+            NSLog("%@", "\(Self.TAG): Updated GPS settings - accuracy: \(accuracy), distanceFilter: \(distanceFilter)")
         }
 
         // Emit status after GPS configuration changes
@@ -1118,12 +1118,12 @@ extension LocationTracker: CLLocationManagerDelegate {
         switch nearestZoneDistance {
         case 0...proximitySettings.nearZoneThresholdMeters:
             if smartConfig.enableDebugLogging {
-                print("\(Self.TAG): Near zone (\(nearestZoneDistance)m) - using high frequency")
+                NSLog("%@", "\(Self.TAG): Near zone (\(nearestZoneDistance)m) - using high frequency")
             }
             return proximitySettings.nearZoneUpdateIntervalMs
         case proximitySettings.farZoneThresholdMeters...:
             if smartConfig.enableDebugLogging {
-                print("\(Self.TAG): Far from zones (\(nearestZoneDistance)m) - using low frequency")
+                NSLog("%@", "\(Self.TAG): Far from zones (\(nearestZoneDistance)m) - using low frequency")
             }
             return proximitySettings.farZoneUpdateIntervalMs
         default:
@@ -1135,7 +1135,7 @@ extension LocationTracker: CLLocationManagerDelegate {
             let interpolatedInterval = proximitySettings.nearZoneUpdateIntervalMs + (ratio * intervalDiff)
 
             if smartConfig.enableDebugLogging {
-                print("\(Self.TAG): Medium distance (\(nearestZoneDistance)m) - using interpolated interval: \(interpolatedInterval)s")
+                NSLog("%@", "\(Self.TAG): Medium distance (\(nearestZoneDistance)m) - using interpolated interval: \(interpolatedInterval)s")
             }
             return interpolatedInterval
         }
@@ -1171,7 +1171,7 @@ extension LocationTracker: CLLocationManagerDelegate {
             if nearestZoneDistance <= settings.nearZoneThresholdMeters {
                 proximityInterval = calculateProximityBasedInterval()
                 if smartConfig.enableDebugLogging {
-                    print("\(Self.TAG): Near zone (\(nearestZoneDistance)m) - proximity interval: \(proximityInterval!)s, isStationary=\(isStationary)")
+                    NSLog("%@", "\(Self.TAG): Near zone (\(nearestZoneDistance)m) - proximity interval: \(proximityInterval!)s, isStationary=\(isStationary)")
                 }
             }
         }
@@ -1186,7 +1186,7 @@ extension LocationTracker: CLLocationManagerDelegate {
             let stationaryInterval = smartConfig.movementSettings?.stationaryUpdateIntervalMs ?? 120.0 // seconds
             let result = max(proxInterval, stationaryInterval)
             if smartConfig.enableDebugLogging {
-                print("\(Self.TAG): Near zone but stationary - using: \(result)s (proximity=\(proxInterval), stationary=\(stationaryInterval))")
+                NSLog("%@", "\(Self.TAG): Near zone but stationary - using: \(result)s (proximity=\(proxInterval), stationary=\(stationaryInterval))")
             }
             return result
         }
@@ -1199,7 +1199,7 @@ extension LocationTracker: CLLocationManagerDelegate {
         // Far from zones -> use the most battery-friendly (longest) interval
         let result = max(movementInterval, batteryInterval, activityInterval)
         if smartConfig.enableDebugLogging {
-            print("\(Self.TAG): Far from zones - using longest interval: \(result)s (movement=\(movementInterval), battery=\(batteryInterval), activity=\(activityInterval))")
+            NSLog("%@", "\(Self.TAG): Far from zones - using longest interval: \(result)s (movement=\(movementInterval), battery=\(batteryInterval), activity=\(activityInterval))")
         }
         return result
     }
@@ -1266,7 +1266,7 @@ extension LocationTracker: CLLocationManagerDelegate {
             }
 
             if smartConfig.enableDebugLogging {
-                print("\(Self.TAG): Nearest zone distance: \(nearestDistance)m")
+                NSLog("%@", "\(Self.TAG): Nearest zone distance: \(nearestDistance)m")
             }
             return nearestDistance
 
@@ -1405,11 +1405,11 @@ extension LocationTracker: CLLocationManagerDelegate {
             let distance = calculateDistanceToNearestZone(location)
             let interval = calculateProximityBasedInterval()
 
-            print("\(Self.TAG): Proximity Debug:")
-            print("  - Distance to nearest zone: \(distance)m")
-            print("  - GPS interval: \(interval)s")
-            print("  - Update strategy: \(smartConfig.updateStrategy)")
-            print("  - Zones count: \(geofenceEngine.getZoneCount())")
+            NSLog("%@", "\(Self.TAG): Proximity Debug:")
+            NSLog("%@", "  - Distance to nearest zone: \(distance)m")
+            NSLog("%@", "  - GPS interval: \(interval)s")
+            NSLog("%@", "  - Update strategy: \(smartConfig.updateStrategy)")
+            NSLog("%@", "  - Zones count: \(geofenceEngine.getZoneCount())")
         }
     }
 
@@ -1540,7 +1540,7 @@ extension LocationTracker: CLLocationManagerDelegate {
                 isStationary = false
                 updateStationaryTracking(nowStationary: false)
                 if smartConfig.enableDebugLogging {
-                    print("\(Self.TAG): Device started moving (moved \(String(format: "%.1f", distance))m)")
+                    NSLog("%@", "\(Self.TAG): Device started moving (moved \(String(format: "%.1f", distance))m)")
                 }
                 updateLocationManagerSettings()
             }
@@ -1550,7 +1550,7 @@ extension LocationTracker: CLLocationManagerDelegate {
                 isStationary = true
                 updateStationaryTracking(nowStationary: true)
                 if smartConfig.enableDebugLogging {
-                    print("\(Self.TAG): Device is now stationary (no movement > \(moveThreshold)m in \(timeThreshold)s)")
+                    NSLog("%@", "\(Self.TAG): Device is now stationary (no movement > \(moveThreshold)m in \(timeThreshold)s)")
                 }
                 updateLocationManagerSettings()
             }
