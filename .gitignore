@@ -31,6 +31,7 @@ secring.gpg
 # Build artifacts
 *.class
 *.jar
+!android/gradle/wrapper/gradle-wrapper.jar
 *.aar
 *.framework
 *.xcframework

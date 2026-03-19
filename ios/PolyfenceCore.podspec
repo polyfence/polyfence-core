@@ -7,10 +7,10 @@ Pod::Spec.new do |s|
     (haversine) geofencing with SmartGPS, activity recognition, and built-in
     telemetry aggregation. No cloud required.
   DESC
-  s.homepage         = 'https://github.com/polyfence/polyfence-core'
+  s.homepage         = 'https://github.com/blackabass/polyfence-core'
   s.license          = { :type => 'MIT', :file => '../LICENSE' }
   s.author           = { 'Polyfence' => 'hello@polyfence.io' }
-  s.source           = { :git => 'https://github.com/polyfence/polyfence-core.git', :tag => s.version.to_s }
+  s.source           = { :git => 'https://github.com/blackabass/polyfence-core.git', :tag => s.version.to_s }
 
   s.ios.deployment_target = '12.0'
   s.swift_version = '5.0'

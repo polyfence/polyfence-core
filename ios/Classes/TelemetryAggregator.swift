@@ -62,7 +62,7 @@ class TelemetryAggregator {
     private var updateStrategy: String?
 
     init() {
-        let now = currentTimeMs()
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
         lastActivityChangeTime = now
         lastIntervalChangeTime = now
         sessionStartTime = now
