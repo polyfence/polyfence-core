@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 8.1.4" type="baseline" client="gradle" dependencies="false" name="AGP (8.1.4)" variant="all" version="8.1.4">
+
+    <issue
+        id="MissingPermission"
+        message="Missing permissions required by ActivityRecognitionClient.requestActivityUpdates: android.permission.ACTIVITY_RECOGNITION or com.google.android.gms.permission.ACTIVITY_RECOGNITION"
+        errorLine1="            activityRecognitionClient?.requestActivityUpdates("
+        errorLine2="            ^">
+        <location
+            file="src/main/kotlin/io/polyfence/core/ActivityRecognitionManager.kt"
+            line="109"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Missing permissions required by ActivityRecognitionClient.removeActivityUpdates: android.permission.ACTIVITY_RECOGNITION or com.google.android.gms.permission.ACTIVITY_RECOGNITION"
+        errorLine1="            pendingIntent?.let { pi ->"
+        errorLine2="                           ^">
+        <location
+            file="src/main/kotlin/io/polyfence/core/ActivityRecognitionManager.kt"
+            line="136"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Missing permissions required by FusedLocationProviderClient.requestLocationUpdates: android.permission.ACCESS_COARSE_LOCATION or android.permission.ACCESS_FINE_LOCATION"
+        errorLine1="            fusedLocationClient?.requestLocationUpdates("
+        errorLine2="            ^">
+        <location
+            file="src/main/kotlin/io/polyfence/core/LocationTracker.kt"
+            line="435"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Missing permissions required by FusedLocationProviderClient.requestLocationUpdates: android.permission.ACCESS_COARSE_LOCATION or android.permission.ACCESS_FINE_LOCATION"
+        errorLine1="        healthCheckHandler?.postDelayed({"
+        errorLine2="                            ^">
+        <location
+            file="src/main/kotlin/io/polyfence/core/LocationTracker.kt"
+            line="989"
+            column="29"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Missing permissions required by FusedLocationProviderClient.requestLocationUpdates: android.permission.ACCESS_COARSE_LOCATION or android.permission.ACCESS_FINE_LOCATION"
+        errorLine1="            fusedLocationClient?.requestLocationUpdates("
+        errorLine2="            ^">
+        <location
+            file="src/main/kotlin/io/polyfence/core/LocationTracker.kt"
+            line="1271"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="AnnotateVersionCheck"
+        message="This field should be annotated with `ChecksSdkIntAtLeast(extension=0)`"
+        errorLine1="    private var osVersionMajor: Int = Build.VERSION.SDK_INT"
+        errorLine2="                ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/TelemetryAggregator.kt"
+            line="60"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="ApplySharedPref"
+        message="Consider using `apply()` instead; `commit` writes its data to persistent storage immediately, whereas `apply` will handle it in the background"
+        errorLine1="                    .commit() // Use commit() for immediate write-through (not apply())"
+        errorLine2="                     ~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/ZonePersistence.kt"
+            line="221"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="ApplySharedPref"
+        message="Consider using `apply()` instead; `commit` writes its data to persistent storage immediately, whereas `apply` will handle it in the background"
+        errorLine1="                    .commit() // Use commit() for immediate write-through"
+        errorLine2="                     ~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/ZonePersistence.kt"
+            line="248"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="ApplySharedPref"
+        message="Consider using `apply()` instead; `commit` writes its data to persistent storage immediately, whereas `apply` will handle it in the background"
+        errorLine1="                    .commit()"
+        errorLine2="                     ~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/ZonePersistence.kt"
+            line="307"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 24 (current min is 21): `java.util.concurrent.ConcurrentHashMap#newKeySet`"
+        errorLine1="    private val activeZoneIds = ConcurrentHashMap.newKeySet&lt;String>()"
+        errorLine2="                                                  ~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/GeofenceEngine.kt"
+            line="95"
+            column="51"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 24 (current min is 21): `java.util.concurrent.ConcurrentHashMap.KeySetView#clear`"
+        errorLine1="        this.activeZoneIds.clear()"
+        errorLine2="                           ~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/GeofenceEngine.kt"
+            line="218"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 24 (current min is 21): `java.util.concurrent.ConcurrentHashMap.KeySetView#clear`"
+        errorLine1="        activeZoneIds.clear()"
+        errorLine2="                      ~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/GeofenceEngine.kt"
+            line="242"
+            column="23"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 24 (current min is 21): `java.util.concurrent.ConcurrentHashMap.KeySetView#add`"
+        errorLine1="                activeZoneIds.add(zoneId)"
+        errorLine2="                              ~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/GeofenceEngine.kt"
+            line="255"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Cast from `KeySetView` to `Collection` requires API level 24 (current min is 21)"
+        errorLine1="        return if (clusteringEnabled &amp;&amp; activeZoneIds.isNotEmpty()) {"
+        errorLine2="                                        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/GeofenceEngine.kt"
+            line="267"
+            column="41"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 24 (current min is 21): `java.util.concurrent.ConcurrentHashMap.KeySetView#contains`"
+        errorLine1="            zones.filterKeys { it in activeZoneIds }"
+        errorLine2="                                  ~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/GeofenceEngine.kt"
+            line="268"
+            column="35"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 23 (current min is 21): `android.os.BatteryManager#isCharging`"
+        errorLine1="                    val isCharging = bm.isCharging"
+        errorLine2="                                        ~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/LocationTracker.kt"
+            line="517"
+            column="41"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 23 (current min is 21): `android.os.PowerManager#isIgnoringBatteryOptimizations`"
+        errorLine1="                &quot;isBatteryOptimizationDisabled&quot; to powerManager.isIgnoringBatteryOptimizations(context.packageName),"
+        errorLine2="                                                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/PolyfenceDebugCollector.kt"
+            line="49"
+            column="65"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 23 (current min is 21): `android.os.BatteryManager#isCharging`"
+        errorLine1="            return batteryManager.isCharging"
+        errorLine2="                                  ~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/PolyfenceDebugCollector.kt"
+            line="242"
+            column="35"/>
+    </issue>
+
+    <issue
+        id="NewApi"
+        message="Call requires API level 23 (current min is 21): `android.os.PowerManager#isIgnoringBatteryOptimizations`"
+        errorLine1="                    powerManager.isIgnoringBatteryOptimizations(context.packageName)"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/PolyfenceErrorManager.kt"
+            line="56"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of com.google.android.gms:play-services-location than 21.0.1 is available: 21.3.0"
+        errorLine1="    implementation(&quot;com.google.android.gms:play-services-location:21.0.1&quot;)"
+        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="47"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-ktx than 1.10.1 is available: 1.18.0"
+        errorLine1="    implementation(&quot;androidx.core:core-ktx:1.10.1&quot;)"
+        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="50"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.work:work-runtime-ktx than 2.8.1 is available: 2.11.1"
+        errorLine1="    implementation(&quot;androidx.work:work-runtime-ktx:2.8.1&quot;)"
+        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="51"
+            column="21"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test.ext:junit than 1.1.5 is available: 1.3.0"
+        errorLine1="    androidTestImplementation(&quot;androidx.test.ext:junit:1.1.5&quot;)"
+        errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="57"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test.espresso:espresso-core than 3.5.1 is available: 3.7.0"
+        errorLine1="    androidTestImplementation(&quot;androidx.test.espresso:espresso-core:3.5.1&quot;)"
+        errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="58"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="UnspecifiedRegisterReceiverFlag"
+        message="`activityReceiver` \&#xA;is missing `RECEIVER_EXPORTED` or `RECEIVER_NOT_EXPORTED` flag for unprotected \&#xA;broadcasts registered for io.polyfence.ACTIVITY_UPDATE"
+        errorLine1="                context.registerReceiver(activityReceiver, filter)"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/io/polyfence/core/ActivityRecognitionManager.kt"
+            line="105"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="Do not place Android context classes in static fields (static reference to `TrackingScheduler` which has field `context` pointing to `Context`); this is a memory leak"
+        errorLine1="        // Tracking Scheduler for time-based tracking"
+        errorLine2="        ^">
+        <location
+            file="src/main/kotlin/io/polyfence/core/LocationTracker.kt"
+            line="56"
+            column="9"/>
+    </issue>
+
+</issues>
