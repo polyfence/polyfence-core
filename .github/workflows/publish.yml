@@ -21,16 +21,14 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Build & Publish
+      - name: Publish to Maven Central
         env:
-          OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
-          OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
-          GPG_PRIVATE_KEY: ${{ secrets.SIGNING_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.SIGNING_PASSWORD }}
-        run: |
-          # Decode base64-encoded GPG key for Gradle in-memory signing
-          export GPG_PRIVATE_KEY=$(echo "$GPG_PRIVATE_KEY" | base64 --decode)
-          ./gradlew publishReleasePublicationToOSSRHRepository
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.OSSRH_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
+        run: ./gradlew publishAndReleaseToMavenCentral
 
   publish-cocoapods:
     name: Publish to CocoaPods

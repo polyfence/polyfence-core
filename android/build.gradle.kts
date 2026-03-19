@@ -1,8 +1,7 @@
 plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
-    id("maven-publish")
-    id("signing")
+    id("com.vanniktech.maven.publish")
 }
 
 group = "io.polyfence"
@@ -58,64 +57,37 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }
 
-publishing {
-    publications {
-        create<MavenPublication>("release") {
-            groupId = "io.polyfence"
-            artifactId = "polyfence-core"
-            version = project.version.toString()
+mavenPublishing {
+    publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
+    signAllPublications()
 
-            afterEvaluate {
-                from(components["release"])
-            }
+    coordinates(
+        groupId = "io.polyfence",
+        artifactId = "polyfence-core",
+        version = project.version.toString()
+    )
 
-            pom {
-                name.set("Polyfence Core")
-                description.set("Privacy-first polygon and circle geofencing engine for Android")
-                url.set("https://github.com/blackabass/polyfence-core")
-                licenses {
-                    license {
-                        name.set("MIT License")
-                        url.set("https://opensource.org/licenses/MIT")
-                    }
-                }
-                developers {
-                    developer {
-                        id.set("polyfence")
-                        name.set("Polyfence")
-                        email.set("hello@polyfence.io")
-                    }
-                }
-                scm {
-                    connection.set("scm:git:git://github.com/blackabass/polyfence-core.git")
-                    developerConnection.set("scm:git:ssh://github.com/blackabass/polyfence-core.git")
-                    url.set("https://github.com/blackabass/polyfence-core")
-                }
+    pom {
+        name.set("Polyfence Core")
+        description.set("Privacy-first polygon and circle geofencing engine for Android")
+        url.set("https://github.com/blackabass/polyfence-core")
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("https://opensource.org/licenses/MIT")
             }
         }
-    }
-
-    repositories {
-        maven {
-            name = "OSSRH"
-            val releasesUrl = uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-            val snapshotsUrl = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
-            url = if (version.toString().endsWith("SNAPSHOT")) snapshotsUrl else releasesUrl
-            credentials {
-                username = findProperty("ossrhUsername") as String? ?: System.getenv("OSSRH_USERNAME") ?: ""
-                password = findProperty("ossrhPassword") as String? ?: System.getenv("OSSRH_PASSWORD") ?: ""
+        developers {
+            developer {
+                id.set("polyfence")
+                name.set("Polyfence")
+                email.set("hello@polyfence.io")
             }
         }
+        scm {
+            connection.set("scm:git:git://github.com/blackabass/polyfence-core.git")
+            developerConnection.set("scm:git:ssh://github.com/blackabass/polyfence-core.git")
+            url.set("https://github.com/blackabass/polyfence-core")
+        }
     }
-}
-
-signing {
-    val signingKey = System.getenv("GPG_PRIVATE_KEY")
-    val signingPassword = System.getenv("GPG_PASSPHRASE")
-
-    if (signingKey != null) {
-        useInMemoryPgpKeys(signingKey, signingPassword)
-    }
-
-    sign(publishing.publications["release"])
 }
