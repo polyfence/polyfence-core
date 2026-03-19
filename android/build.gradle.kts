@@ -68,7 +68,7 @@ publishing {
             pom {
                 name.set("Polyfence Core")
                 description.set("Privacy-first polygon and circle geofencing engine for Android")
-                url.set("https://github.com/polyfence/polyfence-core")
+                url.set("https://github.com/blackabass/polyfence-core")
                 licenses {
                     license {
                         name.set("MIT License")
@@ -83,9 +83,9 @@ publishing {
                     }
                 }
                 scm {
-                    connection.set("scm:git:git://github.com/polyfence/polyfence-core.git")
-                    developerConnection.set("scm:git:ssh://github.com/polyfence/polyfence-core.git")
-                    url.set("https://github.com/polyfence/polyfence-core")
+                    connection.set("scm:git:git://github.com/blackabass/polyfence-core.git")
+                    developerConnection.set("scm:git:ssh://github.com/blackabass/polyfence-core.git")
+                    url.set("https://github.com/blackabass/polyfence-core")
                 }
             }
         }
@@ -106,12 +106,11 @@ publishing {
 }
 
 signing {
-    val signingKeyId = findProperty("signing.keyId") as String? ?: System.getenv("SIGNING_KEY_ID")
-    val signingKey = System.getenv("SIGNING_KEY")
-    val signingPassword = findProperty("signing.password") as String? ?: System.getenv("SIGNING_PASSWORD")
+    val signingKey = System.getenv("GPG_PRIVATE_KEY")
+    val signingPassword = System.getenv("GPG_PASSPHRASE")
 
     if (signingKey != null) {
-        useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
+        useInMemoryPgpKeys(signingKey, signingPassword)
     }
 
     sign(publishing.publications["release"])
