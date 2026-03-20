@@ -27,14 +27,19 @@ Thumbs.db
 *.jks
 *.keystore
 *.p12
+*.pem
 secring.gpg
 .env
 .env.*
+gradle.properties
+!android/gradle.properties
 
 # Agent / editor instructions
 CLAUDE.md
 .cursorrules
+.claude/
 tasks/
+prompts/
 
 # Build artifacts
 *.class
