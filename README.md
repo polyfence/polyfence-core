@@ -100,7 +100,7 @@ These algorithms are implemented identically in Kotlin and Swift for cross-platf
 
 All geofencing runs on-device. Zero location data is transmitted by default.
 
-When telemetry is enabled (opt-in), only anonymous aggregate metrics are sent — detection latency, GPS accuracy, battery drain, zone type counts. No GPS coordinates, zone definitions, user identifiers, or PII.
+Telemetry is **opt-out** (enabled by default) when used through platform bridges like polyfence-flutter. The `TelemetryAggregator` in this library collects anonymous aggregate metrics — detection latency, GPS accuracy, battery drain, zone type counts. No GPS coordinates, zone definitions, user identifiers, or PII. Native consumers building custom bridges control telemetry defaults in their own configuration. See [polyfence-flutter TELEMETRY.md](https://github.com/blackabass/polyfence-flutter/blob/main/doc/TELEMETRY.md) for full details.
 
 ## Relationship to Other Repos
 
