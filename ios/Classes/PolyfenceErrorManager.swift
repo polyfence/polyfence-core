@@ -4,7 +4,7 @@ import Foundation
  * Manages error reporting to developers.
  * Framework-agnostic — receives a plain closure from the bridge layer.
  */
-class PolyfenceErrorManager {
+internal class PolyfenceErrorManager {
     static let shared = PolyfenceErrorManager()
     private var errorCallback: (([String: Any]) -> Void)?
 

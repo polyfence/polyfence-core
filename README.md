@@ -1,7 +1,9 @@
 # Polyfence Core
 
 [![CI](https://github.com/blackabass/polyfence-core/actions/workflows/ci.yml/badge.svg)](https://github.com/blackabass/polyfence-core/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](https://opensource.org/licenses/MIT)
+[![Maven Central](https://img.shields.io/maven-central/v/io.polyfence/polyfence-core)](https://central.sonatype.com/artifact/io.polyfence/polyfence-core)
+[![CocoaPods](https://img.shields.io/cocoapods/v/PolyfenceCore)](https://cocoapods.org/pods/PolyfenceCore)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Standalone, privacy-first geofencing engine for iOS and Android. Runs entirely on-device with zero cloud dependencies.
 
@@ -31,6 +33,99 @@ pod 'PolyfenceCore', '~> 1.0.0'
 
 ```kotlin
 implementation("io.polyfence:polyfence-core:1.0.0")
+```
+
+## Quick Start
+
+### Android (Kotlin)
+
+```kotlin
+import io.polyfence.core.*
+import android.content.Intent
+import android.content.Context
+
+// 1. Create a delegate to receive events
+val delegate = object : PolyfenceCoreDelegate {
+    override fun onGeofenceEvent(eventData: Map<String, Any>) {
+        val zoneId = eventData["zoneId"] as String
+        val eventType = eventData["eventType"] as String
+        println("Event: $eventType for zone $zoneId")
+    }
+
+    override fun onLocationUpdate(locationData: Map<String, Any>) {}
+    override fun onPerformanceEvent(performanceData: Map<String, Any>) {}
+    override fun onError(errorData: Map<String, Any>) {}
+    override fun isTrackingEnabled(): Boolean = true
+}
+
+// 2. Start the LocationTracker service
+val context: Context = this // Your Activity or Service context
+val intent = Intent(context, LocationTracker::class.java)
+intent.action = LocationTracker.ACTION_START_TRACKING
+context.startService(intent)
+
+// 3. Add a zone to monitor
+val zoneIntent = Intent(context, LocationTracker::class.java)
+zoneIntent.action = LocationTracker.ACTION_ADD_ZONE
+zoneIntent.putExtra("zoneId", "office")
+zoneIntent.putExtra("zoneName", "HQ")
+zoneIntent.putExtra("zoneData", mapOf(
+    "type" to "circle",
+    "latitude" to 51.5074,
+    "longitude" to -0.1278,
+    "radius" to 100.0
+) as Serializable)
+context.startService(zoneIntent)
+
+// 4. Stop tracking when done
+val stopIntent = Intent(context, LocationTracker::class.java)
+stopIntent.action = LocationTracker.ACTION_STOP_TRACKING
+context.startService(stopIntent)
+```
+
+### iOS (Swift)
+
+```swift
+import PolyfenceCore
+import CoreLocation
+
+// 1. Create a delegate to receive events
+class MyGeoDelegate: NSObject, PolyfenceCoreDelegate {
+    func onGeofenceEvent(_ eventData: [String: Any]) {
+        let zoneId = eventData["zoneId"] as? String ?? ""
+        let eventType = eventData["eventType"] as? String ?? ""
+        print("Event: \(eventType) for zone \(zoneId)")
+    }
+
+    func onLocationUpdate(_ locationData: [String: Any]) {}
+    func onPerformanceEvent(_ performanceData: [String: Any]) {}
+    func onError(_ errorData: [String: Any]) {}
+    func isTrackingEnabled() -> Bool { return true }
+}
+
+let delegate = MyGeoDelegate()
+
+// 2. Initialize the engine
+let engine = GeofenceEngine()
+engine.setEventCallback { zoneId, eventType, location, detectionTimeMs in
+    print("Zone: \(zoneId), Event: \(eventType)")
+}
+
+// 3. Add a zone to monitor
+try engine.addZone(
+    zoneId: "office",
+    zoneName: "HQ",
+    zoneData: [
+        "type": "circle",
+        "latitude": 51.5074,
+        "longitude": -0.1278,
+        "radius": 100.0
+    ]
+)
+
+// 4. Start tracking with LocationTracker
+let tracker = LocationTracker()
+tracker.startTracking()
 ```
 
 ## Architecture
@@ -129,7 +224,7 @@ pod lib lint
 
 ## Contributing
 
-See [polyfence-flutter CONTRIBUTING.md](https://github.com/blackabass/polyfence-flutter/blob/main/CONTRIBUTING.md) for development guidelines. The same conventions apply here.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
 ## License
 

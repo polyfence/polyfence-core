@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.*
+import io.polyfence.core.utils.GeoMath
 import io.polyfence.core.utils.PolyfenceConfig
 import io.polyfence.core.utils.PolyfenceErrorRecovery
 import io.polyfence.core.configuration.SmartGpsConfig
@@ -23,6 +24,8 @@ import io.polyfence.core.configuration.ActivitySettings
 import io.polyfence.core.configuration.ActivityType
 import io.polyfence.core.GeofenceEngine.LatLng
 import io.polyfence.core.GeofenceEngine.ZoneType
+import java.util.Collections
+import java.util.HashMap
 import kotlin.math.*
 
 /**
@@ -79,14 +82,6 @@ class LocationTracker : Service() {
          */
         fun getCurrentZoneStates(): Map<String, Boolean> {
             return currentInstance?.geofenceEngine?.getCurrentZoneStates() ?: emptyMap()
-        }
-
-        /**
-         * Update smart GPS configuration
-         */
-        fun updateSmartConfiguration(config: SmartGpsConfig) {
-            currentSmartConfig = config
-            Log.d(TAG, "Updated smart GPS configuration: $config")
         }
 
         /**
@@ -159,7 +154,7 @@ class LocationTracker : Service() {
     private lateinit var config: PolyfenceConfig
 
     // Centralized telemetry aggregator (D016)
-    val telemetryAggregator = TelemetryAggregator()
+    internal val telemetryAggregator = TelemetryAggregator()
 
     // Core delegate for platform bridge communication
     private var coreDelegate: PolyfenceCoreDelegate? = null
@@ -181,7 +176,7 @@ class LocationTracker : Service() {
 
     // GPS Health Tracking
     private var currentGpsAccuracy: Float? = null
-    private val gpsAvailabilityDropTimestamps = mutableListOf<Long>()
+    private val gpsAvailabilityDropTimestamps = Collections.synchronizedList(mutableListOf<Long>())
     private var lastGpsUnreliableErrorTime: Long = 0L
     private val GPS_UNRELIABLE_ERROR_COOLDOWN_MS = 60_000L // Emit error max once per minute
 
@@ -340,7 +335,13 @@ class LocationTracker : Service() {
                 }
             }
             ACTION_UPDATE_CONFIG -> {
-                val configMap = intent.getSerializableExtra("config") as? Map<String, Any>
+                val configMap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    @Suppress("UNCHECKED_CAST")
+                    intent.getSerializableExtra("config", HashMap::class.java) as? Map<String, Any>
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getSerializableExtra("config") as? Map<String, Any>
+                }
                 if (configMap != null) {
                     updateConfigurationFromMap(configMap)
                 }
@@ -376,6 +377,10 @@ class LocationTracker : Service() {
         isRunning = true
         firstLocationAfterRestart = true  // Reset for state reconciliation
         startForeground(NOTIFICATION_ID, createTrackingNotification())
+
+        // Persist tracking state for restart recovery (used by ScheduleReceiver)
+        getSharedPreferences("polyfence_tracking", Context.MODE_PRIVATE)
+            .edit().putBoolean("continuous_tracking_active", true).apply()
 
         // Acquire wake lock before starting location requests
         acquireWakeLock()
@@ -451,6 +456,9 @@ class LocationTracker : Service() {
     }
 
     private fun stopTracking() {
+        // Clear persisted tracking state (used by ScheduleReceiver for restart recovery)
+        getSharedPreferences("polyfence_tracking", Context.MODE_PRIVATE)
+            .edit().putBoolean("continuous_tracking_active", false).apply()
 
         isRunning = false
         locationCallback?.let { callback ->
@@ -544,7 +552,13 @@ class LocationTracker : Service() {
     private fun addZone(intent: Intent) {
         val zoneId = intent.getStringExtra("zoneId") ?: return
         val zoneName = intent.getStringExtra("zoneName") ?: "Unknown Zone"
-        val zoneData = intent.getSerializableExtra("zoneData") as? Map<String, Any> ?: return
+        val zoneData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            @Suppress("UNCHECKED_CAST")
+            intent.getSerializableExtra("zoneData", HashMap::class.java) as? Map<String, Any>
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getSerializableExtra("zoneData") as? Map<String, Any>
+        } ?: return
 
         // Add to engine
         geofenceEngine.addZone(zoneId, zoneName, zoneData)
@@ -1087,7 +1101,12 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
      */
     private fun cleanupOldGpsDrops(currentTime: Long) {
         val fiveMinutesAgo = currentTime - 300_000L
-        gpsAvailabilityDropTimestamps.removeAll { it < fiveMinutesAgo }
+        synchronized(gpsAvailabilityDropTimestamps) {
+            val iter = gpsAvailabilityDropTimestamps.iterator()
+            while (iter.hasNext()) {
+                if (iter.next() < fiveMinutesAgo) iter.remove()
+            }
+        }
     }
 
     /**
@@ -1496,24 +1515,26 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         location: android.location.Location,
         zone: GeofenceEngine.Zone
     ): Double {
-        val currentPoint = LatLng(location.latitude, location.longitude)
+        val currentPoint = GeoMath.LatLng(location.latitude, location.longitude)
         val points = zone.points
 
         if (points.isEmpty()) return Double.MAX_VALUE
 
+        val geoVertices = points.map { GeoMath.LatLng(it.latitude, it.longitude) }
+
         // Check if inside polygon first
-        if (isPointInPolygon(currentPoint, points)) {
+        if (GeoMath.isPointInPolygon(currentPoint, geoVertices)) {
             return 0.0 // Inside zone
         }
 
         // Calculate distance to nearest polygon edge
         var nearestDistance = Double.MAX_VALUE
 
-        for (i in points.indices) {
-            val p1 = points[i]
-            val p2 = points[(i + 1) % points.size]
+        for (i in geoVertices.indices) {
+            val p1 = geoVertices[i]
+            val p2 = geoVertices[(i + 1) % geoVertices.size]
 
-            val distance = distanceFromPointToLineSegment(currentPoint, p1, p2)
+            val distance = GeoMath.pointToSegmentDistance(currentPoint, p1, p2)
             if (distance < nearestDistance) {
                 nearestDistance = distance
             }
@@ -1522,78 +1543,7 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         return nearestDistance
     }
 
-    /**
-     * Calculate distance from point to line segment
-     */
-    private fun distanceFromPointToLineSegment(
-        point: LatLng,
-        lineStart: LatLng,
-        lineEnd: LatLng
-    ): Double {
-        // Calculate perpendicular distance from point to line segment
-        val A = point.latitude - lineStart.latitude
-        val B = point.longitude - lineStart.longitude
-        val C = lineEnd.latitude - lineStart.latitude
-        val D = lineEnd.longitude - lineStart.longitude
 
-        val dot = A * C + B * D
-        val lenSq = C * C + D * D
-
-        if (lenSq == 0.0) {
-            // Line segment is a point
-            return calculateDistance(point, lineStart)
-        }
-
-        val param = dot / lenSq
-
-        val closest = when {
-            param < 0.0 -> lineStart
-            param > 1.0 -> lineEnd
-            else -> LatLng(
-                lineStart.latitude + param * C,
-                lineStart.longitude + param * D
-            )
-        }
-
-        return calculateDistance(point, closest)
-    }
-
-    /**
-     * Calculate distance between two LatLng points using Haversine formula
-     */
-    private fun calculateDistance(point1: LatLng, point2: LatLng): Double {
-        val EARTH_RADIUS_METERS = 6371000.0
-        val dLat = Math.toRadians(point2.latitude - point1.latitude)
-        val dLng = Math.toRadians(point2.longitude - point1.longitude)
-
-        val a = sin(dLat / 2).pow(2) +
-                cos(Math.toRadians(point1.latitude)) * cos(Math.toRadians(point2.latitude)) *
-                sin(dLng / 2).pow(2)
-
-        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        return EARTH_RADIUS_METERS * c
-    }
-
-    /**
-     * Point-in-polygon detection using ray casting algorithm
-     */
-    private fun isPointInPolygon(point: LatLng, polygon: List<LatLng>): Boolean {
-        var intersections = 0
-        val x = point.longitude
-        val y = point.latitude
-
-        for (i in polygon.indices) {
-            val p1 = polygon[i]
-            val p2 = polygon[(i + 1) % polygon.size]
-
-            if (((p1.latitude > y) != (p2.latitude > y)) &&
-                (x < (p2.longitude - p1.longitude) * (y - p1.latitude) / (p2.latitude - p1.latitude) + p1.longitude)) {
-                intersections++
-            }
-        }
-
-        return intersections % 2 == 1
-    }
 
     /**
      * Log proximity debug information for testing

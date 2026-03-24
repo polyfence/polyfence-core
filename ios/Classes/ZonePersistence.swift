@@ -169,7 +169,6 @@ class ZonePersistence {
         persistenceQueue.async(flags: .barrier) {
             self.userDefaults.set(states, forKey: ZonePersistence.ZONE_STATES_KEY)
             self.userDefaults.set(Date().timeIntervalSince1970, forKey: ZonePersistence.LAST_STATE_UPDATE_KEY)
-            self.userDefaults.synchronize() // Force immediate write (iOS equivalent of commit())
 
             let insideCount = states.values.filter { $0 }.count
             NSLog("[\(ZonePersistence.TAG)] Saved zone states: \(states.count) zones, inside=\(insideCount)")
@@ -187,7 +186,6 @@ class ZonePersistence {
 
             self.userDefaults.set(existingStates, forKey: ZonePersistence.ZONE_STATES_KEY)
             self.userDefaults.set(Date().timeIntervalSince1970, forKey: ZonePersistence.LAST_STATE_UPDATE_KEY)
-            self.userDefaults.synchronize() // Force immediate write
 
             NSLog("[\(ZonePersistence.TAG)] Saved zone state: \(zoneId) = \(isInside ? "INSIDE" : "OUTSIDE")")
         }
@@ -215,7 +213,6 @@ class ZonePersistence {
             var existingStates = self.userDefaults.dictionary(forKey: ZonePersistence.ZONE_STATES_KEY) as? [String: Bool] ?? [:]
             existingStates.removeValue(forKey: zoneId)
             self.userDefaults.set(existingStates, forKey: ZonePersistence.ZONE_STATES_KEY)
-            self.userDefaults.synchronize()
             NSLog("[\(ZonePersistence.TAG)] Removed zone state for: \(zoneId)")
         }
     }
@@ -227,7 +224,6 @@ class ZonePersistence {
         persistenceQueue.async(flags: .barrier) {
             self.userDefaults.removeObject(forKey: ZonePersistence.ZONE_STATES_KEY)
             self.userDefaults.removeObject(forKey: ZonePersistence.LAST_STATE_UPDATE_KEY)
-            self.userDefaults.synchronize()
             NSLog("[\(ZonePersistence.TAG)] Cleared all zone states")
         }
     }

@@ -15,7 +15,7 @@ import io.polyfence.core.PolyfenceErrorManager
  * Handles error recovery and resilience for Polyfence
  * Single responsibility: Monitor and recover from failures
  */
-class PolyfenceErrorRecovery(private val context: Context) {
+internal class PolyfenceErrorRecovery(private val context: Context) {
 
     companion object {
         private const val TAG = "PolyfenceErrorRecovery"

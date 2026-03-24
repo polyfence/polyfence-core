@@ -5,55 +5,55 @@ import Foundation
 /// Matches the v2 enhanced telemetry payload schema from DATA_STRATEGY.md.
 struct SessionTelemetry {
     // --- Existing v1 fields (populated by bridge layer) ---
-    var appIdentifier: String?
-    var platform: String?
-    var pluginVersion: String?
-    var industryCategory: String?
-    var useCase: String?
+    let appIdentifier: String?
+    let platform: String?
+    let pluginVersion: String?
+    let industryCategory: String?
+    let useCase: String?
 
     // --- Core metrics ---
-    var detectionsTotal: Int = 0
-    var detectionTimeAvgMs: Double = 0.0
-    var detectionTimeP95Ms: Double = 0.0
-    var gpsAccuracyAvgM: Double = 0.0
-    var sessionDurationMinutes: Double = 0.0
+    let detectionsTotal: Int
+    let detectionTimeAvgMs: Double
+    let detectionTimeP95Ms: Double
+    let gpsAccuracyAvgM: Double
+    let sessionDurationMinutes: Double
 
-    var zoneUsage: [String: Int] = [:]
-    var errorCounts: [String: Int] = [:]
+    let zoneUsage: [String: Int]
+    let errorCounts: [String: Int]
 
-    var ttfdMs: Int64 = 0
-    var hadDetection: Bool = false
-    var serviceInterruptions: Int = 0
-    var gpsOkRatio: Double = 0.0
-    var sampleEvents: Int = 0
+    let ttfdMs: Int64
+    let hadDetection: Bool
+    let serviceInterruptions: Int
+    let gpsOkRatio: Double
+    let sampleEvents: Int
 
-    var batteryOptimizationDisabled: Bool = false
-    var batteryLevelStart: Double?
-    var batteryLevelEnd: Double?
+    let batteryOptimizationDisabled: Bool
+    let batteryLevelStart: Double?
+    let batteryLevelEnd: Double?
 
     // --- v2 Enhanced fields (D016) ---
-    var accuracyProfile: String?
-    var updateStrategy: String?
+    let accuracyProfile: String?
+    let updateStrategy: String?
 
-    var activityDistribution: [String: Double] = [:]
-    var gpsIntervalDistribution: [String: Double] = [:]
-    var stationaryRatio: Double = 0.0
-    var avgGpsIntervalMs: Int = 0
+    let activityDistribution: [String: Double]
+    let gpsIntervalDistribution: [String: Double]
+    let stationaryRatio: Double
+    let avgGpsIntervalMs: Int
 
-    var falseEventCount: Int = 0
-    var falseEventRatio: Double = 0.0
-    var avgGpsAccuracyAtEvent: Double = 0.0
-    var avgSpeedAtEventMps: Double = 0.0
-    var boundaryEventsCount: Int = 0
+    let falseEventCount: Int
+    let falseEventRatio: Double
+    let avgGpsAccuracyAtEvent: Double
+    let avgSpeedAtEventMps: Double
+    let boundaryEventsCount: Int
 
-    var zoneCount: Int = 0
-    var zoneSizeDistribution: [String: Int] = [:]
-    var zoneTransitionCount: Int = 0
-    var avgDwellMinutes: Double = 0.0
+    let zoneCount: Int
+    let zoneSizeDistribution: [String: Int]
+    let zoneTransitionCount: Int
+    let avgDwellMinutes: Double
 
-    var deviceCategory: String?
-    var osVersionMajor: Int = 0
-    var chargingDuringSession: Bool = false
+    let deviceCategory: String?
+    let osVersionMajor: Int
+    let chargingDuringSession: Bool
 
     /// Convert to dictionary for JSON serialization.
     /// Returns the complete v2 enhanced payload matching DATA_STRATEGY.md schema.

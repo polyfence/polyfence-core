@@ -21,7 +21,7 @@ class GeofenceEngine {
     static let EVENT_DWELL = "DWELL"
 
     // Default dwell threshold (5 minutes)
-    static let DEFAULT_DWELL_THRESHOLD_MS: TimeInterval = 300.0 // 300 seconds = 5 minutes
+    static let DEFAULT_DWELL_THRESHOLD_SECONDS: TimeInterval = 300.0 // 300 seconds = 5 minutes
 
     // MARK: - Properties
     // Synchronization for thread-safe access to zone data/state
@@ -35,7 +35,7 @@ class GeofenceEngine {
     // Track which zones have already fired dwell events this session
     private var dwellEventsFired: [String: Bool] = [:]
     // Dwell threshold in seconds (configurable)
-    private var dwellThresholdSeconds: TimeInterval = GeofenceEngine.DEFAULT_DWELL_THRESHOLD_MS
+    private var dwellThresholdSeconds: TimeInterval = GeofenceEngine.DEFAULT_DWELL_THRESHOLD_SECONDS
     // Whether dwell detection is enabled
     private var dwellEnabled: Bool = true
 
@@ -60,6 +60,7 @@ class GeofenceEngine {
 
     // ML Telemetry: false event tracking (enter->exit reversal within 30s)
     private var lastEventPerZone: [String: (eventType: String, timestamp: TimeInterval)] = [:]
+    private var lastEventWasQuickReversal: [String: Bool] = [:]
     private var falseEventCount: Int = 0
 
     // ML Telemetry: dwell durations (minutes)
@@ -100,7 +101,7 @@ class GeofenceEngine {
     /**
      * Configure validation settings
      */
-    func setValidationConfig(requireConfirmation: Bool, confirmationPoints: Int) {
+    func setValidationConfig(requireConfirmation: Bool, confirmationPoints: Int = 2) {
         self.requireConfirmation = requireConfirmation
         self.confirmationPoints = confirmationPoints
     }
@@ -119,7 +120,7 @@ class GeofenceEngine {
      * @param enabled Whether dwell detection is enabled
      * @param thresholdSeconds How long (seconds) device must stay in zone before DWELL fires
      */
-    func setDwellConfig(enabled: Bool, thresholdSeconds: TimeInterval = GeofenceEngine.DEFAULT_DWELL_THRESHOLD_MS) {
+    func setDwellConfig(enabled: Bool, thresholdSeconds: TimeInterval = GeofenceEngine.DEFAULT_DWELL_THRESHOLD_SECONDS) {
         self.dwellEnabled = enabled
         self.dwellThresholdSeconds = thresholdSeconds
         NSLog("[\(GeofenceEngine.TAG)] Dwell config: enabled=\(enabled), threshold=\(thresholdSeconds)s")
@@ -334,29 +335,24 @@ class GeofenceEngine {
     /**
      * Add zone for monitoring
      */
-    func addZone(zoneId: String, zoneName: String, zoneData: [String: Any]) throws {
+    func addZone(zoneId: String, zoneName: String, zoneData: [String: Any], completion: ((Bool) -> Void)? = nil) throws {
         let memoryBefore = getCurrentMemoryUsage()
 
-        do {
-            let zone = try ZoneData.fromMap(zoneId: zoneId, zoneName: zoneName, zoneData: zoneData)
+        let zone = try ZoneData.fromMap(zoneId: zoneId, zoneName: zoneName, zoneData: zoneData)
 
-            // Move zone storage to background thread to avoid blocking location service
-            DispatchQueue.global(qos: .userInitiated).async {
-                self.syncQueue.sync {
-                    self.zones[zoneId] = zone
-                    self.zoneStates[zoneId] = false // Initially outside
-                    // Reset any previous confidence state if re-adding
-                    self.zoneConfidence[zoneId] = ZoneConfidence()
-                }
+        // Zone insertion is synchronous — callers can rely on zone being available after return
+        syncQueue.sync {
+            self.zones[zoneId] = zone
+            self.zoneStates[zoneId] = false // Initially outside
+            // Reset any previous confidence state if re-adding
+            self.zoneConfidence[zoneId] = ZoneConfidence()
+        }
 
-                // Memory monitoring after zone add
-                let memoryAfter = self.getCurrentMemoryUsage()
-                let memoryDelta = memoryAfter - memoryBefore
-                let totalZones = self.syncQueue.sync { self.zones.count }
-            }
-
-        } catch {
-            throw error
+        // Fire completion on background queue to avoid blocking caller with monitoring
+        DispatchQueue.global(qos: .utility).async {
+            let memoryAfter = self.getCurrentMemoryUsage()
+            let _ = memoryAfter - memoryBefore
+            completion?(true)
         }
     }
 
@@ -461,42 +457,6 @@ class GeofenceEngine {
     // MARK: - Private Methods
 
     /**
-     * Calculate distance between two points using Haversine formula (ported from Android)
-     */
-    private func calculateDistance(point1: CLLocationCoordinate2D, point2: CLLocationCoordinate2D) -> Double {
-        let dLat = (point2.latitude - point1.latitude) * .pi / 180
-        let dLng = (point2.longitude - point1.longitude) * .pi / 180
-
-        let a = sin(dLat / 2) * sin(dLat / 2) +
-                cos(point1.latitude * .pi / 180) * cos(point2.latitude * .pi / 180) *
-                sin(dLng / 2) * sin(dLng / 2)
-
-        let c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        return GeofenceEngine.EARTH_RADIUS_METERS * c
-    }
-
-    /**
-     * Point-in-polygon detection using ray casting algorithm (ported from Android)
-     */
-    private func isPointInPolygon(point: CLLocationCoordinate2D, polygon: [CLLocationCoordinate2D]) -> Bool {
-        var intersections = 0
-        let x = point.longitude
-        let y = point.latitude
-
-        for i in 0..<polygon.count {
-            let p1 = polygon[i]
-            let p2 = polygon[(i + 1) % polygon.count]
-
-            if (((p1.latitude > y) != (p2.latitude > y)) &&
-                (x < (p2.longitude - p1.longitude) * (y - p1.latitude) / (p2.latitude - p1.latitude) + p1.longitude)) {
-                intersections += 1
-            }
-        }
-
-        return intersections % 2 == 1
-    }
-
-    /**
      * Smart validation: Single point for obvious cases, 2-point for edge cases (ported from Android)
      */
     private func shouldUseConfirmation(speed: Double, zoneRadius: Double?) -> Bool {
@@ -518,26 +478,30 @@ class GeofenceEngine {
      * Process with confidence validation - returns true if state changed (ported from Android)
      */
     private func processWithConfidence(zoneId: String, zone: ZoneData, isInside: Bool, currentState: Bool, currentTime: TimeInterval, location: CLLocation, checkStartTime: CFAbsoluteTime) -> Bool {
-        let confidence = syncQueue.sync { self.zoneConfidence[zoneId] ?? ZoneConfidence() }
-        // Persist confidence across calls
-        syncQueue.sync { self.zoneConfidence[zoneId] = confidence }
+        let (hasConfidence, lastDetection) = syncQueue.sync { () -> (Bool, TimeInterval) in
+            let confidence = self.zoneConfidence[zoneId] ?? ZoneConfidence()
+            // Persist confidence across calls
+            self.zoneConfidence[zoneId] = confidence
 
-        // Update confidence counters
-        if isInside {
-            confidence.insideCount += 1
-            confidence.outsideCount = 0
-        } else {
-            confidence.outsideCount += 1
-            confidence.insideCount = 0
+            // Update confidence counters
+            if isInside {
+                confidence.insideCount += 1
+                confidence.outsideCount = 0
+            } else {
+                confidence.outsideCount += 1
+                confidence.insideCount = 0
+            }
+
+            confidence.lastDetection = currentTime
+
+            // Check if we have enough confidence for state change
+            let requiredCount = self.confirmationPoints
+            let hasConfidence = isInside ? confidence.insideCount >= requiredCount : confidence.outsideCount >= requiredCount
+
+            return (hasConfidence, confidence.lastDetection)
         }
 
-        confidence.lastDetection = currentTime
-
-        // Check if we have enough confidence for state change
-        let requiredCount = confirmationPoints
-        let hasConfidence = isInside ? confidence.insideCount >= requiredCount : confidence.outsideCount >= requiredCount
-
-            // State change with confidence
+        // State change with confidence
         if hasConfidence && currentState != isInside {
             syncQueue.sync {
                 self.zoneStates[zoneId] = isInside
@@ -567,7 +531,7 @@ class GeofenceEngine {
         }
 
         // Timeout: reset confidence if no consistent readings
-        if currentTime - confidence.lastDetection > confirmationTimeoutMs {
+        if currentTime - lastDetection > confirmationTimeoutMs {
             syncQueue.sync {
                 self.zoneConfidence[zoneId]?.insideCount = 0
                 self.zoneConfidence[zoneId]?.outsideCount = 0
@@ -688,25 +652,29 @@ class GeofenceEngine {
         syncQueue.sync {
             self.zoneTransitionCount += 1
             let now = Date().timeIntervalSince1970
+            var quickReversal = false
 
             if let lastEvent = self.lastEventPerZone[zoneId] {
                 let timeSince = now - lastEvent.timestamp
                 if timeSince <= 30.0 && lastEvent.eventType != eventType {
                     self.falseEventCount += 1
+                    quickReversal = true
                 }
             }
             self.lastEventPerZone[zoneId] = (eventType: eventType, timestamp: now)
+            self.lastEventWasQuickReversal[zoneId] = quickReversal
         }
     }
 
     /**
-     * Check if an event is a recent reversal (opposite event within 30s on same zone).
+     * Whether the most recently emitted event for this zone was a quick opposite transition
+     * (e.g. EXIT within 30s of ENTER). Call after the event has been processed.
      */
     func isRecentReversal(zoneId: String, eventType: String) -> Bool {
         return syncQueue.sync {
             guard let lastEvent = self.lastEventPerZone[zoneId] else { return false }
-            let timeSince = Date().timeIntervalSince1970 - lastEvent.timestamp
-            return timeSince <= 30.0 && lastEvent.eventType != eventType
+            guard lastEvent.eventType == eventType else { return false }
+            return self.lastEventWasQuickReversal[zoneId] == true
         }
     }
 
@@ -718,42 +686,20 @@ class GeofenceEngine {
         switch zone.type {
         case .circle:
             guard let center = zone.center, let radius = zone.radius else { return Double.greatestFiniteMagnitude }
-            let distance = calculateDistance(point1: point, point2: center)
+            let distance = GeoMath.haversineDistance(point1: point, point2: center)
             return abs(distance - radius)
         case .polygon:
             guard let vertices = zone.polygon, vertices.count >= 2 else { return Double.greatestFiniteMagnitude }
             var minDist = Double.greatestFiniteMagnitude
             for i in 0..<vertices.count {
                 let j = (i + 1) % vertices.count
-                let segDist = pointToSegmentDistance(p: point, a: vertices[i], b: vertices[j])
+                let segDist = GeoMath.pointToSegmentDistance(p: point, a: vertices[i], b: vertices[j])
                 if segDist < minDist { minDist = segDist }
             }
             return minDist
         }
     }
 
-    /**
-     * Distance from a point to a line segment in meters.
-     */
-    private func pointToSegmentDistance(p: CLLocationCoordinate2D, a: CLLocationCoordinate2D, b: CLLocationCoordinate2D) -> Double {
-        let ab = calculateDistance(point1: a, point2: b)
-        if ab < 0.001 { return calculateDistance(point1: p, point2: a) }
-
-        let cosLat = cos((a.latitude + b.latitude) / 2.0 * .pi / 180.0)
-        let dx = (b.longitude - a.longitude) * .pi / 180.0 * cosLat * GeofenceEngine.EARTH_RADIUS_METERS
-        let dy = (b.latitude - a.latitude) * .pi / 180.0 * GeofenceEngine.EARTH_RADIUS_METERS
-        let px = (p.longitude - a.longitude) * .pi / 180.0 * cos((a.latitude + p.latitude) / 2.0 * .pi / 180.0) * GeofenceEngine.EARTH_RADIUS_METERS
-        let py = (p.latitude - a.latitude) * .pi / 180.0 * GeofenceEngine.EARTH_RADIUS_METERS
-
-        let abLenSq = dx * dx + dy * dy
-        if abLenSq < 0.001 { return calculateDistance(point1: p, point2: a) }
-
-        let t = max(0.0, min(1.0, (px * dx + py * dy) / abLenSq))
-        let projLat = a.latitude + t * (b.latitude - a.latitude)
-        let projLng = a.longitude + t * (b.longitude - a.longitude)
-
-        return calculateDistance(point1: p, point2: CLLocationCoordinate2D(latitude: projLat, longitude: projLng))
-    }
 
     /**
      * Public accessor for boundary distance, used by LocationTracker for event enrichment.
@@ -778,7 +724,7 @@ class GeofenceEngine {
                     effectiveRadius = zone.radius ?? 0
                 case .polygon:
                     let center = zone.calculateCenter()
-                    effectiveRadius = zone.polygon?.map { self.calculateDistance(point1: $0, point2: center) }.max() ?? 0
+                    effectiveRadius = zone.polygon?.map { GeoMath.haversineDistance(point1: $0, point2: center) }.max() ?? 0
                 }
                 switch effectiveRadius {
                 case ..<200: dist["small"]! += 1
@@ -818,6 +764,7 @@ class GeofenceEngine {
     func resetTelemetry() {
         syncQueue.sync {
             self.lastEventPerZone.removeAll()
+            self.lastEventWasQuickReversal.removeAll()
             self.falseEventCount = 0
             self.dwellDurationsMinutes.removeAll()
             self.zoneTransitionCount = 0
@@ -926,12 +873,12 @@ class ZoneData {
         switch type {
         case .circle:
             guard let center = center, let radius = radius else { return false }
-            let distance = calculateDistance(point1: center, point2: location.coordinate)
+            let distance = GeoMath.haversineDistance(point1: center, point2: location.coordinate)
             return distance <= radius
 
         case .polygon:
             guard let polygon = polygon else { return false }
-            return isPointInPolygon(point: location.coordinate, polygon: polygon)
+            return GeoMath.isPointInPolygon(point: location.coordinate, polygon: polygon)
         }
     }
 
@@ -953,41 +900,6 @@ class ZoneData {
         }
     }
 
-    /**
-     * Calculate distance between two points using Haversine formula
-     */
-    private func calculateDistance(point1: CLLocationCoordinate2D, point2: CLLocationCoordinate2D) -> Double {
-        let dLat = (point2.latitude - point1.latitude) * .pi / 180
-        let dLng = (point2.longitude - point1.longitude) * .pi / 180
-
-        let a = sin(dLat / 2) * sin(dLat / 2) +
-                cos(point1.latitude * .pi / 180) * cos(point2.latitude * .pi / 180) *
-                sin(dLng / 2) * sin(dLng / 2)
-
-        let c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        return GeofenceEngine.EARTH_RADIUS_METERS * c
-    }
-
-    /**
-     * Point-in-polygon detection using ray casting algorithm
-     */
-    private func isPointInPolygon(point: CLLocationCoordinate2D, polygon: [CLLocationCoordinate2D]) -> Bool {
-        var intersections = 0
-        let x = point.longitude
-        let y = point.latitude
-
-        for i in 0..<polygon.count {
-            let p1 = polygon[i]
-            let p2 = polygon[(i + 1) % polygon.count]
-
-            if (((p1.latitude > y) != (p2.latitude > y)) &&
-                (x < (p2.longitude - p1.longitude) * (y - p1.latitude) / (p2.latitude - p1.latitude) + p1.longitude)) {
-                intersections += 1
-            }
-        }
-
-        return intersections % 2 == 1
-    }
 
     /**
      * Create ZoneData from map (ported from Android)
@@ -1062,6 +974,14 @@ class ZoneData {
                 throw NSError(domain: "GeofenceEngine", code: 4, userInfo: [NSLocalizedDescriptionKey: "Polygon must have at least 3 points"])
             }
 
+            // Check for self-intersecting polygon
+            if isPolygonSelfIntersecting(points: points) {
+                throw NSError(domain: "GeofenceEngine", code: 6, userInfo: [NSLocalizedDescriptionKey: "Polygon is self-intersecting and cannot be used for geofencing"])
+            }
+
+            // Warn about poles (reduced accuracy near ±85°)
+            checkPoleWarning(points: points)
+
             center = nil
             radius = nil
             polygon = points
@@ -1116,6 +1036,81 @@ class ZoneData {
             return coords
         }
         return coords
+    }
+
+    /**
+     * Check if polygon is self-intersecting using O(n²) edge intersection test
+     * Uses CCW (counter-clockwise) orientation test for robust intersection detection
+     * Skips adjacent edges (they share a vertex) and first-last edge pair (closed polygon)
+     */
+    private static func isPolygonSelfIntersecting(points: [CLLocationCoordinate2D]) -> Bool {
+        guard points.count >= 4 else { return false } // Minimum 4 points needed to self-intersect
+
+        for i in 0..<(points.count - 1) {
+            for j in (i + 2)..<points.count {
+                // Skip last edge pair (first and last vertices share a connection in closed polygon)
+                if i == 0 && j == points.count - 1 { continue }
+
+                if segmentsIntersect(
+                    a1: points[i], a2: points[i + 1],
+                    b1: points[j], b2: points[(j + 1) % points.count]
+                ) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /**
+     * Check if two line segments intersect using CCW orientation test
+     * @param a1 First point of segment A
+     * @param a2 Second point of segment A
+     * @param b1 First point of segment B
+     * @param b2 Second point of segment B
+     * @return true if segments intersect
+     */
+    private static func segmentsIntersect(a1: CLLocationCoordinate2D, a2: CLLocationCoordinate2D, b1: CLLocationCoordinate2D, b2: CLLocationCoordinate2D) -> Bool {
+        let d1 = cross(ux: b2.longitude - b1.longitude, uy: b2.latitude - b1.latitude,
+                       vx: a1.longitude - b1.longitude, vy: a1.latitude - b1.latitude)
+        let d2 = cross(ux: b2.longitude - b1.longitude, uy: b2.latitude - b1.latitude,
+                       vx: a2.longitude - b1.longitude, vy: a2.latitude - b1.latitude)
+        let d3 = cross(ux: a2.longitude - a1.longitude, uy: a2.latitude - a1.latitude,
+                       vx: b1.longitude - a1.longitude, vy: b1.latitude - a1.latitude)
+        let d4 = cross(ux: a2.longitude - a1.longitude, uy: a2.latitude - a1.latitude,
+                       vx: b2.longitude - a1.longitude, vy: b2.latitude - a1.latitude)
+
+        if sign(d1) != sign(d2) && sign(d3) != sign(d4) {
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Cross product: u.x * v.y - u.y * v.x
+     * Using lng as x, lat as y for geographic coordinates
+     */
+    private static func cross(ux: Double, uy: Double, vx: Double, vy: Double) -> Double {
+        return ux * vy - uy * vx
+    }
+
+    /**
+     * Get sign of a number (-1, 0, or 1)
+     */
+    private static func sign(_ value: Double) -> Int {
+        if value > 0 { return 1 }
+        if value < 0 { return -1 }
+        return 0
+    }
+
+    /**
+     * Check for poles (latitude > ±85°) and log warning about reduced accuracy
+     */
+    private static func checkPoleWarning(points: [CLLocationCoordinate2D]) {
+        let polesNear = points.contains { abs($0.latitude) > 85.0 }
+        if polesNear {
+            NSLog("[\(GeofenceEngine.TAG)] Polygon zone contains vertices near poles (lat > ±85°) - accuracy will be reduced near poles due to geomagnetic field distortions")
+        }
     }
 
 }

@@ -219,7 +219,17 @@ class TrackingScheduler(private val context: Context) {
 
         // Use setExactAndAllowWhileIdle for reliable delivery
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextTime, pendingIntent)
+            // On API 31+, check SCHEDULE_EXACT_ALARM permission before calling setExactAndAllowWhileIdle
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextTime, pendingIntent)
+                } else {
+                    // Fallback to inexact alarm if permission denied
+                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextTime, pendingIntent)
+                }
+            } else {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextTime, pendingIntent)
+            }
         } else {
             alarmManager.setExact(AlarmManager.RTC_WAKEUP, nextTime, pendingIntent)
         }
@@ -426,8 +436,11 @@ class ScheduleReceiver : BroadcastReceiver() {
                 // Restore scheduled tracking if configured
                 scheduler.loadConfig()
 
-                // Restart continuous tracking if it was active before boot/update
-                if (!scheduler.isEnabled() && (scheduler.delegate?.isTrackingEnabled() ?: false)) {
+                // Restart continuous tracking if it was active before boot/update.
+                // Use persisted tracking state — delegate is unavailable in a BroadcastReceiver.
+                val trackingPrefs = context.getSharedPreferences("polyfence_tracking", Context.MODE_PRIVATE)
+                val wasTrackingActive = trackingPrefs.getBoolean("continuous_tracking_active", false)
+                if (!scheduler.isEnabled() && wasTrackingActive) {
                     Log.i("ScheduleReceiver", "Restarting continuous tracking after ${intent.action}")
                     val serviceIntent = Intent(context, LocationTracker::class.java).apply {
                         action = LocationTracker.ACTION_START_TRACKING

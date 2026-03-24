@@ -303,7 +303,5 @@ class TrackingScheduler {
             return "\(window.startTime.hour),\(window.startTime.minute)|\(window.endTime.hour),\(window.endTime.minute)|\(days)"
         }.joined(separator: ";")
         defaults.set(windowsJson, forKey: Self.PREFS_KEY_TIME_WINDOWS)
-
-        defaults.synchronize()
     }
 }

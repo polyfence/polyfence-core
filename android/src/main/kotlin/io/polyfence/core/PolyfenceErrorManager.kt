@@ -9,7 +9,7 @@ import java.util.UUID
  * Manages error reporting to developers.
  * Framework-agnostic — receives a plain callback from the bridge layer.
  */
-class PolyfenceErrorManager {
+internal class PolyfenceErrorManager {
     companion object {
         private const val TAG = "PolyfenceErrorManager"
         private var errorSink: ((Map<String, Any>) -> Unit)? = null

@@ -11,15 +11,16 @@ import androidx.core.app.ActivityCompat
 import android.Manifest
 import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedDeque
 
 /**
  * Collects comprehensive debug information for developers
  * Integrates with existing analytics and error systems
  */
-class PolyfenceDebugCollector {
+internal class PolyfenceDebugCollector {
     companion object {
         private val performanceMetrics = ConcurrentHashMap<String, Any>()
-        private val errorHistory = mutableListOf<Map<String, Any>>()
+        private val errorHistory = ConcurrentLinkedDeque<Map<String, Any>>()
         private var sessionStartTime = System.currentTimeMillis()
         private var lastLocationUpdateTime = 0L
         private var lastKnownAccuracy = -1.0
@@ -97,7 +98,7 @@ class PolyfenceDebugCollector {
         }
 
         private fun getRecentErrors(): List<Map<String, Any>> {
-            return errorHistory.takeLast(10) // Last 10 errors
+            return errorHistory.toList().takeLast(10)
         }
 
         fun recordLocationUpdate(accuracy: Double) {
@@ -118,11 +119,11 @@ class PolyfenceDebugCollector {
                 "timestamp" to System.currentTimeMillis(),
                 "context" to context
             )
-            errorHistory.add(errorEntry)
+            errorHistory.addLast(errorEntry)
 
             // Keep only last 100 errors
-            if (errorHistory.size > 100) {
-                errorHistory.removeAt(0)
+            while (errorHistory.size > 100) {
+                errorHistory.removeFirst()
             }
         }
 
@@ -131,21 +132,21 @@ class PolyfenceDebugCollector {
         }
 
         fun getErrorHistory(timeRangeMs: Long?, errorTypes: List<String>?): List<Map<String, Any>> {
-            var filteredErrors = errorHistory.toMutableList()
+            var filteredErrors = errorHistory.toList()
 
             // Filter by time range
             if (timeRangeMs != null) {
                 val cutoffTime = System.currentTimeMillis() - timeRangeMs
                 filteredErrors = filteredErrors.filter {
                     (it["timestamp"] as Long) >= cutoffTime
-                }.toMutableList()
+                }
             }
 
             // Filter by error types
             if (errorTypes != null && errorTypes.isNotEmpty()) {
                 filteredErrors = filteredErrors.filter {
                     errorTypes.contains(it["type"])
-                }.toMutableList()
+                }
             }
 
             return filteredErrors
@@ -194,7 +195,15 @@ class PolyfenceDebugCollector {
             return pluginVersion ?: "unknown"
         }
 
+        /**
+         * Measures CPU usage by reading /proc/stat before and after a 360ms interval.
+         * Must be called from a background thread — blocks for ~360ms to measure CPU usage.
+         * Do not call from the main thread.
+         */
         private fun getCpuUsage(): Double {
+            require(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+                "getCpuUsage() blocks for ~360ms and must not be called on the main thread"
+            }
             return try {
                 val reader = RandomAccessFile("/proc/stat", "r")
                 val load = reader.readLine()

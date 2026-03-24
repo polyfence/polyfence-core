@@ -6,9 +6,10 @@ import UIKit
  * Collects debug information for the Polyfence plugin
  * Provides system status, performance metrics, and error history
  */
-class PolyfenceDebugCollector {
+internal class PolyfenceDebugCollector {
     static let shared = PolyfenceDebugCollector()
 
+    private let syncQueue = DispatchQueue(label: "io.polyfence.PolyfenceDebugCollector")
     private var performanceMetrics: [String: Any] = [:]
     private var errorHistory: [[String: Any]] = []
     private var sessionStartTime = Date()
@@ -34,33 +35,35 @@ class PolyfenceDebugCollector {
     }
 
     private func collectSystemStatus() -> [String: Any] {
-        let locationManager = CLLocationManager()
-
-        return [
-            "isLocationPermissionGranted": CLLocationManager.authorizationStatus() == .authorizedAlways || CLLocationManager.authorizationStatus() == .authorizedWhenInUse,
-            "isBackgroundLocationEnabled": CLLocationManager.authorizationStatus() == .authorizedAlways,
-            "isBatteryOptimizationDisabled": true, // iOS doesn't have battery optimization like Android
-            "isGpsEnabled": CLLocationManager.locationServicesEnabled(),
-            "isWakeLockAcquired": false, // iOS doesn't use wake locks
-            "lastKnownAccuracy": performanceMetrics["lastAccuracy"] as? Double ?? -1.0,
-            "lastLocationUpdate": (performanceMetrics["lastLocationUpdate"] as? Date ?? Date()).timeIntervalSince1970 * 1000,
-            "platformVersion": UIDevice.current.systemVersion,
-            "pluginVersion": pluginVersion ?? "unknown"
-        ]
+        return syncQueue.sync {
+            return [
+                "isLocationPermissionGranted": CLLocationManager.authorizationStatus() == .authorizedAlways || CLLocationManager.authorizationStatus() == .authorizedWhenInUse,
+                "isBackgroundLocationEnabled": CLLocationManager.authorizationStatus() == .authorizedAlways,
+                "isBatteryOptimizationDisabled": true, // iOS doesn't have battery optimization like Android
+                "isGpsEnabled": CLLocationManager.locationServicesEnabled(),
+                "isWakeLockAcquired": false, // iOS doesn't use wake locks
+                "lastKnownAccuracy": self.performanceMetrics["lastAccuracy"] as? Double ?? -1.0,
+                "lastLocationUpdate": (self.performanceMetrics["lastLocationUpdate"] as? Date ?? Date()).timeIntervalSince1970 * 1000,
+                "platformVersion": UIDevice.current.systemVersion,
+                "pluginVersion": self.pluginVersion ?? "unknown"
+            ]
+        }
     }
 
     private func collectPerformanceMetrics() -> [String: Any] {
-        let uptime = Date().timeIntervalSince(sessionStartTime) * 1000 // Convert to milliseconds
+        return syncQueue.sync {
+            let uptime = Date().timeIntervalSince(self.sessionStartTime) * 1000 // Convert to milliseconds
 
-        return [
-            "uptime": Int(uptime),
-            "totalLocationUpdates": performanceMetrics["locationUpdateCount"] as? Int ?? 0,
-            "totalZoneDetections": performanceMetrics["zoneDetectionCount"] as? Int ?? 0,
-            "averageDetectionLatency": performanceMetrics["avgDetectionLatency"] as? Double ?? 0.0,
-            "memoryUsageMB": getMemoryUsage(),
-            "cpuUsagePercent": 0.0, // CPU usage is complex to get on iOS
-            "restartCount": performanceMetrics["restartCount"] as? Int ?? 0
-        ]
+            return [
+                "uptime": Int(uptime),
+                "totalLocationUpdates": self.performanceMetrics["locationUpdateCount"] as? Int ?? 0,
+                "totalZoneDetections": self.performanceMetrics["zoneDetectionCount"] as? Int ?? 0,
+                "averageDetectionLatency": self.performanceMetrics["avgDetectionLatency"] as? Double ?? 0.0,
+                "memoryUsageMB": self.getMemoryUsage(),
+                "cpuUsagePercent": 0.0, // CPU usage is complex to get on iOS
+                "restartCount": self.performanceMetrics["restartCount"] as? Int ?? 0
+            ]
+        }
     }
 
     private func collectBatteryMetrics() -> [String: Any] {
@@ -77,64 +80,76 @@ class PolyfenceDebugCollector {
     }
 
     private func collectZoneStatus() -> [String: Any] {
-        return [
-            "activeZones": performanceMetrics["activeZones"] as? Int ?? 0,
-            "circleZones": performanceMetrics["circleZones"] as? Int ?? 0,
-            "polygonZones": performanceMetrics["polygonZones"] as? Int ?? 0,
-            "lastZoneUpdate": (performanceMetrics["lastZoneUpdate"] as? Date ?? Date()).timeIntervalSince1970 * 1000,
-            "zoneEventCounts": performanceMetrics["zoneEventCounts"] as? [String: Int] ?? [:]
-        ]
+        return syncQueue.sync {
+            return [
+                "activeZones": self.performanceMetrics["activeZones"] as? Int ?? 0,
+                "circleZones": self.performanceMetrics["circleZones"] as? Int ?? 0,
+                "polygonZones": self.performanceMetrics["polygonZones"] as? Int ?? 0,
+                "lastZoneUpdate": (self.performanceMetrics["lastZoneUpdate"] as? Date ?? Date()).timeIntervalSince1970 * 1000,
+                "zoneEventCounts": self.performanceMetrics["zoneEventCounts"] as? [String: Int] ?? [:]
+            ]
+        }
     }
 
     private func getRecentErrors() -> [[String: Any]] {
-        return errorHistory
+        return syncQueue.sync {
+            return self.errorHistory
+        }
     }
 
     func getErrorHistory(timeRangeMs: Int64?, errorTypes: [String]?) -> [[String: Any]] {
-        var filteredErrors = errorHistory
+        return syncQueue.sync {
+            var filteredErrors = self.errorHistory
 
-        // Filter by time range
-        if let timeRangeMs = timeRangeMs {
-            let cutoffTime = Date().timeIntervalSince1970 * 1000 - Double(timeRangeMs)
-            filteredErrors = filteredErrors.filter { error in
-                let timestamp = error["timestamp"] as? Double ?? 0
-                return timestamp >= cutoffTime
+            // Filter by time range
+            if let timeRangeMs = timeRangeMs {
+                let cutoffTime = Date().timeIntervalSince1970 * 1000 - Double(timeRangeMs)
+                filteredErrors = filteredErrors.filter { error in
+                    let timestamp = error["timestamp"] as? Double ?? 0
+                    return timestamp >= cutoffTime
+                }
             }
-        }
 
-        // Filter by error types
-        if let errorTypes = errorTypes, !errorTypes.isEmpty {
-            filteredErrors = filteredErrors.filter { error in
-                let type = error["type"] as? String
-                return errorTypes.contains(type ?? "")
+            // Filter by error types
+            if let errorTypes = errorTypes, !errorTypes.isEmpty {
+                filteredErrors = filteredErrors.filter { error in
+                    let type = error["type"] as? String
+                    return errorTypes.contains(type ?? "")
+                }
             }
-        }
 
-        return filteredErrors
+            return filteredErrors
+        }
     }
 
     // Helper methods for recording metrics
     func recordLocationUpdate(accuracy: Double) {
-        performanceMetrics["lastAccuracy"] = accuracy
-        performanceMetrics["lastLocationUpdate"] = Date()
-        let count = performanceMetrics["locationUpdateCount"] as? Int ?? 0
-        performanceMetrics["locationUpdateCount"] = count + 1
+        syncQueue.async { [weak self] in
+            self?.performanceMetrics["lastAccuracy"] = accuracy
+            self?.performanceMetrics["lastLocationUpdate"] = Date()
+            let count = (self?.performanceMetrics["locationUpdateCount"] as? Int) ?? 0
+            self?.performanceMetrics["locationUpdateCount"] = count + 1
+        }
     }
 
     func recordZoneDetection(latencyMs: Int64) {
-        let count = performanceMetrics["zoneDetectionCount"] as? Int ?? 0
-        performanceMetrics["zoneDetectionCount"] = count + 1
+        syncQueue.async { [weak self] in
+            let count = (self?.performanceMetrics["zoneDetectionCount"] as? Int) ?? 0
+            self?.performanceMetrics["zoneDetectionCount"] = count + 1
 
-        let avgLatency = performanceMetrics["avgDetectionLatency"] as? Double ?? 0.0
-        let newAvg = count > 0 ? ((avgLatency * Double(count - 1)) + Double(latencyMs)) / Double(count) : Double(latencyMs)
-        performanceMetrics["avgDetectionLatency"] = newAvg
+            let avgLatency = (self?.performanceMetrics["avgDetectionLatency"] as? Double) ?? 0.0
+            let newAvg = count > 0 ? ((avgLatency * Double(count - 1)) + Double(latencyMs)) / Double(count) : Double(latencyMs)
+            self?.performanceMetrics["avgDetectionLatency"] = newAvg
+        }
     }
 
     func addErrorToHistory(_ error: [String: Any]) {
-        errorHistory.append(error)
-        // Keep history size manageable
-        if errorHistory.count > 100 {
-            errorHistory.removeFirst()
+        syncQueue.async { [weak self] in
+            self?.errorHistory.append(error)
+            // Keep history size manageable
+            if (self?.errorHistory.count ?? 0) > 100 {
+                self?.errorHistory.removeFirst()
+            }
         }
     }
 

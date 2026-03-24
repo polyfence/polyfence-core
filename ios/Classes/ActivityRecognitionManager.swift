@@ -14,6 +14,9 @@ class ActivityRecognitionManager {
     private let motionActivityManager = CMMotionActivityManager()
     private let operationQueue = OperationQueue()
 
+    // Synchronization for thread-safe access to mutable state
+    private let syncQueue = DispatchQueue(label: "io.polyfence.ActivityRecognitionManager")
+
     // Current state
     private var currentActivity: ActivityType = .unknown
     private var currentConfidence: Int = 0
@@ -59,9 +62,11 @@ class ActivityRecognitionManager {
             return
         }
 
-        self.settings = settings
-        self.onActivityChanged = callback
-        self.isEnabled = true
+        syncQueue.sync {
+            self.settings = settings
+            self.onActivityChanged = callback
+            self.isEnabled = true
+        }
 
         // Start activity updates - this also triggers permission prompt if status is .notDetermined
         // On iOS, calling startActivityUpdates is the only way to request motion permission
@@ -79,7 +84,8 @@ class ActivityRecognitionManager {
      * Stop activity recognition
      */
     func stop() {
-        guard isEnabled else { return }
+        let shouldStop = syncQueue.sync { self.isEnabled }
+        guard shouldStop else { return }
 
         // Cancel pending debounce
         debounceTimer?.invalidate()
@@ -89,10 +95,12 @@ class ActivityRecognitionManager {
         // Stop activity updates
         motionActivityManager.stopActivityUpdates()
 
-        isEnabled = false
-        accumulateActivityTime()
-        currentActivity = .unknown
-        currentConfidence = 0
+        syncQueue.sync {
+            self.isEnabled = false
+            self.accumulateActivityTime()
+            self.currentActivity = .unknown
+            self.currentConfidence = 0
+        }
 
         NSLog("[\(Self.TAG)] Activity recognition stopped")
     }
@@ -101,12 +109,15 @@ class ActivityRecognitionManager {
      * Update settings
      */
     func updateSettings(_ newSettings: ActivitySettings) {
-        let wasEnabled = settings.enabled
-        settings = newSettings
+        let (wasEnabled, callback) = syncQueue.sync { () -> (Bool, ((ActivityType, Int) -> Void)?) in
+            let wasEnabled = self.settings.enabled
+            self.settings = newSettings
+            return (wasEnabled, self.onActivityChanged)
+        }
 
         if !wasEnabled && newSettings.enabled {
             // Was disabled, now enabled - start
-            if let callback = onActivityChanged {
+            if let callback = callback {
                 start(settings: newSettings, callback: callback)
             }
         } else if wasEnabled && !newSettings.enabled {
@@ -119,21 +130,21 @@ class ActivityRecognitionManager {
      * Get current detected activity
      */
     func getCurrentActivity() -> ActivityType {
-        return currentActivity
+        return syncQueue.sync { self.currentActivity }
     }
 
     /**
      * Get current activity confidence
      */
     func getCurrentConfidence() -> Int {
-        return currentConfidence
+        return syncQueue.sync { self.currentConfidence }
     }
 
     /**
      * Check if activity recognition is running
      */
     func isRunning() -> Bool {
-        return isEnabled
+        return syncQueue.sync { self.isEnabled }
     }
 
     /**
@@ -156,14 +167,18 @@ class ActivityRecognitionManager {
 
         NSLog("[\(Self.TAG)] Detected: \(newActivity) (confidence: \(confidence)%)")
 
-        // Check confidence threshold
-        guard confidence >= settings.confidenceThreshold else {
-            NSLog("[\(Self.TAG)] Confidence below threshold (\(settings.confidenceThreshold)%), ignoring")
+        // Check confidence threshold and compare with current activity inside sync block
+        let (confidenceThreshold, currentActivityState) = syncQueue.sync { () -> (Int, ActivityType) in
+            return (self.settings.confidenceThreshold, self.currentActivity)
+        }
+
+        guard confidence >= confidenceThreshold else {
+            NSLog("[\(Self.TAG)] Confidence below threshold (\(confidenceThreshold)%), ignoring")
             return
         }
 
         // Check if activity changed
-        if newActivity != currentActivity {
+        if newActivity != currentActivityState {
             applyDebounce(newActivity: newActivity, confidence: confidence)
         }
     }
@@ -172,36 +187,51 @@ class ActivityRecognitionManager {
      * Apply debounce before confirming activity change
      */
     private func applyDebounce(newActivity: ActivityType, confidence: Int) {
-        // If same activity is already pending, let the timer complete (don't reset)
-        if newActivity == pendingActivityChange && debounceTimer != nil {
-            NSLog("[\(Self.TAG)] Same activity pending, letting timer complete")
-            return
+        let debounceSeconds = syncQueue.sync { self.settings.debounceSeconds }
+
+        let shouldReturn = syncQueue.sync { () -> Bool in
+            // If same activity is already pending, let the timer complete (don't reset)
+            if newActivity == self.pendingActivityChange && self.debounceTimer != nil {
+                NSLog("[\(Self.TAG)] Same activity pending, letting timer complete")
+                return true
+            }
+
+            // Cancel any pending change for a DIFFERENT activity
+            self.debounceTimer?.invalidate()
+            self.pendingActivityChange = newActivity
+
+            return false
         }
 
-        // Cancel any pending change for a DIFFERENT activity
-        debounceTimer?.invalidate()
-        pendingActivityChange = newActivity
+        if shouldReturn {
+            return
+        }
 
         // Schedule debounce timer on main thread
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
-            self.debounceTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(self.settings.debounceSeconds), repeats: false) { [weak self] _ in
-                guard let self = self else { return }
+            let onActivityChanged = self.syncQueue.sync { self.onActivityChanged }
+            self.syncQueue.sync {
+                self.debounceTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(debounceSeconds), repeats: false) { [weak self] _ in
+                    guard let self = self else { return }
 
-                if self.pendingActivityChange == newActivity {
-                    NSLog("[\(Self.TAG)] Activity confirmed after debounce: \(newActivity)")
-                    self.accumulateActivityTime()
-                    self.currentActivity = newActivity
-                    self.currentConfidence = confidence
-                    self.onActivityChanged?(newActivity, confidence)
+                    self.syncQueue.sync {
+                        if self.pendingActivityChange == newActivity {
+                            NSLog("[\(Self.TAG)] Activity confirmed after debounce: \(newActivity)")
+                            self.accumulateActivityTime()
+                            self.currentActivity = newActivity
+                            self.currentConfidence = confidence
+                        }
+
+                        self.pendingActivityChange = nil
+                        self.debounceTimer = nil
+                    }
                 }
-
-                self.pendingActivityChange = nil
-                self.debounceTimer = nil
             }
 
-            NSLog("[\(Self.TAG)] Debounce started: \(self.settings.debounceSeconds)s for \(newActivity)")
+            onActivityChanged?(newActivity, confidence)
+            NSLog("[\(Self.TAG)] Debounce started: \(debounceSeconds)s for \(newActivity)")
         }
     }
 
@@ -209,7 +239,7 @@ class ActivityRecognitionManager {
 
     /**
      * Accumulate time spent in the current activity before switching.
-     * Must be called BEFORE updating currentActivity.
+     * Must be called BEFORE updating currentActivity (already in sync context).
      */
     private func accumulateActivityTime() {
         let now = Date().timeIntervalSince1970
@@ -226,25 +256,31 @@ class ActivityRecognitionManager {
      * Finalize the last activity segment before reading the distribution.
      */
     func finalizeSession() {
-        accumulateActivityTime()
+        syncQueue.sync {
+            self.accumulateActivityTime()
+        }
     }
 
     /**
      * Returns activity distribution as proportions (0.0-1.0).
      */
     func getActivityDistribution() -> [String: Double] {
-        let total = activityTime.values.reduce(0, +)
-        guard total > 0 else { return [:] }
-        return activityTime.mapValues { $0 / total }
+        return syncQueue.sync {
+            let total = self.activityTime.values.reduce(0, +)
+            guard total > 0 else { return [:] }
+            return self.activityTime.mapValues { $0 / total }
+        }
     }
 
     /**
      * Reset telemetry counters for a new session.
      */
     func resetTelemetry() {
-        activityTime.removeAll()
-        lastActivityChangeTime = Date().timeIntervalSince1970
-        lastTrackedActivity = currentActivity.rawValue.lowercased()
+        syncQueue.sync {
+            self.activityTime.removeAll()
+            self.lastActivityChangeTime = Date().timeIntervalSince1970
+            self.lastTrackedActivity = self.currentActivity.rawValue.lowercased()
+        }
     }
 
     /**

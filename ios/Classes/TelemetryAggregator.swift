@@ -6,7 +6,7 @@ import UIKit
 /// and POSTs the result — no per-bridge telemetry reimplementation needed.
 ///
 /// Thread-safe: all mutable state accessed via syncQueue.
-class TelemetryAggregator {
+internal class TelemetryAggregator {
 
     private let syncQueue = DispatchQueue(label: "io.polyfence.telemetryAggregator", attributes: .concurrent)
 

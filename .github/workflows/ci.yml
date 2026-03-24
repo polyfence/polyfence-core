@@ -47,7 +47,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Lint podspec
-        run: pod lib lint PolyfenceCore.podspec --allow-warnings
+        run: pod lib lint PolyfenceCore.podspec
+
+  ios-test:
+    name: iOS Swift Tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test iOS via Swift Package Manager
+        run: |
+          swift build
+          swift test
 
   code-quality:
     name: Code Quality Checks

@@ -2,6 +2,7 @@ package io.polyfence.core
 
 import android.os.Build
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 
 /**
@@ -11,7 +12,7 @@ import kotlin.math.abs
  *
  * Thread-safe: all mutable state uses ConcurrentHashMap or synchronized blocks.
  */
-class TelemetryAggregator {
+internal class TelemetryAggregator {
 
     // --- Activity distribution ---
     private val activityTimeMs = ConcurrentHashMap<String, Long>()
@@ -37,7 +38,7 @@ class TelemetryAggregator {
 
     // --- False event tracking ---
     private val lastEventPerZone = ConcurrentHashMap<String, Pair<String, Long>>()
-    private var falseEventCount: Int = 0
+    private val falseEventCount = AtomicInteger(0)
 
     // --- Detection timing ---
     private val detectionTimesMs = mutableListOf<Double>()
@@ -45,7 +46,7 @@ class TelemetryAggregator {
     private var sessionStartTime: Long = System.currentTimeMillis()
 
     // --- Zone metrics ---
-    private var zoneTransitionCount: Int = 0
+    private val zoneTransitionCount = AtomicInteger(0)
     private val dwellDurations = mutableListOf<Double>()
 
     // --- GPS health ---
@@ -130,7 +131,7 @@ class TelemetryAggregator {
         accuracyM: Double,
         detectionTimeMs: Double
     ) {
-        zoneTransitionCount++
+        zoneTransitionCount.incrementAndGet()
 
         // Detection timing
         synchronized(detectionTimesMs) { detectionTimesMs.add(detectionTimeMs) }
@@ -153,17 +154,10 @@ class TelemetryAggregator {
             val (lastType, lastTime) = lastEvent
             val timeSince = System.currentTimeMillis() - lastTime
             if (timeSince <= 30_000L && lastType != eventType) {
-                falseEventCount++
+                falseEventCount.incrementAndGet()
             }
         }
         lastEventPerZone[zoneId] = Pair(eventType, System.currentTimeMillis())
-    }
-
-    /**
-     * Record zone info for zone metrics.
-     */
-    fun recordZoneInfo(zoneCount: Int, zoneSizes: List<Double>) {
-        // Zone sizes are recorded at session end via getSessionTelemetry
     }
 
     /**
@@ -278,7 +272,7 @@ class TelemetryAggregator {
         // Compute false event ratio
         val totalDetections = detTimes.size
         val falseRatio = if (totalDetections > 0) {
-            falseEventCount.toDouble() / totalDetections
+            falseEventCount.get().toDouble() / totalDetections
         } else 0.0
 
         // Compute dwell average
@@ -324,14 +318,14 @@ class TelemetryAggregator {
             gpsIntervalDistribution = intervalDist,
             stationaryRatio = stationaryRatio,
             avgGpsIntervalMs = avgInterval,
-            falseEventCount = falseEventCount,
+            falseEventCount = falseEventCount.get(),
             falseEventRatio = falseRatio,
             avgGpsAccuracyAtEvent = avgAccuracyAtEvent,
             avgSpeedAtEventMps = avgSpeedAtEvent,
             boundaryEventsCount = boundaryEventsCount,
             zoneCount = zoneCount,
             zoneSizeDistribution = zoneSizeDist,
-            zoneTransitionCount = zoneTransitionCount,
+            zoneTransitionCount = zoneTransitionCount.get(),
             avgDwellMinutes = avgDwell,
             deviceCategory = deviceCategory,
             osVersionMajor = osVersionMajor,
@@ -363,13 +357,13 @@ class TelemetryAggregator {
         boundaryEventsCount = 0
 
         lastEventPerZone.clear()
-        falseEventCount = 0
+        falseEventCount.set(0)
 
         synchronized(detectionTimesMs) { detectionTimesMs.clear() }
         firstDetectionTimeMs = null
         sessionStartTime = System.currentTimeMillis()
 
-        zoneTransitionCount = 0
+        zoneTransitionCount.set(0)
         synchronized(dwellDurations) { dwellDurations.clear() }
 
         totalGpsReadings = 0

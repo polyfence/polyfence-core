@@ -2,6 +2,7 @@ package io.polyfence.core
 
 import android.location.Location
 import android.util.Log
+import io.polyfence.core.utils.GeoMath
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.*
 import kotlin.math.abs
@@ -13,7 +14,6 @@ import kotlin.math.abs
 class GeofenceEngine {
     companion object {
         private const val TAG = "GeofenceEngine"
-        private const val EARTH_RADIUS_METERS = 6371000.0
 
         // State recovery event types
         const val EVENT_RECOVERY_ENTER = "RECOVERY_ENTER"
@@ -26,39 +26,61 @@ class GeofenceEngine {
         const val DEFAULT_DWELL_THRESHOLD_MS = 300000L
 
         /**
-         * Calculate distance between two points using Haversine formula
+         * Check if polygon is self-intersecting using O(n²) edge intersection test.
+         * Used from [ZoneData.fromMap]; must live in companion so nested class can call it.
+         * Internal: nested [ZoneData] cannot call companion private members in Kotlin.
          */
-        private fun calculateDistance(point1: LatLng, point2: LatLng): Double {
-            val dLat = Math.toRadians(point2.latitude - point1.latitude)
-            val dLng = Math.toRadians(point2.longitude - point1.longitude)
+        internal fun isPolygonSelfIntersecting(points: List<LatLng>): Boolean {
+            if (points.size < 4) return false
 
-            val a = sin(dLat / 2).pow(2) +
-                    cos(Math.toRadians(point1.latitude)) * cos(Math.toRadians(point2.latitude)) *
-                    sin(dLng / 2).pow(2)
+            for (i in 0 until points.size - 1) {
+                for (j in i + 2 until points.size) {
+                    if (i == 0 && j == points.size - 1) continue
 
-            val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-            return EARTH_RADIUS_METERS * c
-        }
-
-        /**
-         * Point-in-polygon detection using ray casting algorithm
-         */
-        private fun isPointInPolygon(point: LatLng, polygon: List<LatLng>): Boolean {
-            var intersections = 0
-            val x = point.longitude
-            val y = point.latitude
-
-            for (i in polygon.indices) {
-                val p1 = polygon[i]
-                val p2 = polygon[(i + 1) % polygon.size]
-
-                if (((p1.latitude > y) != (p2.latitude > y)) &&
-                    (x < (p2.longitude - p1.longitude) * (y - p1.latitude) / (p2.latitude - p1.latitude) + p1.longitude)) {
-                    intersections++
+                    if (segmentsIntersect(
+                            points[i], points[i + 1],
+                            points[j], points[(j + 1) % points.size]
+                        )) {
+                        return true
+                    }
                 }
             }
+            return false
+        }
 
-            return intersections % 2 == 1
+        private fun segmentsIntersect(a1: LatLng, a2: LatLng, b1: LatLng, b2: LatLng): Boolean {
+            val d1 = cross(b2.longitude - b1.longitude, b2.latitude - b1.latitude,
+                a1.longitude - b1.longitude, a1.latitude - b1.latitude)
+            val d2 = cross(b2.longitude - b1.longitude, b2.latitude - b1.latitude,
+                a2.longitude - b1.longitude, a2.latitude - b1.latitude)
+            val d3 = cross(a2.longitude - a1.longitude, a2.latitude - a1.latitude,
+                b1.longitude - a1.longitude, b1.latitude - a1.latitude)
+            val d4 = cross(a2.longitude - a1.longitude, a2.latitude - a1.latitude,
+                b2.longitude - a1.longitude, b2.latitude - a1.latitude)
+
+            if (sign(d1) != sign(d2) && sign(d3) != sign(d4)) {
+                return true
+            }
+            return false
+        }
+
+        private fun cross(ux: Double, uy: Double, vx: Double, vy: Double): Double {
+            return ux * vy - uy * vx
+        }
+
+        private fun sign(value: Double): Int {
+            return when {
+                value > 0 -> 1
+                value < 0 -> -1
+                else -> 0
+            }
+        }
+
+        internal fun checkPoleWarning(points: List<LatLng>) {
+            val polesNear = points.any { abs(it.latitude) > 85.0 }
+            if (polesNear) {
+                Log.w(TAG, "Polygon zone contains vertices near poles (lat > ±85°) - accuracy will be reduced near poles due to geomagnetic field distortions")
+            }
         }
     }
 
@@ -97,15 +119,10 @@ class GeofenceEngine {
     // Event callback - includes detection time in milliseconds
     private var eventCallback: ((String, String, Location, Double) -> Unit)? = null
 
-    // ML Telemetry: false event tracking (enter→exit reversal within 30s)
+    // False event detection: track last event per zone for reversal detection
     private val lastEventPerZone = ConcurrentHashMap<String, Pair<String, Long>>() // zoneId -> (eventType, timestamp)
-    private var falseEventCount: Int = 0
-
-    // ML Telemetry: dwell durations (minutes)
-    private val dwellDurations = mutableListOf<Double>()
-
-    // ML Telemetry: zone transition counter
-    private var zoneTransitionCount: Int = 0
+    private val lastEventWasQuickReversal = ConcurrentHashMap<String, Boolean>()
+    private var falseEventCount = 0
 
     // Zone state persistence (injected by LocationTracker)
     private var zonePersistence: ZonePersistence? = null
@@ -176,7 +193,7 @@ fun getZoneName(zoneId: String): String? {
     /**
      * Enhanced configuration method
      */
-    fun setValidationConfig(requireConfirmation: Boolean, confirmationPoints: Int, timeoutMs: Long = 10000L) {
+    fun setValidationConfig(requireConfirmation: Boolean, confirmationPoints: Int = 2, timeoutMs: Long = 10000L) {
         this.requireConfirmation = requireConfirmation
         this.confirmationPoints = confirmationPoints
         this.confirmationTimeoutMs = timeoutMs
@@ -226,10 +243,7 @@ fun getZoneName(zoneId: String): String? {
         val centerLat = clusterCenterLat ?: return true
         val centerLng = clusterCenterLng ?: return true
 
-        val distance = calculateDistance(
-            LatLng(centerLat, centerLng),
-            LatLng(location.latitude, location.longitude)
-        )
+        val distance = GeoMath.haversineDistance(centerLat, centerLng, location.latitude, location.longitude)
         return distance >= clusterRefreshDistanceMeters
     }
 
@@ -241,12 +255,11 @@ fun getZoneName(zoneId: String): String? {
         clusterCenterLng = location.longitude
         activeZoneIds.clear()
 
-        val userLocation = LatLng(location.latitude, location.longitude)
         val activatedZonesList = mutableListOf<String>()
 
         zones.forEach { (zoneId, zone) ->
             val zoneCenter = zone.calculateCenter()
-            val distance = calculateDistance(userLocation, zoneCenter)
+            val distance = GeoMath.haversineDistance(location.latitude, location.longitude, zoneCenter.latitude, zoneCenter.longitude)
 
             // Include zone if its center is within active radius
             // Also include zones whose boundary might intersect (add zone radius buffer)
@@ -599,34 +612,33 @@ fun getZoneName(zoneId: String): String? {
         return false // No state change
     }
 
-    // --- ML Telemetry: false event + transition tracking ---
-
     /**
-     * Track zone transitions and detect false events (reversals within 30s).
-     * Must be called BEFORE firing eventCallback.
+     * Track zone transitions for false-event / reversal detection (parity with iOS).
      */
     private fun trackEventTelemetry(zoneId: String, eventType: String) {
-        zoneTransitionCount++
-
-        val lastEvent = lastEventPerZone[zoneId]
-        if (lastEvent != null) {
-            val (lastType, lastTime) = lastEvent
-            val timeSince = System.currentTimeMillis() - lastTime
+        val now = System.currentTimeMillis()
+        var quickReversal = false
+        lastEventPerZone[zoneId]?.let { (lastType, lastTime) ->
+            val timeSince = now - lastTime
             if (timeSince <= 30_000L && lastType != eventType) {
                 falseEventCount++
+                quickReversal = true
             }
         }
-        lastEventPerZone[zoneId] = Pair(eventType, System.currentTimeMillis())
+        lastEventPerZone[zoneId] = Pair(eventType, now)
+        lastEventWasQuickReversal[zoneId] = quickReversal
     }
 
+    // --- ML Telemetry: false event detection (for external use only) ---
+
     /**
-     * Check if an event is a recent reversal (opposite event within 30s on same zone).
+     * Whether the most recently emitted event for this zone was a quick opposite transition
+     * (e.g. EXIT within 30s of ENTER). Call after the event has been processed.
      */
     fun isRecentReversal(zoneId: String, eventType: String): Boolean {
         val lastEvent = lastEventPerZone[zoneId] ?: return false
-        val (lastType, lastTime) = lastEvent
-        val timeSince = System.currentTimeMillis() - lastTime
-        return timeSince <= 30_000L && lastType != eventType
+        if (lastEvent.first != eventType) return false
+        return lastEventWasQuickReversal[zoneId] == true
     }
 
     /**
@@ -641,12 +653,6 @@ fun getZoneName(zoneId: String): String? {
             dwellEventsFired.remove(zoneId) // Reset dwell flag for new entry
             Log.d(TAG, "Dwell tracking started for zone $zoneId")
         } else {
-            // ML Telemetry: capture dwell duration before removing entry time
-            val entryTime = zoneEntryTimes[zoneId]
-            if (entryTime != null) {
-                val dwellMinutes = (System.currentTimeMillis() - entryTime) / 60_000.0
-                synchronized(dwellDurations) { dwellDurations.add(dwellMinutes) }
-            }
             // Exited zone - stop tracking dwell time
             zoneEntryTimes.remove(zoneId)
             dwellEventsFired.remove(zoneId)
@@ -700,18 +706,16 @@ fun getZoneName(zoneId: String): String? {
     ) {
 
         fun contains(location: Location): Boolean {
-            val point = LatLng(location.latitude, location.longitude)
-
             return when (type) {
                 ZoneType.CIRCLE -> {
                     val zoneCenter = center ?: return false
                     val zoneRadius = radius ?: return false
-                    val distance = calculateDistance(point, zoneCenter)
+                    val distance = GeoMath.haversineDistance(location.latitude, location.longitude, zoneCenter.latitude, zoneCenter.longitude)
                     distance <= zoneRadius
                 }
                 ZoneType.POLYGON -> {
                     val zonePolygon = polygon ?: return false
-                    isPointInPolygon(point, zonePolygon)
+                    GeoMath.isPointInPolygon(location.latitude, location.longitude, zonePolygon.map { Pair(it.latitude, it.longitude) })
                 }
             }
         }
@@ -771,6 +775,14 @@ fun getZoneName(zoneId: String): String? {
                             throw IllegalArgumentException("Polygon must have at least 3 points")
                         }
 
+                        // Check for self-intersecting polygon
+                        if (GeofenceEngine.isPolygonSelfIntersecting(points)) {
+                            throw IllegalArgumentException("Polygon is self-intersecting and cannot be used for geofencing")
+                        }
+
+                        // Warn about poles (reduced accuracy near ±85°)
+                        GeofenceEngine.checkPoleWarning(points)
+
                         ZoneData(id, name, type, null, null, points)
                     }
                 }
@@ -793,12 +805,11 @@ fun getZoneName(zoneId: String): String? {
      * For polygons: minimum distance from point to any polygon edge segment
      */
     private fun calculateDistanceFromBoundary(zone: ZoneData, location: Location): Double {
-        val point = LatLng(location.latitude, location.longitude)
         return when (zone.type) {
             ZoneType.CIRCLE -> {
                 val center = zone.center ?: return Double.MAX_VALUE
                 val radius = zone.radius ?: return Double.MAX_VALUE
-                val distance = calculateDistance(point, center)
+                val distance = GeoMath.haversineDistance(location.latitude, location.longitude, center.latitude, center.longitude)
                 abs(distance - radius)
             }
             ZoneType.POLYGON -> {
@@ -807,7 +818,11 @@ fun getZoneName(zoneId: String): String? {
                 var minDist = Double.MAX_VALUE
                 for (i in vertices.indices) {
                     val j = (i + 1) % vertices.size
-                    val segDist = pointToSegmentDistance(point, vertices[i], vertices[j])
+                    val segDist = GeoMath.pointToSegmentDistance(
+                        location.latitude, location.longitude,
+                        vertices[i].latitude, vertices[i].longitude,
+                        vertices[j].latitude, vertices[j].longitude
+                    )
                     if (segDist < minDist) minDist = segDist
                 }
                 minDist
@@ -815,31 +830,6 @@ fun getZoneName(zoneId: String): String? {
         }
     }
 
-    /**
-     * Distance from a point to a line segment in meters.
-     * Projects the point onto the segment and computes haversine distance to the projection.
-     */
-    private fun pointToSegmentDistance(p: LatLng, a: LatLng, b: LatLng): Double {
-        val ab = calculateDistance(a, b)
-        if (ab < 0.001) return calculateDistance(p, a) // Degenerate segment
-
-        // Flat-earth projection for segment math (valid for short segments)
-        val cosLat = cos(Math.toRadians((a.latitude + b.latitude) / 2))
-        val dx = Math.toRadians(b.longitude - a.longitude) * cosLat * EARTH_RADIUS_METERS
-        val dy = Math.toRadians(b.latitude - a.latitude) * EARTH_RADIUS_METERS
-        val px = Math.toRadians(p.longitude - a.longitude) * cos(Math.toRadians((a.latitude + p.latitude) / 2)) * EARTH_RADIUS_METERS
-        val py = Math.toRadians(p.latitude - a.latitude) * EARTH_RADIUS_METERS
-
-        val abLenSq = dx * dx + dy * dy
-        if (abLenSq < 0.001) return calculateDistance(p, a)
-
-        val t = ((px * dx + py * dy) / abLenSq).coerceIn(0.0, 1.0)
-
-        val projLat = a.latitude + t * (b.latitude - a.latitude)
-        val projLng = a.longitude + t * (b.longitude - a.longitude)
-
-        return calculateDistance(p, LatLng(projLat, projLng))
-    }
 
     /**
      * Public accessor for boundary distance, used by LocationTracker for event enrichment.
@@ -862,7 +852,7 @@ fun getZoneName(zoneId: String): String? {
                 ZoneType.CIRCLE -> zone.radius ?: 0.0
                 ZoneType.POLYGON -> {
                     val center = zone.calculateCenter()
-                    zone.polygon?.maxOfOrNull { calculateDistance(it, center) } ?: 0.0
+                    zone.polygon?.maxOfOrNull { vertex -> GeoMath.haversineDistance(vertex.latitude, vertex.longitude, center.latitude, center.longitude) } ?: 0.0
                 }
             }
             when {
@@ -874,9 +864,6 @@ fun getZoneName(zoneId: String): String? {
         return dist
     }
 
-    fun getZoneTransitionCount(): Int = zoneTransitionCount
-    fun getFalseEventCount(): Int = falseEventCount
-    fun getDwellDurations(): List<Double> = synchronized(dwellDurations) { dwellDurations.toList() }
 
     /**
      * Compute dwell duration in minutes for a zone (if it has an entry time).
@@ -888,13 +875,12 @@ fun getZoneName(zoneId: String): String? {
     }
 
     /**
-     * Reset all telemetry counters for a new session.
+     * Reset false event reversal detection for a new session.
+     * Note: Zone transition and dwell tracking is managed by TelemetryAggregator.
      */
     fun resetTelemetry() {
         lastEventPerZone.clear()
-        falseEventCount = 0
-        synchronized(dwellDurations) { dwellDurations.clear() }
-        zoneTransitionCount = 0
+        lastEventWasQuickReversal.clear()
     }
 
     /**

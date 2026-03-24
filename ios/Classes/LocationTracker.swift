@@ -3,6 +3,8 @@ import CoreLocation
 import UserNotifications
 import UIKit
 
+// GeoMath is already available in the same module
+
 /**
  * Background location tracking service for iOS
  * Single responsibility: GPS updates -> GeofenceEngine -> Notifications
@@ -1295,13 +1297,13 @@ extension LocationTracker: CLLocationManagerDelegate {
      * Calculate distance to polygon zone boundary
      */
     private func calculateDistanceToPolygonZone(location: CLLocation, zone: Zone) -> Double {
-        let currentPoint = CLLocationCoordinate2D(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
+        let currentPoint = location.coordinate
         let points = zone.points
 
         guard !points.isEmpty else { return Double.greatestFiniteMagnitude }
 
         // Check if inside polygon first
-        if isPointInPolygon(point: currentPoint, polygon: points) {
+        if GeoMath.isPointInPolygon(point: currentPoint, polygon: points) {
             return 0.0 // Inside zone
         }
 
@@ -1312,7 +1314,7 @@ extension LocationTracker: CLLocationManagerDelegate {
             let p1 = points[i]
             let p2 = points[(i + 1) % points.count]
 
-            let distance = distanceFromPointToLineSegment(point: currentPoint, lineStart: p1, lineEnd: p2)
+            let distance = GeoMath.pointToSegmentDistance(p: currentPoint, a: p1, b: p2)
             if distance < nearestDistance {
                 nearestDistance = distance
             }
@@ -1321,81 +1323,7 @@ extension LocationTracker: CLLocationManagerDelegate {
         return nearestDistance
     }
 
-    /**
-     * Calculate distance from point to line segment
-     */
-    private func distanceFromPointToLineSegment(
-        point: CLLocationCoordinate2D,
-        lineStart: CLLocationCoordinate2D,
-        lineEnd: CLLocationCoordinate2D
-    ) -> Double {
-        // Calculate perpendicular distance from point to line segment
-        let A = point.latitude - lineStart.latitude
-        let B = point.longitude - lineStart.longitude
-        let C = lineEnd.latitude - lineStart.latitude
-        let D = lineEnd.longitude - lineStart.longitude
 
-        let dot = A * C + B * D
-        let lenSq = C * C + D * D
-
-        if lenSq == 0.0 {
-            // Line segment is a point
-            return calculateDistance(point1: point, point2: lineStart)
-        }
-
-        let param = dot / lenSq
-
-        let closest: CLLocationCoordinate2D
-        if param < 0 {
-            closest = lineStart
-        } else if param > 1 {
-            closest = lineEnd
-        } else {
-            closest = CLLocationCoordinate2D(
-                latitude: lineStart.latitude + param * C,
-                longitude: lineStart.longitude + param * D
-            )
-        }
-
-        return calculateDistance(point1: point, point2: closest)
-    }
-
-    /**
-     * Calculate distance between two CLLocationCoordinate2D points using Haversine formula
-     */
-    private func calculateDistance(point1: CLLocationCoordinate2D, point2: CLLocationCoordinate2D) -> Double {
-        let EARTH_RADIUS_METERS = 6371000.0
-        let dLat = (point2.latitude - point1.latitude) * .pi / 180
-        let dLng = (point2.longitude - point1.longitude) * .pi / 180
-
-        let a = sin(dLat / 2) * sin(dLat / 2) +
-                cos(point1.latitude * .pi / 180) * cos(point2.latitude * .pi / 180) *
-                sin(dLng / 2) * sin(dLng / 2)
-
-        let c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        return EARTH_RADIUS_METERS * c
-    }
-
-    /**
-     * Point-in-polygon detection using ray casting algorithm
-     */
-    private func isPointInPolygon(point: CLLocationCoordinate2D, polygon: [CLLocationCoordinate2D]) -> Bool {
-        var intersections = 0
-        let x = point.longitude
-        let y = point.latitude
-
-        for i in polygon.indices {
-            let p1 = polygon[i]
-            let p2 = polygon[(i + 1) % polygon.count]
-
-            if ((p1.latitude > y) != (p2.latitude > y)) &&
-               (x < (p2.longitude - p1.longitude) * (y - p1.latitude) / (p2.latitude - p1.latitude) + p1.longitude) {
-                intersections += 1
-            }
-        }
-
-        return intersections % 2 == 1
-    }
 
     /**
      * Log proximity debug information for testing

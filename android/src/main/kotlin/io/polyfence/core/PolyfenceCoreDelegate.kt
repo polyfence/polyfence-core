@@ -3,6 +3,11 @@ package io.polyfence.core
 /**
  * Interface for platform bridges (Flutter, React Native, etc.) to receive
  * events from the core engine. Each bridge implements this interface.
+ *
+ * **Threading Contract:** All delegate callbacks are invoked on the main thread
+ * unless otherwise noted. Implementations must not perform blocking operations
+ * in callback methods. For long-running tasks, offload to background threads
+ * (e.g., using coroutines or Handler.post).
  */
 interface PolyfenceCoreDelegate {
     /** Called when a geofence event occurs (ENTER, EXIT, DWELL, RECOVERY_*) */

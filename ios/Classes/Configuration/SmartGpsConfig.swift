@@ -367,14 +367,11 @@ struct SmartGpsConfigFactory {
             fallback: SmartGpsConfig.UpdateStrategy.continuous
         )
 
-        let proximitySettings = map["proximitySettings"] != nil ?
-            ProximitySettings.fromMap(map["proximitySettings"] as! [String: Any]) : nil
+        let proximitySettings = (map["proximitySettings"] as? [String: Any]).flatMap { ProximitySettings.fromMap($0) }
 
-        let movementSettings = map["movementSettings"] != nil ?
-            MovementSettings.fromMap(map["movementSettings"] as! [String: Any]) : nil
+        let movementSettings = (map["movementSettings"] as? [String: Any]).flatMap { MovementSettings.fromMap($0) }
 
-        let batterySettings = map["batterySettings"] != nil ?
-            BatterySettings.fromMap(map["batterySettings"] as! [String: Any]) : nil
+        let batterySettings = (map["batterySettings"] as? [String: Any]).flatMap { BatterySettings.fromMap($0) }
 
         let enableDebugLogging = map["enableDebugLogging"] as? Bool ?? false
 
