@@ -10,7 +10,7 @@ Pod::Spec.new do |s|
   s.homepage         = 'https://github.com/blackabass/polyfence-core'
   s.license          = { :type => 'MIT', :file => '../LICENSE' }
   s.author           = { 'Polyfence' => 'hello@polyfence.io' }
-  s.source           = { :git => 'https://github.com/blackabass/polyfence-core.git', :tag => s.version.to_s }
+  s.source           = { :git => 'https://github.com/blackabass/polyfence-core.git', :tag => "v#{s.version}" }
 
   s.ios.deployment_target = '14.0'
   s.swift_version = '5.0'

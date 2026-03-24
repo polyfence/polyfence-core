@@ -21,6 +21,15 @@ Polyfence Core is the shared native engine that powers [polyfence-flutter](https
 - **Telemetry aggregation** — Session-level performance metrics collected natively (no GPS coordinates or PII)
 - **Zone persistence** — Zone state recovery across app restarts
 
+## Requirements
+
+| Platform | Minimum |
+|----------|---------|
+| Android  | API 24 (Android 7.0) |
+| iOS      | 14.0 |
+| Kotlin   | 2.0+ |
+| Swift    | 5.0+ |
+
 ## Installation
 
 ### iOS (CocoaPods)
@@ -28,6 +37,16 @@ Polyfence Core is the shared native engine that powers [polyfence-flutter](https
 ```ruby
 pod 'PolyfenceCore', '~> 1.0.0'
 ```
+
+### iOS (Swift Package Manager)
+
+Add to your `Package.swift` dependencies:
+
+```swift
+.package(url: "https://github.com/blackabass/polyfence-core.git", from: "1.0.0")
+```
+
+Or in Xcode: File → Add Package Dependencies → paste the repository URL.
 
 ### Android (Maven)
 
@@ -152,6 +171,7 @@ polyfence-core (this repo)
 | `ZonePersistence` | Persists zone definitions and inside/outside state to local storage. Enables state recovery after app restarts. |
 | `SmartGpsConfig` | Configuration model — accuracy profiles (max, balanced, battery-optimal, adaptive), update strategies, proximity/movement/battery/dwell/cluster/schedule/activity settings. |
 | `PolyfenceCoreDelegate` | Bridge interface — platform bridges (Flutter, RN) implement this to receive events from the engine. |
+| `GeoMath` | Shared geometry algorithms — haversine distance, ray-casting point-in-polygon, point-to-segment distance. Used by GeofenceEngine and LocationTracker. |
 | `PolyfenceErrorManager` | Structured error reporting with typed errors, context, and correlation IDs. |
 | `PolyfenceDebugCollector` | Collects debug information (system status, performance metrics, battery stats, zone status, recent errors). |
 
@@ -218,8 +238,13 @@ cd android
 ### iOS
 
 ```bash
+# CocoaPods lint
 cd ios
 pod lib lint
+
+# Swift Package Manager (from repo root)
+swift build
+swift test
 ```
 
 ## Contributing
