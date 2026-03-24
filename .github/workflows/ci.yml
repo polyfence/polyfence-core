@@ -57,8 +57,8 @@ jobs:
 
       - name: Build and test iOS via Swift Package Manager
         run: |
-          swift build
-          swift test
+          xcodebuild build -scheme PolyfenceCore -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' | tail -20
+          xcodebuild test -scheme PolyfenceCore -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' | tail -20
 
   code-quality:
     name: Code Quality Checks

@@ -1,6 +1,5 @@
 import Foundation
 import CoreLocation
-import UIKit
 
 /**
  * Core geofencing detection engine for iOS
@@ -11,7 +10,7 @@ class GeofenceEngine {
 
     // MARK: - Constants
     internal static let EARTH_RADIUS_METERS: Double = 6371000.0
-    private static let TAG = "GeofenceEngine"
+    static let TAG = "GeofenceEngine"
 
     // State recovery event types
     static let EVENT_RECOVERY_ENTER = "RECOVERY_ENTER"
@@ -433,25 +432,24 @@ class GeofenceEngine {
             let isInside = zone.contains(location)
             let algorithmDuration = CFAbsoluteTimeGetCurrent() - algorithmStartTime
             totalAlgorithmTime += algorithmDuration
-            let zoneTime = (CFAbsoluteTimeGetCurrent() - zoneStartTime) * 1000
+            _ = (CFAbsoluteTimeGetCurrent() - zoneStartTime) * 1000
 
             // Smart validation: Use confirmation based on speed and zone characteristics
             let useConfirmation = requireConfirmation ? shouldUseConfirmation(speed: speed, zoneRadius: zone.radius) : false
 
-            let stateChanged: Bool
             if useConfirmation {
                 let confidenceStartTime = CFAbsoluteTimeGetCurrent()
-                stateChanged = processWithConfidence(zoneId: zoneId, zone: zone, isInside: isInside, currentState: currentState, currentTime: Date().timeIntervalSince1970, location: location, checkStartTime: zoneStartTime)
+                _ = processWithConfidence(zoneId: zoneId, zone: zone, isInside: isInside, currentState: currentState, currentTime: Date().timeIntervalSince1970, location: location, checkStartTime: zoneStartTime)
                 let confidenceDuration = CFAbsoluteTimeGetCurrent() - confidenceStartTime
                 totalConfidenceTime += confidenceDuration
             } else {
                 // Original logic for immediate detection
-                stateChanged = processImmediate(zoneId: zoneId, zone: zone, isInside: isInside, currentState: currentState, location: location, checkStartTime: zoneStartTime)
+                _ = processImmediate(zoneId: zoneId, zone: zone, isInside: isInside, currentState: currentState, location: location, checkStartTime: zoneStartTime)
             }
 
         }
 
-        let overallDuration = CFAbsoluteTimeGetCurrent() - overallStartTime
+        _ = CFAbsoluteTimeGetCurrent() - overallStartTime
     }
 
     // MARK: - Private Methods
@@ -550,36 +548,32 @@ class GeofenceEngine {
      * Process immediate detection without confidence validation
      */
     private func processImmediate(zoneId: String, zone: ZoneData, isInside: Bool, currentState: Bool, location: CLLocation, checkStartTime: CFAbsoluteTime) -> Bool {
-        do {
-            // Check what happens when we detect a state change
-            if isInside != currentState {
-                handleStateChange(zoneId: zoneId, zoneName: zone.zoneName, isInside: isInside, location: location)
+        // Check what happens when we detect a state change
+        if isInside != currentState {
+            handleStateChange(zoneId: zoneId, zoneName: zone.zoneName, isInside: isInside, location: location)
 
-                syncQueue.sync { self.zoneStates[zoneId] = isInside }
+            syncQueue.sync { self.zoneStates[zoneId] = isInside }
 
-                // Persist state change immediately (write-through)
-                persistZoneState(zoneId: zoneId, isInside: isInside)
+            // Persist state change immediately (write-through)
+            persistZoneState(zoneId: zoneId, isInside: isInside)
 
-                // Calculate detection time: from start of zone check to now (in milliseconds)
-                let detectionTimeMs = (CFAbsoluteTimeGetCurrent() - checkStartTime) * 1000.0
+            // Calculate detection time: from start of zone check to now (in milliseconds)
+            let detectionTimeMs = (CFAbsoluteTimeGetCurrent() - checkStartTime) * 1000.0
 
-                let eventType = isInside ? "ENTER" : "EXIT"
-                trackEventTelemetry(zoneId: zoneId, eventType: eventType)
-                eventCallback?(zoneId, eventType, location, detectionTimeMs)
+            let eventType = isInside ? "ENTER" : "EXIT"
+            trackEventTelemetry(zoneId: zoneId, eventType: eventType)
+            eventCallback?(zoneId, eventType, location, detectionTimeMs)
 
-                // Handle dwell tracking on state change
-                handleDwellStateChange(zoneId: zoneId, isInside: isInside, location: location, checkStartTime: checkStartTime)
+            // Handle dwell tracking on state change
+            handleDwellStateChange(zoneId: zoneId, isInside: isInside, location: location, checkStartTime: checkStartTime)
 
-                return true
-            } else if isInside && dwellEnabled {
-                // Still inside - check for dwell
-                checkAndFireDwell(zoneId: zoneId, location: location, checkStartTime: checkStartTime)
-            }
-
-            return false
-        } catch {
-            return false
+            return true
+        } else if isInside && dwellEnabled {
+            // Still inside - check for dwell
+            checkAndFireDwell(zoneId: zoneId, location: location, checkStartTime: checkStartTime)
         }
+
+        return false
     }
 
     /**

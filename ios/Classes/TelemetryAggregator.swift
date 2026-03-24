@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// Aggregates all session telemetry in the native layer (D016).
 /// Each platform bridge (Flutter, RN, future) only calls getSessionTelemetry()
@@ -213,7 +215,7 @@ internal class TelemetryAggregator {
     ) -> [String: Any] {
         var result: [String: Any] = [:]
 
-        syncQueue.sync {
+        syncQueue.sync(execute: {
             // Finalize activity tracking
             let now = currentTimeMs()
             let actElapsed = now - lastActivityChangeTime
@@ -317,7 +319,7 @@ internal class TelemetryAggregator {
             telemetry.chargingDuringSession = chargingDuringSession
 
             result = telemetry.toMap()
-        }
+        })
 
         // Zone metrics from engine (outside sync to avoid deadlock)
         if let engine = geofenceEngine {

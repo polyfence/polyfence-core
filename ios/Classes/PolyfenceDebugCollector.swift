@@ -1,6 +1,8 @@
 import Foundation
 import CoreLocation
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /**
  * Collects debug information for the Polyfence plugin

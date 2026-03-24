@@ -1,7 +1,9 @@
 import Foundation
 import CoreLocation
 import UserNotifications
+#if canImport(UIKit)
 import UIKit
+#endif
 
 // GeoMath is already available in the same module
 
@@ -1242,40 +1244,34 @@ extension LocationTracker: CLLocationManagerDelegate {
      * Calculate distance to nearest zone
      */
     private func calculateDistanceToNearestZone(_ location: CLLocation) -> Double {
-        do {
-            // Get current zones from GeofenceEngine
-            let zones = geofenceEngine.getCurrentZones()
-            guard !zones.isEmpty else {
-                return Double.greatestFiniteMagnitude // No zones configured
-            }
-
-            var nearestDistance = Double.greatestFiniteMagnitude
-
-            for zone in zones {
-                let distance: Double
-
-                if zone.isCircle {
-                    distance = calculateDistanceToCircleZone(location: location, zone: zone)
-                } else if zone.isPolygon {
-                    distance = calculateDistanceToPolygonZone(location: location, zone: zone)
-                } else {
-                    distance = Double.greatestFiniteMagnitude
-                }
-
-                if distance < nearestDistance {
-                    nearestDistance = distance
-                }
-            }
-
-            if smartConfig.enableDebugLogging {
-                NSLog("%@", "\(Self.TAG): Nearest zone distance: \(nearestDistance)m")
-            }
-            return nearestDistance
-
-        } catch {
-            NSLog("\(Self.TAG): Error calculating zone distance: \(error.localizedDescription)")
-            return Double.greatestFiniteMagnitude // Fallback to no optimization
+        // Get current zones from GeofenceEngine
+        let zones = geofenceEngine.getCurrentZones()
+        guard !zones.isEmpty else {
+            return Double.greatestFiniteMagnitude // No zones configured
         }
+
+        var nearestDistance = Double.greatestFiniteMagnitude
+
+        for zone in zones {
+            let distance: Double
+
+            if zone.isCircle {
+                distance = calculateDistanceToCircleZone(location: location, zone: zone)
+            } else if zone.isPolygon {
+                distance = calculateDistanceToPolygonZone(location: location, zone: zone)
+            } else {
+                distance = Double.greatestFiniteMagnitude
+            }
+
+            if distance < nearestDistance {
+                nearestDistance = distance
+            }
+        }
+
+        if smartConfig.enableDebugLogging {
+            NSLog("%@", "\(Self.TAG): Nearest zone distance: \(nearestDistance)m")
+        }
+        return nearestDistance
     }
 
     /**
