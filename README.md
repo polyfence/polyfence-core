@@ -7,7 +7,7 @@
 
 Standalone, privacy-first geofencing engine for iOS and Android. Runs entirely on-device with zero cloud dependencies.
 
-Polyfence Core is the shared native engine that powers [polyfence-flutter](https://github.com/blackabass/polyfence-flutter) and future framework bridges (React Native, native iOS/Android SDKs). It contains all geofencing algorithms, GPS management, and telemetry aggregation logic.
+Polyfence Core is the shared native engine that powers [polyfence-flutter](https://github.com/blackabass/polyfence-flutter). It contains all geofencing algorithms, GPS management, and telemetry aggregation logic.
 
 ## Features
 
@@ -152,9 +152,7 @@ Polyfence Core is the engine layer consumed by platform-specific bridges:
 ```
 polyfence-core (this repo)
   │
-  ├── polyfence-flutter           Flutter plugin bridge (depends on polyfence-core)
-  ├── polyfence-react-native      React Native bridge (planned, depends on polyfence-core)
-  └── polyfence-intelligence      ML add-on (planned, depends on polyfence-core)
+  └── polyfence-flutter           Flutter plugin bridge (depends on polyfence-core)
 ```
 
 ### Key Classes
@@ -168,7 +166,7 @@ polyfence-core (this repo)
 | `TelemetryAggregator` | Collects session-level performance metrics natively — activity distribution, GPS interval histogram, zone transitions, dwell durations, device category. No GPS coordinates or PII. |
 | `ZonePersistence` | Persists zone definitions and inside/outside state to local storage. Enables state recovery after app restarts. |
 | `SmartGpsConfig` | Configuration model — accuracy profiles (max, balanced, battery-optimal, adaptive), update strategies, proximity/movement/battery/dwell/cluster/schedule/activity settings. |
-| `PolyfenceCoreDelegate` | Bridge interface — platform bridges (Flutter, RN) implement this to receive events from the engine. |
+| `PolyfenceCoreDelegate` | Bridge interface — platform bridges implement this to receive events from the engine. |
 | `GeoMath` | Shared geometry algorithms — haversine distance, ray-casting point-in-polygon, point-to-segment distance. Used by GeofenceEngine and LocationTracker. |
 | `PolyfenceErrorManager` | Structured error reporting with typed errors, context, and correlation IDs. |
 | `PolyfenceDebugCollector` | Collects debug information (system status, performance metrics, battery stats, zone status, recent errors). |
@@ -219,7 +217,6 @@ Telemetry is **opt-out** (enabled by default) when used through platform bridges
 |---|---|
 | **[polyfence-core](https://github.com/blackabass/polyfence-core)** | This repo — shared native engine |
 | **[polyfence-flutter](https://github.com/blackabass/polyfence-flutter)** | Flutter plugin that wraps polyfence-core |
-| polyfence-react-native | React Native bridge (planned) |
 
 ## Building from Source
 
