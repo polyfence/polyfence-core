@@ -58,6 +58,37 @@ jobs:
       - name: Build and test Swift package (iOS Simulator)
         run: bash scripts/ci-ios-swift-tests.sh PolyfenceCore
 
+  android-instrumented:
+    name: Android Instrumented Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Run Android Instrumented Tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          enable-kvm: true
+          script: cd android && ./gradlew connectedAndroidTest
+
   code-quality:
     name: Code Quality Checks
     runs-on: ubuntu-latest

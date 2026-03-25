@@ -17,8 +17,8 @@ for XCODE in \
   for PHONE in "iPhone 16" "iPhone 15"; do
     for OS in 18.5 18.4 18.2 18.1 17.5; do
       DEST="platform=iOS Simulator,name=${PHONE},OS=${OS}"
-      if xcodebuild build -scheme "$SCHEME" -destination "$DEST" \
-        && xcodebuild test -scheme "$SCHEME" -destination "$DEST"; then
+      # test implies build — running both doubles compile time on CI.
+      if xcodebuild test -scheme "$SCHEME" -destination "$DEST"; then
         exit 0
       fi
     done
