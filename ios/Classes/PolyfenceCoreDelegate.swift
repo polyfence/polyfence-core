@@ -15,7 +15,4 @@ protocol PolyfenceCoreDelegate: AnyObject {
 
     /// Called when an error occurs
     func onError(_ errorData: [String: Any])
-
-    /// Check if tracking is currently enabled in the bridge layer
-    func isTrackingEnabled() -> Bool
 }

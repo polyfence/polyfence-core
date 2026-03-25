@@ -74,7 +74,6 @@ val delegate = object : PolyfenceCoreDelegate {
     override fun onLocationUpdate(locationData: Map<String, Any>) {}
     override fun onPerformanceEvent(performanceData: Map<String, Any>) {}
     override fun onError(errorData: Map<String, Any>) {}
-    override fun isTrackingEnabled(): Boolean = true
 }
 
 // 2. Start the LocationTracker service
@@ -119,7 +118,6 @@ class MyGeoDelegate: NSObject, PolyfenceCoreDelegate {
     func onLocationUpdate(_ locationData: [String: Any]) {}
     func onPerformanceEvent(_ performanceData: [String: Any]) {}
     func onError(_ errorData: [String: Any]) {}
-    func isTrackingEnabled() -> Bool { return true }
 }
 
 let delegate = MyGeoDelegate()
@@ -186,7 +184,6 @@ interface PolyfenceCoreDelegate {
     fun onLocationUpdate(locationData: Map<String, Any>)
     fun onPerformanceEvent(performanceData: Map<String, Any>)
     fun onError(errorData: Map<String, Any>)
-    fun isTrackingEnabled(): Boolean
 }
 ```
 
@@ -197,7 +194,6 @@ protocol PolyfenceCoreDelegate: AnyObject {
     func onLocationUpdate(_ locationData: [String: Any])
     func onPerformanceEvent(_ performanceData: [String: Any])
     func onError(_ errorData: [String: Any])
-    func isTrackingEnabled() -> Bool
 }
 ```
 
