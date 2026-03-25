@@ -213,9 +213,7 @@ internal class TelemetryAggregator {
     func getSessionTelemetry(
         geofenceEngine: GeofenceEngine? = nil
     ) -> [String: Any] {
-        var result: [String: Any] = [:]
-
-        syncQueue.sync(execute: {
+        var result: [String: Any] = syncQueue.sync { () -> [String: Any] in
             // Finalize activity tracking
             let now = currentTimeMs()
             let actElapsed = now - lastActivityChangeTime
@@ -318,8 +316,8 @@ internal class TelemetryAggregator {
             telemetry.osVersionMajor = osVersionMajor
             telemetry.chargingDuringSession = chargingDuringSession
 
-            result = telemetry.toMap()
-        })
+            return telemetry.toMap()
+        }
 
         // Zone metrics from engine (outside sync to avoid deadlock)
         if let engine = geofenceEngine {
