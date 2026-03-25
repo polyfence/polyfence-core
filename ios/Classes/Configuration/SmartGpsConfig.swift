@@ -412,8 +412,8 @@ struct SmartGpsConfigFactory {
         let normalized = normalize(value)
 
         for candidate in allCases {
-            if let enumCase = candidate as? T, normalize(enumCase.rawValue) == normalized {
-                return enumCase
+            if normalize(candidate.rawValue) == normalized {
+                return candidate
             }
         }
 

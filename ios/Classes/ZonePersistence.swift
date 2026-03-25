@@ -104,8 +104,8 @@ class ZonePersistence {
      * Load all zones from persistent storage
      * Thread-safe: Uses sync to ensure consistent reads
      */
-    func loadAllZones() throws -> [String: (String, String, [String: Any])] {
-        return try persistenceQueue.sync {
+    func loadAllZones() -> [String: (String, String, [String: Any])] {
+        return persistenceQueue.sync {
             let zoneIds = self.userDefaults.stringArray(forKey: ZonePersistence.ZONES_KEY) ?? []
             var zones: [String: (String, String, [String: Any])] = [:]
 

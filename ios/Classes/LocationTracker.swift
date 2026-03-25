@@ -212,7 +212,7 @@ class LocationTracker: NSObject {
         fallbackTimer?.invalidate()
         fallbackTimer = nil
         // Request permissions if needed
-        let authorizationStatus = CLLocationManager.authorizationStatus()
+        let authorizationStatus = locationManager?.authorizationStatus ?? .notDetermined
 
         if authorizationStatus == .notDetermined {
             pendingStartAfterAuthorization = true
@@ -346,7 +346,7 @@ class LocationTracker: NSObject {
      * Request permissions using the same CLLocationManager instance
      */
     func requestPermissions(always: Bool = false) {
-        let status = CLLocationManager.authorizationStatus()
+        let status = locationManager?.authorizationStatus ?? .notDetermined
         if status == .notDetermined {
             pendingStartAfterAuthorization = false
             DispatchQueue.main.async { [weak self] in
@@ -378,7 +378,7 @@ class LocationTracker: NSObject {
     // MARK: - Private Methods
 
     private func startLocationUpdatesFlow() {
-        guard let locationManager = locationManager else { return }
+        guard locationManager != nil else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
@@ -429,31 +429,27 @@ class LocationTracker: NSObject {
     private func restoreZonesFromStorage() {
         guard let zonePersistence = zonePersistence else { return }
 
-        do {
-            let savedZones = try zonePersistence.loadAllZones()
-            geofenceQueue.sync { [weak self] in
-                guard let self = self else { return }
-                for (_, zoneInfo) in savedZones {
-                    let (id, name, data) = zoneInfo
-                    if self.geofenceEngine.getZoneName(id) != nil {
-                        continue
-                    }
-                    do {
-                        try self.geofenceEngine.addZone(zoneId: id, zoneName: name, zoneData: data)
-                    } catch {
-                        // Failed to restore zone
-                    }
+        let savedZones = zonePersistence.loadAllZones()
+        geofenceQueue.sync { [weak self] in
+            guard let self = self else { return }
+            for (_, zoneInfo) in savedZones {
+                let (id, name, data) = zoneInfo
+                if self.geofenceEngine.getZoneName(id) != nil {
+                    continue
                 }
-
-                // Load persisted zone states AFTER zones are loaded
-                // This restores the "inside/outside" state from before service restart
-                self.geofenceEngine.loadPersistedZoneStates()
+                do {
+                    try self.geofenceEngine.addZone(zoneId: id, zoneName: name, zoneData: data)
+                } catch {
+                    // Failed to restore zone
+                }
             }
 
-            NSLog("[LocationTracker] Restored \(savedZones.count) zones from storage")
-        } catch {
-            // Failed to restore zones
+            // Load persisted zone states AFTER zones are loaded
+            // This restores the "inside/outside" state from before service restart
+            self.geofenceEngine.loadPersistedZoneStates()
         }
+
+        NSLog("[LocationTracker] Restored \(savedZones.count) zones from storage")
     }
 
     /**
@@ -596,13 +592,9 @@ class LocationTracker: NSObject {
             trigger: nil  // Immediate delivery
         )
 
-        notificationCenter?.add(request) { error in
+        notificationCenter?.add(request) { _ in
             DispatchQueue.main.async {
-                if let error = error {
-                    // Notification delivery failed
-                } else {
-                    // Notification posted successfully
-                }
+                // Notification delivery completed
             }
         }
     }

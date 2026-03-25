@@ -39,8 +39,11 @@ internal class PolyfenceDebugCollector {
     private func collectSystemStatus() -> [String: Any] {
         return syncQueue.sync {
             return [
-                "isLocationPermissionGranted": CLLocationManager.authorizationStatus() == .authorizedAlways || CLLocationManager.authorizationStatus() == .authorizedWhenInUse,
-                "isBackgroundLocationEnabled": CLLocationManager.authorizationStatus() == .authorizedAlways,
+                "isLocationPermissionGranted": {
+                    let mgr = CLLocationManager()
+                    return mgr.authorizationStatus == .authorizedAlways || mgr.authorizationStatus == .authorizedWhenInUse
+                }(),
+                "isBackgroundLocationEnabled": CLLocationManager().authorizationStatus == .authorizedAlways,
                 "isBatteryOptimizationDisabled": true, // iOS doesn't have battery optimization like Android
                 "isGpsEnabled": CLLocationManager.locationServicesEnabled(),
                 "isWakeLockAcquired": false, // iOS doesn't use wake locks
