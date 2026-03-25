@@ -37,7 +37,7 @@ class GeofenceEngineTests: XCTestCase {
             "radius": 100.0
         ]
 
-        engine.addZone("zone-1", zoneName: "NYC Zone", zoneData: zoneData)
+        engine.addZone(zoneId: "zone-1", zoneName: "NYC Zone", zoneData: zoneData)
 
         XCTAssertTrue(engine.hasZones(), "Engine should have zones")
         XCTAssertEqual(engine.getZoneCount(), 1, "Zone count should be 1")
@@ -56,7 +56,7 @@ class GeofenceEngineTests: XCTestCase {
             "polygon": polygon
         ]
 
-        engine.addZone("poly-1", zoneName: "Square Zone", zoneData: zoneData)
+        engine.addZone(zoneId: "poly-1", zoneName: "Square Zone", zoneData: zoneData)
 
         XCTAssertEqual(engine.getZoneName("poly-1"), "Square Zone", "Zone name should match")
     }
@@ -67,7 +67,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 100.0
         ]
-        engine.addZone("zone-1", zoneName: "NYC Zone", zoneData: zoneData)
+        engine.addZone(zoneId: "zone-1", zoneName: "NYC Zone", zoneData: zoneData)
         XCTAssertTrue(engine.hasZones(), "Zone should exist")
 
         engine.removeZone("zone-1")
@@ -83,11 +83,11 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 100.0
         ]
-        engine.addZone("zone-1", zoneName: "Zone 1", zoneData: zoneData)
-        engine.addZone("zone-2", zoneName: "Zone 2", zoneData: zoneData)
-        engine.addZone("zone-3", zoneName: "Zone 3", zoneData: zoneData)
+        engine.addZone(zoneId: "zone-1", zoneName: "Zone 1", zoneData: zoneData)
+        engine.addZone(zoneId: "zone-2", zoneName: "Zone 2", zoneData: zoneData)
+        engine.addZone(zoneId: "zone-3", zoneName: "Zone 3", zoneData: zoneData)
 
-        engine.removeAllZones()
+        engine.clearAllZones()
 
         XCTAssertFalse(engine.hasZones(), "No zones should remain")
         XCTAssertEqual(engine.getZoneCount(), 0, "Zone count should be 0")
@@ -101,7 +101,7 @@ class GeofenceEngineTests: XCTestCase {
         let invalidZoneData: [String: Any] = ["type": "invalid"]
 
         XCTAssertThrowsError(
-            try engine.addZone("bad-zone", zoneName: "Bad Zone", zoneData: invalidZoneData)
+            try engine.addZone(zoneId: "bad-zone", zoneName: "Bad Zone", zoneData: invalidZoneData)
         ) { error in
             XCTAssertTrue(error is GeofenceEngineError)
         }
@@ -114,7 +114,7 @@ class GeofenceEngineTests: XCTestCase {
         ]
 
         XCTAssertThrowsError(
-            try engine.addZone("no-center", zoneName: "Bad Circle", zoneData: badCircle)
+            try engine.addZone(zoneId: "no-center", zoneName: "Bad Circle", zoneData: badCircle)
         ) { error in
             XCTAssertTrue(error is GeofenceEngineError)
         }
@@ -127,7 +127,7 @@ class GeofenceEngineTests: XCTestCase {
         ]
 
         XCTAssertThrowsError(
-            try engine.addZone("no-radius", zoneName: "Bad Circle", zoneData: badCircle)
+            try engine.addZone(zoneId: "no-radius", zoneName: "Bad Circle", zoneData: badCircle)
         ) { error in
             XCTAssertTrue(error is GeofenceEngineError)
         }
@@ -141,7 +141,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0 // 1km radius
         ]
-        try! engine.addZone("circle-1", zoneName: "NYC", zoneData: zoneData)
+        try! engine.addZone(zoneId: "circle-1", zoneName: "NYC", zoneData: zoneData)
 
         // Point ~100m from center (within 1km)
         let location = createLocation(40.7138, -74.0050)
@@ -157,7 +157,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 100.0 // 100m radius
         ]
-        try! engine.addZone("circle-1", zoneName: "Tiny Zone", zoneData: zoneData)
+        try! engine.addZone(zoneId: "circle-1", zoneName: "Tiny Zone", zoneData: zoneData)
 
         // Point ~2km from center (outside 100m)
         let location = createLocation(40.7328, -74.0260)
@@ -173,7 +173,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 0.0 // Zero radius
         ]
-        try! engine.addZone("point-zone", zoneName: "Point Zone", zoneData: zoneData)
+        try! engine.addZone(zoneId: "point-zone", zoneName: "Point Zone", zoneData: zoneData)
 
         // Exact point
         let exactLocation = createLocation(40.7128, -74.0060)
@@ -201,7 +201,7 @@ class GeofenceEngineTests: XCTestCase {
             "type": "polygon",
             "polygon": polygon
         ]
-        try! engine.addZone("square-1", zoneName: "Square", zoneData: zoneData)
+        try! engine.addZone(zoneId: "square-1", zoneName: "Square", zoneData: zoneData)
 
         // Center of square
         let location = createLocation(0.5, 0.5)
@@ -222,7 +222,7 @@ class GeofenceEngineTests: XCTestCase {
             "type": "polygon",
             "polygon": polygon
         ]
-        try! engine.addZone("square-1", zoneName: "Square", zoneData: zoneData)
+        try! engine.addZone(zoneId: "square-1", zoneName: "Square", zoneData: zoneData)
 
         // Well outside
         let location = createLocation(2.0, 2.0)
@@ -243,7 +243,7 @@ class GeofenceEngineTests: XCTestCase {
             "type": "polygon",
             "polygon": polygon
         ]
-        try! engine.addZone("square-1", zoneName: "Square", zoneData: zoneData)
+        try! engine.addZone(zoneId: "square-1", zoneName: "Square", zoneData: zoneData)
 
         // Point on edge
         let location = createLocation(0.5, 0.0)
@@ -265,7 +265,7 @@ class GeofenceEngineTests: XCTestCase {
             "type": "polygon",
             "polygon": polygon
         ]
-        try! engine.addZone("square-1", zoneName: "Square", zoneData: zoneData)
+        try! engine.addZone(zoneId: "square-1", zoneName: "Square", zoneData: zoneData)
 
         // Exact vertex
         let location = createLocation(0.0, 0.0)
@@ -286,7 +286,7 @@ class GeofenceEngineTests: XCTestCase {
         ]
 
         XCTAssertThrowsError(
-            try engine.addZone("bad-poly", zoneName: "Bad Polygon", zoneData: zoneData)
+            try engine.addZone(zoneId: "bad-poly", zoneName: "Bad Polygon", zoneData: zoneData)
         ) { error in
             XCTAssertTrue(error is GeofenceEngineError)
         }
@@ -306,7 +306,7 @@ class GeofenceEngineTests: XCTestCase {
         ]
 
         XCTAssertThrowsError(
-            try engine.addZone("self-intersect", zoneName: "Bad Polygon", zoneData: zoneData)
+            try engine.addZone(zoneId: "self-intersect", zoneName: "Bad Polygon", zoneData: zoneData)
         ) { error in
             XCTAssertTrue(error is GeofenceEngineError)
         }
@@ -322,7 +322,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("dwell-zone", zoneName: "Dwell Test", zoneData: zoneData)
+        try! engine.addZone(zoneId: "dwell-zone", zoneName: "Dwell Test", zoneData: zoneData)
         engine.setValidationConfig(requireConfirmation: false)
 
         // Enter zone
@@ -342,7 +342,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("dwell-zone", zoneName: "Dwell Test", zoneData: zoneData)
+        try! engine.addZone(zoneId: "dwell-zone", zoneName: "Dwell Test", zoneData: zoneData)
         engine.setValidationConfig(requireConfirmation: false)
 
         // Enter zone
@@ -367,7 +367,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("dwell-zone", zoneName: "Dwell Test", zoneData: zoneData)
+        try! engine.addZone(zoneId: "dwell-zone", zoneName: "Dwell Test", zoneData: zoneData)
         engine.setValidationConfig(requireConfirmation: false)
 
         let location = createLocation(40.7138, -74.0050)
@@ -394,7 +394,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("dwell-zone", zoneName: "Dwell Test", zoneData: zoneData)
+        try! engine.addZone(zoneId: "dwell-zone", zoneName: "Dwell Test", zoneData: zoneData)
         engine.setValidationConfig(requireConfirmation: false)
 
         // Enter zone
@@ -419,7 +419,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("no-dwell", zoneName: "No Dwell", zoneData: zoneData)
+        try! engine.addZone(zoneId: "no-dwell", zoneName: "No Dwell", zoneData: zoneData)
         engine.setValidationConfig(requireConfirmation: false)
 
         let location = createLocation(40.7138, -74.0050)
@@ -439,7 +439,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("flip-zone", zoneName: "Flip Test", zoneData: zoneData)
+        try! engine.addZone(zoneId: "flip-zone", zoneName: "Flip Test", zoneData: zoneData)
 
         // Enter event
         let insideLocation = createLocation(40.7138, -74.0050)
@@ -460,7 +460,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("slow-zone", zoneName: "Slow Test", zoneData: zoneData)
+        try! engine.addZone(zoneId: "slow-zone", zoneName: "Slow Test", zoneData: zoneData)
 
         // For testing, reversal detection requires actual time passage
         let isReversal = engine.isRecentReversal("slow-zone", eventType: "EXIT")
@@ -475,7 +475,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("persist-zone", zoneName: "Persist Test", zoneData: zoneData)
+        try! engine.addZone(zoneId: "persist-zone", zoneName: "Persist Test", zoneData: zoneData)
         engine.setValidationConfig(requireConfirmation: false)
 
         // Enter
@@ -496,7 +496,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("state-zone", zoneName: "State Test", zoneData: zoneData)
+        try! engine.addZone(zoneId: "state-zone", zoneName: "State Test", zoneData: zoneData)
 
         let states = engine.getCurrentZoneStates()
         XCTAssertTrue(states.keys.contains("state-zone"), "States map should have zone")
@@ -514,8 +514,8 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 50.0, "longitude": -80.0],
             "radius": 100.0
         ]
-        try! engine.addZone("near-zone", zoneName: "Near", zoneData: insideZone)
-        try! engine.addZone("far-zone", zoneName: "Far", zoneData: outsideZone)
+        try! engine.addZone(zoneId: "near-zone", zoneName: "Near", zoneData: insideZone)
+        try! engine.addZone(zoneId: "far-zone", zoneName: "Far", zoneData: outsideZone)
         engine.setValidationConfig(requireConfirmation: false)
 
         let location = createLocation(40.7138, -74.0050)
@@ -536,7 +536,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("accuracy-zone", zoneName: "Accuracy Test", zoneData: zoneData)
+        try! engine.addZone(zoneId: "accuracy-zone", zoneName: "Accuracy Test", zoneData: zoneData)
 
         // Create location with poor accuracy (100m, exceeds 50m threshold)
         let poorLocation = createLocation(40.7138, -74.0050, accuracy: 100.0)
@@ -553,7 +553,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("zero-zone", zoneName: "Zero Test", zoneData: zoneData)
+        try! engine.addZone(zoneId: "zero-zone", zoneName: "Zero Test", zoneData: zoneData)
 
         let badLocation = CLLocation(latitude: 0.0, longitude: 0.0)
         engine.checkLocation(badLocation)
@@ -579,7 +579,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 100.0
         ]
-        try! engine.addZone("exist-zone", zoneName: "Exists", zoneData: zoneData)
+        try! engine.addZone(zoneId: "exist-zone", zoneName: "Exists", zoneData: zoneData)
 
         XCTAssertEqual(engine.getZoneName("exist-zone"), "Exists", "Should retrieve existing zone name")
         XCTAssertNil(engine.getZoneName("no-zone"), "Should return nil for non-existent zone")
@@ -594,16 +594,16 @@ class GeofenceEngineTests: XCTestCase {
 
         XCTAssertEqual(engine.getZoneCount(), 0, "Initial count should be 0")
 
-        try! engine.addZone("z1", zoneName: "Zone 1", zoneData: zoneData)
+        try! engine.addZone(zoneId: "z1", zoneName: "Zone 1", zoneData: zoneData)
         XCTAssertEqual(engine.getZoneCount(), 1, "Count should be 1")
 
-        try! engine.addZone("z2", zoneName: "Zone 2", zoneData: zoneData)
+        try! engine.addZone(zoneId: "z2", zoneName: "Zone 2", zoneData: zoneData)
         XCTAssertEqual(engine.getZoneCount(), 2, "Count should be 2")
 
         engine.removeZone("z1")
         XCTAssertEqual(engine.getZoneCount(), 1, "Count should be 1 after removal")
 
-        engine.removeAllZones()
+        engine.clearAllZones()
         XCTAssertEqual(engine.getZoneCount(), 0, "Count should be 0 after clear")
     }
 
@@ -615,7 +615,7 @@ class GeofenceEngineTests: XCTestCase {
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 1000.0
         ]
-        try! engine.addZone("validate-zone", zoneName: "Validate Test", zoneData: zoneData)
+        try! engine.addZone(zoneId: "validate-zone", zoneName: "Validate Test", zoneData: zoneData)
 
         let location = createLocation(40.7138, -74.0050)
         engine.checkLocation(location)
