@@ -84,10 +84,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build and test iOS via Swift Package Manager
-        run: |
-          swift build
-          swift test
+      - name: Build and test Swift package (iOS Simulator)
+        run: bash scripts/ci-ios-swift-tests.sh PolyfenceCore
 
 
   publish-maven:

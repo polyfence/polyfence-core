@@ -55,10 +55,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build and test iOS via Swift Package Manager
-        run: |
-          xcodebuild build -scheme PolyfenceCore -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' | tail -20
-          xcodebuild test -scheme PolyfenceCore -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' | tail -20
+      - name: Build and test Swift package (iOS Simulator)
+        run: bash scripts/ci-ios-swift-tests.sh PolyfenceCore
 
   code-quality:
     name: Code Quality Checks

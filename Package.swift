@@ -16,6 +16,11 @@ let package = Package(
         .target(
             name: "PolyfenceCore",
             path: "ios/Classes"
+        ),
+        .testTarget(
+            name: "PolyfenceCoreTests",
+            dependencies: ["PolyfenceCore"],
+            path: "test/ios"
         )
     ]
 )
