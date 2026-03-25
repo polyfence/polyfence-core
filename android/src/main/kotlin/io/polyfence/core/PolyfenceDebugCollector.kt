@@ -29,6 +29,14 @@ internal class PolyfenceDebugCollector {
         private var totalDetectionLatency = 0.0
         private var restartCount = 0
         private var pluginVersion: String? = null // Stored during initialization
+        private var geofenceEngine: GeofenceEngine? = null
+
+        /**
+         * Set reference to GeofenceEngine for zone status collection
+         */
+        fun setGeofenceEngine(engine: GeofenceEngine) {
+            geofenceEngine = engine
+        }
 
         fun collectDebugInfo(context: Context): Map<String, Any> {
             return mapOf(
@@ -87,11 +95,25 @@ internal class PolyfenceDebugCollector {
         }
 
         private fun collectZoneStatus(): Map<String, Any> {
-            // This would integrate with the actual zone management system
+            val engine = geofenceEngine
+            if (engine == null) {
+                return mapOf(
+                    "activeZones" to 0,
+                    "circleZones" to 0,
+                    "polygonZones" to 0,
+                    "lastZoneUpdate" to System.currentTimeMillis(),
+                    "zoneEventCounts" to emptyMap<String, Int>()
+                )
+            }
+
+            val zones = engine.getCurrentZones()
+            val circleCount = zones.count { it.isCircle }
+            val polygonCount = zones.count { it.isPolygon }
+
             return mapOf(
-                "activeZones" to 0, // Would get from actual zone manager
-                "circleZones" to 0,
-                "polygonZones" to 0,
+                "activeZones" to zones.size,
+                "circleZones" to circleCount,
+                "polygonZones" to polygonCount,
                 "lastZoneUpdate" to System.currentTimeMillis(),
                 "zoneEventCounts" to emptyMap<String, Int>()
             )

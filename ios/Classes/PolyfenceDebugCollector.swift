@@ -16,6 +16,7 @@ internal class PolyfenceDebugCollector {
     private var errorHistory: [[String: Any]] = []
     private var sessionStartTime = Date()
     var pluginVersion: String? = nil // Stored from bridge during initialization
+    weak var geofenceEngine: GeofenceEngine?
 
     private init() {}
 
@@ -85,15 +86,17 @@ internal class PolyfenceDebugCollector {
     }
 
     private func collectZoneStatus() -> [String: Any] {
-        return syncQueue.sync {
-            return [
-                "activeZones": self.performanceMetrics["activeZones"] as? Int ?? 0,
-                "circleZones": self.performanceMetrics["circleZones"] as? Int ?? 0,
-                "polygonZones": self.performanceMetrics["polygonZones"] as? Int ?? 0,
-                "lastZoneUpdate": (self.performanceMetrics["lastZoneUpdate"] as? Date ?? Date()).timeIntervalSince1970 * 1000,
-                "zoneEventCounts": self.performanceMetrics["zoneEventCounts"] as? [String: Int] ?? [:]
-            ]
-        }
+        let zones = geofenceEngine?.getCurrentZones() ?? []
+        let circleCount = zones.filter { $0.isCircle }.count
+        let polygonCount = zones.filter { $0.isPolygon }.count
+
+        return [
+            "activeZones": zones.count,
+            "circleZones": circleCount,
+            "polygonZones": polygonCount,
+            "lastZoneUpdate": Date().timeIntervalSince1970 * 1000,
+            "zoneEventCounts": [String: Int]()
+        ]
     }
 
     private func getRecentErrors() -> [[String: Any]] {
