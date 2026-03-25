@@ -332,9 +332,22 @@ class GeofenceEngine {
     }
 
     /**
-     * Add zone for monitoring
+     * Add zone for monitoring using typed configuration
      */
+    func addZone(config: ZoneConfig, completion: ((Bool) -> Void)? = nil) throws {
+        try addZoneInternal(zoneId: config.id, zoneName: config.name, zoneData: config.toMap(), completion: completion)
+    }
+
+    /**
+     * Add zone for monitoring from a raw dictionary.
+     * Prefer `addZone(config:)` with `ZoneConfig` for type safety.
+     */
+    @available(*, deprecated, message: "Use addZone(config:) with ZoneConfig for type safety")
     func addZone(zoneId: String, zoneName: String, zoneData: [String: Any], completion: ((Bool) -> Void)? = nil) throws {
+        try addZoneInternal(zoneId: zoneId, zoneName: zoneName, zoneData: zoneData, completion: completion)
+    }
+
+    private func addZoneInternal(zoneId: String, zoneName: String, zoneData: [String: Any], completion: ((Bool) -> Void)? = nil) throws {
         let memoryBefore = getCurrentMemoryUsage()
 
         let zone = try ZoneData.fromMap(zoneId: zoneId, zoneName: zoneName, zoneData: zoneData)

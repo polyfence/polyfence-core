@@ -142,8 +142,21 @@ class GeofenceEngine {
     )
 
     /**
-     * Add zone for monitoring
+     * Add zone for monitoring using typed configuration
      */
+    fun addZone(config: ZoneConfig) {
+        @Suppress("DEPRECATION")
+        addZone(config.id, config.name, config.toMap())
+    }
+
+    /**
+     * Add zone for monitoring from a raw map.
+     * Prefer [addZone(ZoneConfig)] for type safety.
+     */
+    @Deprecated(
+        message = "Use addZone(ZoneConfig) for type safety",
+        replaceWith = ReplaceWith("addZone(ZoneConfig.circle(...)) or addZone(ZoneConfig.polygon(...))")
+    )
     fun addZone(zoneId: String, zoneName: String, zoneData: Map<String, Any>) {
         try {
             val zone = ZoneData.fromMap(zoneId, zoneName, zoneData)
