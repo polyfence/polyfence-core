@@ -64,6 +64,9 @@ internal enum GeoMath {
     /**
      * Calculate distance between two points using Haversine formula.
      *
+     * Reference: Sinnott, R.W. (1984). "Virtues of the Haversine."
+     * Sky & Telescope 68(2): 158-159.
+     *
      * - Parameters:
      *   - lat1: First point latitude
      *   - lng1: First point longitude
@@ -91,6 +94,9 @@ internal enum GeoMath {
     /**
      * Point-in-polygon detection using ray casting algorithm.
      * Handles antimeridian-crossing polygons by normalizing longitudes.
+     *
+     * Reference: Shimrat, M. (1962). "Algorithm 112: Position of point relative to polygon."
+     * Communications of the ACM 5(8): 434. DOI: 10.1145/368637.368653
      *
      * - Parameters:
      *   - point: Point coordinate
@@ -145,6 +151,7 @@ internal enum GeoMath {
      * Distance from a point to a line segment in meters.
      * Uses cosLat-adjusted flat-earth projection for accurate distance calculation.
      * Handles antimeridian-crossing segments by normalizing longitudes.
+     * Distance calculation via vector projection (classical geometric method).
      *
      * - Parameters:
      *   - p: Point coordinate
