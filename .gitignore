@@ -48,3 +48,7 @@ prompts/
 *.aar
 *.framework
 *.xcframework
+
+# macOS
+Icon?
+Icon\r
