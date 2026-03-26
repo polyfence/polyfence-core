@@ -46,8 +46,8 @@ When reporting a vulnerability, please include:
 PolyfenceCore is a standalone native geofencing engine with a minimal attack surface:
 
 - **No network calls** — the library never connects to the internet
-- **No data collection** — no telemetry, analytics, or usage tracking
-- **No file system access** — no persistent storage (zone state is in-memory only; `ZonePersistence` writes to the host app's storage, not its own)
+- **No vendor telemetry** — no analytics or usage tracking to Polyfence or third parties
+- **On-disk persistence is optional** — the engine keeps working zone state **in memory** while running. It does not create a separate app sandbox or library-owned files. **`ZonePersistence`** (attachable via **`setZonePersistence`**, and registered automatically by bundled **`LocationTracker`**) serializes zones and inside/outside state to the **host app's** SharedPreferences (Android) or UserDefaults (iOS), which is **not encrypted** by the library
 - **No permissions required** — the library itself requires no device permissions; GPS and activity recognition permissions are requested by the host app
 - **Pure computation** — haversine distance, ray-casting point-in-polygon, and boundary distance calculations
 
@@ -66,8 +66,9 @@ The same geofencing algorithms (haversine, ray-casting, point-to-segment distanc
 ### For Developers Using PolyfenceCore
 
 1. **Zone Data**
-   - Zone coordinates are held in memory by the engine
-   - `ZonePersistence` serializes zones to the host app's local storage (SharedPreferences on Android, UserDefaults on iOS) — this is **not encrypted** by default
+   - Zone coordinates are held in memory by the engine during operation
+   - If your integration enables **`ZonePersistence`** (directly or via **`LocationTracker`**), zones and inside/outside state are written to the host app's local storage (SharedPreferences on Android, UserDefaults on iOS) — **not encrypted** by default
+   - If you use the engine **without** persistence, nothing is written by the library; you remain responsible for any data you persist yourself
    - For sensitive zones (private addresses, restricted facilities), encrypt coordinates before passing them to the engine or use platform-specific encrypted storage
 
 2. **Location Data**
@@ -105,6 +106,8 @@ No third-party libraries beyond platform SDKs.
 
 ## Contact
 
-- **Security issues**: hello@polyfence.io
-- **General questions**: Open a GitHub issue with `question` label
+- **Security vulnerabilities**: hello@polyfence.io
+- **Privacy practices (this library)**: see [PRIVACY.md](./PRIVACY.md) — hello@polyfence.io
+- **General inquiries**: hello@polyfence.io
+- **Technical questions**: Open a GitHub issue with `question` label
 - **Commercial support**: https://polyfence.io

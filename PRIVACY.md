@@ -10,17 +10,20 @@
 
 PolyfenceCore is a standalone on-device geofencing engine. It performs geometric calculations (haversine distance, ray-casting point-in-polygon, boundary distance) on coordinates your app provides. That's all it does.
 
-**This library makes no network calls, collects no data, and has no telemetry.**
+**This library makes no network calls to Polyfence, includes no vendor telemetry, and does not send us any data.** All geofence math runs on-device. Any zone or location data remains under **your** app's control.
 
 ---
 
 ## What This Library Does NOT Do
 
 - Does not connect to the internet
-- Does not collect, transmit, or store any data
-- Does not include analytics, telemetry, or usage tracking
+- Does not phone home, track usage, or send analytics to Polyfence or third parties
 - Does not request device permissions (GPS and activity recognition permissions are your app's responsibility)
-- Does not persist data to disk (zone state is held in memory; `ZonePersistence` writes to your app's local storage, not its own)
+
+### Local persistence (optional)
+
+- **By default**, working zone state lives **in memory** only while the engine runs
+- If your integration enables **`ZonePersistence`** (you attach it with **`setZonePersistence`**, or you use **`LocationTracker`**, which registers it for you), zones and inside/outside state are written to **your app's** local storage (SharedPreferences on Android, UserDefaults on iOS), not a separate library-owned container. That storage is **not encrypted** by this library
 
 ---
 
@@ -47,6 +50,7 @@ PolyfenceCore gives you the geofencing engine. What you build with it — and ho
 
 ## Contact
 
-- **Privacy questions:** [hello@polyfence.io](mailto:hello@polyfence.io)
-- **Security vulnerabilities:** [hello@polyfence.io](mailto:hello@polyfence.io)
-- **General support:** [GitHub Issues](https://github.com/blackabass/polyfence-core/issues)
+- **Privacy questions and data requests:** [hello@polyfence.io](mailto:hello@polyfence.io)
+- **Security vulnerabilities:** [hello@polyfence.io](mailto:hello@polyfence.io) (or see [SECURITY.md](./SECURITY.md))
+- **General inquiries:** [hello@polyfence.io](mailto:hello@polyfence.io)
+- **Technical support:** [GitHub Issues](https://github.com/blackabass/polyfence-core/issues)
