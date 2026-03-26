@@ -12,7 +12,7 @@ PolyfenceCore is the shared native geofencing engine powering [polyfence-flutter
 
 PolyfenceCore contains **platform-agnostic native engines** — pure Kotlin (Android) and Swift (iOS) with zero framework bridge dependencies.
 
-- Geofencing algorithms (haversine, ray-casting, Douglas-Peucker) live here
+- Geofencing algorithms (haversine, ray-casting, point-to-segment distance) live here
 - Location tracking, activity recognition, and telemetry aggregation live here
 - Flutter/React Native bridge code does NOT belong here — that goes in the respective bridge repos
 

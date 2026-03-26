@@ -203,7 +203,7 @@ These algorithms are implemented identically in Kotlin and Swift for cross-platf
 |---|---|---|
 | **Haversine** | Great-circle distance between GPS coordinates | O(1) |
 | **Ray-casting** | Point-in-polygon detection | O(n) where n = polygon vertices |
-| **Douglas-Peucker** | Polygon simplification for large boundaries | O(n log n) |
+| **Point-to-segment distance** | Boundary proximity calculation | O(1) |
 
 ## Privacy
 
