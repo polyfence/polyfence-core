@@ -343,6 +343,13 @@ class LocationTracker: NSObject {
     }
 
     /**
+     * Set which bridge platform is calling core.
+     */
+    func setBridgePlatform(_ platform: String) {
+        telemetryAggregator.setBridgePlatform(platform: platform)
+    }
+
+    /**
      * Request permissions using the same CLLocationManager instance
      */
     func requestPermissions(always: Bool = false) {

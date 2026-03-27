@@ -63,6 +63,7 @@ internal class TelemetryAggregator {
     private var chargingDuringSession: Bool = false
     private var accuracyProfile: String?
     private var updateStrategy: String?
+    private var bridgePlatform: String = ""
     private var sessionStartHour: Int
 
     init() {
@@ -211,6 +212,14 @@ internal class TelemetryAggregator {
         }
     }
 
+    /// Set which bridge layer is calling this core (e.g. "flutter", "react-native").
+    /// Called once during plugin initialization.
+    func setBridgePlatform(platform: String) {
+        syncQueue.async(flags: .barrier) {
+            self.bridgePlatform = platform
+        }
+    }
+
     // ========================================================================
     // OUTPUT — returns complete v2 enhanced payload
     // ========================================================================
@@ -313,6 +322,7 @@ internal class TelemetryAggregator {
             telemetry.batteryLevelEnd = batteryLevelEnd
             telemetry.accuracyProfile = accuracyProfile
             telemetry.updateStrategy = updateStrategy
+            telemetry.bridgePlatform = bridgePlatform
             telemetry.activityDistribution = activityDist
             telemetry.gpsIntervalDistribution = intervalDist
             telemetry.stationaryRatio = statRatio

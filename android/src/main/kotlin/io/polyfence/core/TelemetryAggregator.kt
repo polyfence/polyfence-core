@@ -68,6 +68,7 @@ internal class TelemetryAggregator {
     private var chargingDuringSession: Boolean = false
     private var accuracyProfile: String? = null
     private var updateStrategy: String? = null
+    private var bridgePlatform: String = ""
 
     // ========================================================================
     // RECORDING METHODS — called by engines during session
@@ -237,6 +238,16 @@ internal class TelemetryAggregator {
         }
     }
 
+    /**
+     * Set which bridge layer is calling this core (e.g. "flutter", "react-native").
+     * Called once during plugin initialization.
+     */
+    fun setBridgePlatform(platform: String) {
+        synchronized(lock) {
+            bridgePlatform = platform
+        }
+    }
+
     // ========================================================================
     // OUTPUT — returns complete v2 enhanced payload (snapshot, no mutation)
     // ========================================================================
@@ -282,6 +293,7 @@ internal class TelemetryAggregator {
         val snapshotAccuracyProfile: String?
         val snapshotUpdateStrategy: String?
         val snapshotSessionStartHour: Int
+        val snapshotBridgePlatform: String
 
         synchronized(lock) {
             now = System.currentTimeMillis()
@@ -335,6 +347,7 @@ internal class TelemetryAggregator {
             snapshotAccuracyProfile = accuracyProfile
             snapshotUpdateStrategy = updateStrategy
             snapshotSessionStartHour = sessionStartHour
+            snapshotBridgePlatform = bridgePlatform
         }
 
         // Compute derived values from snapshot (no lock needed)
@@ -430,7 +443,8 @@ internal class TelemetryAggregator {
             deviceCategory = snapshotDeviceCategory,
             osVersionMajor = snapshotOsVersionMajor,
             chargingDuringSession = snapshotChargingDuringSession,
-            sessionStartHour = snapshotSessionStartHour
+            sessionStartHour = snapshotSessionStartHour,
+            bridgePlatform = snapshotBridgePlatform
         )
 
         return telemetry.toMap()

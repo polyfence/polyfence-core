@@ -13,6 +13,7 @@ data class SessionTelemetry(
     var pluginVersion: String? = null,
     var industryCategory: String? = null,
     var useCase: String? = null,
+    var bridgePlatform: String? = null,
 
     // --- Core metrics (accumulated by TelemetryAggregator) ---
     var detectionsTotal: Int = 0,
@@ -88,6 +89,7 @@ data class SessionTelemetry(
         pluginVersion?.let { map["plugin_version"] = it }
         industryCategory?.let { map["industry_category"] = it }
         useCase?.let { map["use_case"] = it }
+        bridgePlatform?.let { map["bridge_platform"] = it }
 
         map["detections_total"] = detectionsTotal
         map["detection_time_avg_ms"] = detectionTimeAvgMs

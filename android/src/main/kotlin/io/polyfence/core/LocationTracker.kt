@@ -65,6 +65,9 @@ class LocationTracker : Service() {
         // Pending activity settings (stored until tracking starts)
         private var pendingActivitySettings: ActivitySettings? = null
 
+        // Pending bridge platform (stored until service creates TelemetryAggregator)
+        private var pendingBridgePlatform: String? = null
+
         /**
          * Store activity settings to be applied when tracking starts
          */
@@ -115,6 +118,15 @@ class LocationTracker : Service() {
          */
         fun isInScheduledWindow(): Boolean {
             return trackingScheduler?.isCurrentlyInScheduledWindow() ?: true
+        }
+
+        /**
+         * Set which bridge platform is calling core (e.g. "flutter", "react-native").
+         * Stored as pending if service not yet created; applied in onCreate.
+         */
+        fun setBridgePlatform(platform: String) {
+            pendingBridgePlatform = platform
+            currentInstance?.telemetryAggregator?.setBridgePlatform(platform)
         }
 
         /**
@@ -246,6 +258,11 @@ class LocationTracker : Service() {
 
         // Set current instance for static access to zone states
         currentInstance = this
+
+        // Apply pending bridge platform set before service existed
+        pendingBridgePlatform?.let { platform ->
+            telemetryAggregator.setBridgePlatform(platform)
+        }
 
         // Log device info for debugging battery issues on Samsung/etc
         DeviceOptimization.logDeviceInfo(TAG)

@@ -10,6 +10,7 @@ struct SessionTelemetry {
     var pluginVersion: String? = nil
     var industryCategory: String? = nil
     var useCase: String? = nil
+    var bridgePlatform: String? = nil
 
     // --- Core metrics ---
     var detectionsTotal: Int = 0
@@ -69,6 +70,7 @@ struct SessionTelemetry {
         if let v = pluginVersion { map["plugin_version"] = v }
         if let v = industryCategory { map["industry_category"] = v }
         if let v = useCase { map["use_case"] = v }
+        if let v = bridgePlatform { map["bridge_platform"] = v }
 
         map["detections_total"] = detectionsTotal
         map["detection_time_avg_ms"] = detectionTimeAvgMs

@@ -178,6 +178,7 @@ class TelemetryAggregatorTest {
         aggregator.setConfig("balanced", "intelligent")
         aggregator.setDeviceInfo("samsung_budget", 13)
         aggregator.setBatteryInfo(85.0, 72.0, false)
+        aggregator.setBridgePlatform("flutter")
 
         aggregator.recordActivityChange("walking")
         aggregator.recordGpsUpdate(intervalMs = 10000, accuracyM = 15.0f)
@@ -215,7 +216,8 @@ class TelemetryAggregatorTest {
             "avg_dwell_duration_minutes",
             "device_category",
             "os_version_major",
-            "charging_during_session"
+            "charging_during_session",
+            "bridge_platform"
         )
 
         for (key in expectedKeys) {
@@ -232,6 +234,7 @@ class TelemetryAggregatorTest {
         assertEquals(85.0, telemetry["battery_level_start"])
         assertEquals(72.0, telemetry["battery_level_end"])
         assertEquals(true, telemetry["had_detection"])
+        assertEquals("flutter", telemetry["bridge_platform"])
     }
 
     // ========================================================================
