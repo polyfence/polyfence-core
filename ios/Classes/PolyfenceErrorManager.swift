@@ -4,23 +4,23 @@ import Foundation
  * Manages error reporting to developers.
  * Framework-agnostic — receives a plain closure from the bridge layer.
  */
-internal class PolyfenceErrorManager {
-    static let shared = PolyfenceErrorManager()
+public class PolyfenceErrorManager {
+    public static let shared = PolyfenceErrorManager()
     private var errorCallback: (([String: Any]) -> Void)?
 
     private init() {}
 
-    func initialize(errorCallback: @escaping ([String: Any]) -> Void) {
+    public func initialize(errorCallback: @escaping ([String: Any]) -> Void) {
         self.errorCallback = errorCallback
         NSLog("PolyfenceErrorManager: Error callback registered")
     }
 
-    func dispose() {
+    public func dispose() {
         errorCallback = nil
         NSLog("PolyfenceErrorManager: Error callback cleared")
     }
 
-    func reportError(
+    public func reportError(
         type: String,
         message: String,
         context: [String: Any] = [:],
@@ -38,7 +38,7 @@ internal class PolyfenceErrorManager {
         NSLog("PolyfenceErrorManager: Error reported: %@ - %@", type, message)
     }
 
-    func reportGpsError(type: String, details: String = "") {
+    public func reportGpsError(type: String, details: String = "") {
         let context: [String: Any] = [
             "platform": "ios",
             "details": details
@@ -51,7 +51,7 @@ internal class PolyfenceErrorManager {
         )
     }
 
-    func reportServiceError(type: String, details: String = "") {
+    public func reportServiceError(type: String, details: String = "") {
         let context: [String: Any] = [
             "platform": "ios",
             "details": details
@@ -64,7 +64,7 @@ internal class PolyfenceErrorManager {
         )
     }
 
-    func reportBatteryError(type: String, details: String = "") {
+    public func reportBatteryError(type: String, details: String = "") {
         let context: [String: Any] = [
             "platform": "ios",
             "details": details,

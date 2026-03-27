@@ -68,6 +68,9 @@ class LocationTracker : Service() {
         // Pending bridge platform (stored until service creates TelemetryAggregator)
         private var pendingBridgePlatform: String? = null
 
+        // Pending core delegate (stored until service starts)
+        private var pendingCoreDelegate: PolyfenceCoreDelegate? = null
+
         /**
          * Store activity settings to be applied when tracking starts
          */
@@ -130,6 +133,16 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Set the core delegate for receiving events from the engine.
+         * If the service is already running, applies immediately.
+         * Otherwise stored as pending and applied in onCreate.
+         */
+        fun setPendingCoreDelegate(delegate: PolyfenceCoreDelegate?) {
+            pendingCoreDelegate = delegate
+            currentInstance?.setCoreDelegate(delegate)
+        }
+
+        /**
          * Collect session telemetry from all native components.
          */
         fun getSessionTelemetry(): Map<String, Any?> {
@@ -175,7 +188,7 @@ class LocationTracker : Service() {
      * Set the core delegate for receiving events from the engine.
      * Platform bridges (Flutter, React Native, etc.) implement PolyfenceCoreDelegate.
      */
-    fun setCoreDelegate(delegate: PolyfenceCoreDelegate) {
+    fun setCoreDelegate(delegate: PolyfenceCoreDelegate?) {
         coreDelegate = delegate
     }
 
@@ -262,6 +275,11 @@ class LocationTracker : Service() {
         // Apply pending bridge platform set before service existed
         pendingBridgePlatform?.let { platform ->
             telemetryAggregator.setBridgePlatform(platform)
+        }
+
+        // Apply pending core delegate set before service existed
+        pendingCoreDelegate?.let { delegate ->
+            coreDelegate = delegate
         }
 
         // Log device info for debugging battery issues on Samsung/etc

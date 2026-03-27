@@ -3,7 +3,7 @@ import CoreLocation
 
 /// Protocol for platform bridges (Flutter, React Native, etc.) to receive
 /// events from the core engine. Each bridge implements this protocol.
-protocol PolyfenceCoreDelegate: AnyObject {
+public protocol PolyfenceCoreDelegate: AnyObject {
     /// Called when a geofence event occurs (ENTER, EXIT, DWELL, RECOVERY_*)
     func onGeofenceEvent(_ eventData: [String: Any])
 

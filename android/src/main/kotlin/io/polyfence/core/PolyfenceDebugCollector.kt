@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentLinkedDeque
  * Collects comprehensive debug information for developers
  * Integrates with existing analytics and error systems
  */
-internal class PolyfenceDebugCollector {
+class PolyfenceDebugCollector {
     companion object {
         private val performanceMetrics = ConcurrentHashMap<String, Any>()
         private val errorHistory = ConcurrentLinkedDeque<Map<String, Any>>()

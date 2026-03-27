@@ -8,14 +8,14 @@ import UIKit
  * Collects debug information for the Polyfence plugin
  * Provides system status, performance metrics, and error history
  */
-internal class PolyfenceDebugCollector {
-    static let shared = PolyfenceDebugCollector()
+public class PolyfenceDebugCollector {
+    public static let shared = PolyfenceDebugCollector()
 
     private let syncQueue = DispatchQueue(label: "io.polyfence.PolyfenceDebugCollector")
     private var performanceMetrics: [String: Any] = [:]
     private var errorHistory: [[String: Any]] = []
     private var sessionStartTime = Date()
-    var pluginVersion: String? = nil // Stored from bridge during initialization
+    public var pluginVersion: String? = nil
     weak var geofenceEngine: GeofenceEngine?
 
     private init() {}
@@ -23,11 +23,11 @@ internal class PolyfenceDebugCollector {
     /**
      * Set plugin version from bridge (called during initialization)
      */
-    func setPluginVersion(_ version: String) {
+    public func setPluginVersion(_ version: String) {
         pluginVersion = version
     }
 
-    func collectDebugInfo() -> [String: Any] {
+    public func collectDebugInfo() -> [String: Any] {
         return [
             "systemStatus": collectSystemStatus(),
             "performance": collectPerformanceMetrics(),
@@ -58,7 +58,7 @@ internal class PolyfenceDebugCollector {
 
     private func collectPerformanceMetrics() -> [String: Any] {
         return syncQueue.sync {
-            let uptime = Date().timeIntervalSince(self.sessionStartTime) * 1000 // Convert to milliseconds
+            let uptime = Date().timeIntervalSince(self.sessionStartTime) * 1000
 
             return [
                 "uptime": Int(uptime),
@@ -105,11 +105,10 @@ internal class PolyfenceDebugCollector {
         }
     }
 
-    func getErrorHistory(timeRangeMs: Int64?, errorTypes: [String]?) -> [[String: Any]] {
+    public func getErrorHistory(timeRangeMs: Int64?, errorTypes: [String]?) -> [[String: Any]] {
         return syncQueue.sync {
             var filteredErrors = self.errorHistory
 
-            // Filter by time range
             if let timeRangeMs = timeRangeMs {
                 let cutoffTime = Date().timeIntervalSince1970 * 1000 - Double(timeRangeMs)
                 filteredErrors = filteredErrors.filter { error in
@@ -118,7 +117,6 @@ internal class PolyfenceDebugCollector {
                 }
             }
 
-            // Filter by error types
             if let errorTypes = errorTypes, !errorTypes.isEmpty {
                 filteredErrors = filteredErrors.filter { error in
                     let type = error["type"] as? String
@@ -130,8 +128,7 @@ internal class PolyfenceDebugCollector {
         }
     }
 
-    // Helper methods for recording metrics
-    func recordLocationUpdate(accuracy: Double) {
+    public func recordLocationUpdate(accuracy: Double) {
         syncQueue.async { [weak self] in
             self?.performanceMetrics["lastAccuracy"] = accuracy
             self?.performanceMetrics["lastLocationUpdate"] = Date()
@@ -140,7 +137,7 @@ internal class PolyfenceDebugCollector {
         }
     }
 
-    func recordZoneDetection(latencyMs: Int64) {
+    public func recordZoneDetection(latencyMs: Int64) {
         syncQueue.async { [weak self] in
             let count = (self?.performanceMetrics["zoneDetectionCount"] as? Int) ?? 0
             self?.performanceMetrics["zoneDetectionCount"] = count + 1
@@ -151,10 +148,9 @@ internal class PolyfenceDebugCollector {
         }
     }
 
-    func addErrorToHistory(_ error: [String: Any]) {
+    public func addErrorToHistory(_ error: [String: Any]) {
         syncQueue.async { [weak self] in
             self?.errorHistory.append(error)
-            // Keep history size manageable
             if (self?.errorHistory.count ?? 0) > 100 {
                 self?.errorHistory.removeFirst()
             }
@@ -175,7 +171,7 @@ internal class PolyfenceDebugCollector {
         }
 
         if kerr == KERN_SUCCESS {
-            return Int(info.resident_size / 1024 / 1024) // Convert to MB
+            return Int(info.resident_size / 1024 / 1024)
         }
         return 0
     }
