@@ -212,7 +212,7 @@ class TelemetryAggregatorTest {
             "boundary_events_count",
             "zone_count",
             "zone_transition_count",
-            "avg_dwell_minutes",
+            "avg_dwell_duration_minutes",
             "device_category",
             "os_version_major",
             "charging_during_session"
@@ -369,6 +369,6 @@ class TelemetryAggregatorTest {
         aggregator.recordDwellComplete(durationMinutes = 30.0)
 
         val telemetry = aggregator.getSessionTelemetry()
-        assertEquals("Average dwell should be 20 minutes", 20.0, telemetry["avg_dwell_minutes"] as Double, 0.01)
+        assertEquals("Average dwell should be 20 minutes", 20.0, telemetry["avg_dwell_duration_minutes"] as Double, 0.01)
     }
 }
