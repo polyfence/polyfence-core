@@ -1,13 +1,13 @@
 # Polyfence Core
 
-[![CI](https://github.com/blackabass/polyfence-core/actions/workflows/ci.yml/badge.svg)](https://github.com/blackabass/polyfence-core/actions/workflows/ci.yml)
+[![CI](https://github.com/polyfence/polyfence-core/actions/workflows/ci.yml/badge.svg)](https://github.com/polyfence/polyfence-core/actions/workflows/ci.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/io.polyfence/polyfence-core)](https://central.sonatype.com/artifact/io.polyfence/polyfence-core)
 [![CocoaPods](https://img.shields.io/cocoapods/v/PolyfenceCore)](https://cocoapods.org/pods/PolyfenceCore)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Standalone, privacy-first geofencing engine for iOS and Android. Runs entirely on-device with zero cloud dependencies.
 
-Polyfence Core is the shared native engine that powers [polyfence-flutter](https://github.com/blackabass/polyfence-flutter). It contains all geofencing algorithms, GPS management, and telemetry aggregation logic.
+Polyfence Core is the shared native engine that powers [polyfence-flutter](https://github.com/polyfence/polyfence-flutter). It contains all geofencing algorithms, GPS management, and telemetry aggregation logic.
 
 ## Features
 
@@ -43,7 +43,7 @@ pod 'PolyfenceCore', '~> 1.0.0'
 Add to your `Package.swift` dependencies:
 
 ```swift
-.package(url: "https://github.com/blackabass/polyfence-core.git", from: "1.0.0")
+.package(url: "https://github.com/polyfence/polyfence-core.git", from: "1.0.0")
 ```
 
 Or in Xcode: File → Add Package Dependencies → paste the repository URL.
@@ -209,14 +209,14 @@ These algorithms are implemented identically in Kotlin and Swift for cross-platf
 
 All geofencing runs on-device. Zero location data is transmitted by default.
 
-Telemetry is **opt-out** (enabled by default) when used through platform bridges like polyfence-flutter. The `TelemetryAggregator` in this library collects anonymous aggregate metrics — detection latency, GPS accuracy, battery drain, zone type counts. No GPS coordinates, zone definitions, user identifiers, or PII. Native consumers building custom bridges control telemetry defaults in their own configuration. See [polyfence-flutter TELEMETRY.md](https://github.com/blackabass/polyfence-flutter/blob/main/doc/TELEMETRY.md) for full details.
+Telemetry is **opt-out** (enabled by default) when used through platform bridges like polyfence-flutter. The `TelemetryAggregator` in this library collects anonymous aggregate metrics — detection latency, GPS accuracy, battery drain, zone type counts. No GPS coordinates, zone definitions, user identifiers, or PII. Native consumers building custom bridges control telemetry defaults in their own configuration. See [polyfence-flutter TELEMETRY.md](https://github.com/polyfence/polyfence-flutter/blob/main/doc/TELEMETRY.md) for full details.
 
 ## Relationship to Other Repos
 
 | Repository | What It Is |
 |---|---|
-| **[polyfence-core](https://github.com/blackabass/polyfence-core)** | This repo — shared native engine |
-| **[polyfence-flutter](https://github.com/blackabass/polyfence-flutter)** | Flutter plugin that wraps polyfence-core |
+| **[polyfence-core](https://github.com/polyfence/polyfence-core)** | This repo — shared native engine |
+| **[polyfence-flutter](https://github.com/polyfence/polyfence-flutter)** | Flutter plugin that wraps polyfence-core |
 
 ## Building from Source
 

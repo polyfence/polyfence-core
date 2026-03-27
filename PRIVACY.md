@@ -43,7 +43,7 @@ PolyfenceCore gives you the geofencing engine. What you build with it — and ho
 
 ## Related Privacy Policies
 
-- **Polyfence Flutter plugin** (wraps this library, adds optional telemetry): [PRIVACY.md](https://github.com/blackabass/polyfence-flutter/blob/main/PRIVACY.md)
+- **Polyfence Flutter plugin** (wraps this library, adds optional telemetry): [PRIVACY.md](https://github.com/polyfence/polyfence-flutter/blob/main/PRIVACY.md)
 - **Polyfence platform** (polyfence.io SaaS): [polyfence.io/privacy](https://polyfence.io/privacy)
 
 ---
@@ -53,4 +53,4 @@ PolyfenceCore gives you the geofencing engine. What you build with it — and ho
 - **Privacy questions and data requests:** [hello@polyfence.io](mailto:hello@polyfence.io)
 - **Security vulnerabilities:** [hello@polyfence.io](mailto:hello@polyfence.io) (or see [SECURITY.md](./SECURITY.md))
 - **General inquiries:** [hello@polyfence.io](mailto:hello@polyfence.io)
-- **Technical support:** [GitHub Issues](https://github.com/blackabass/polyfence-core/issues)
+- **Technical support:** [GitHub Issues](https://github.com/polyfence/polyfence-core/issues)

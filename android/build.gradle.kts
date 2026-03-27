@@ -79,7 +79,7 @@ mavenPublishing {
     pom {
         name.set("Polyfence Core")
         description.set("Privacy-first polygon and circle geofencing engine for Android")
-        url.set("https://github.com/blackabass/polyfence-core")
+        url.set("https://github.com/polyfence/polyfence-core")
         licenses {
             license {
                 name.set("MIT License")
@@ -94,9 +94,9 @@ mavenPublishing {
             }
         }
         scm {
-            connection.set("scm:git:git://github.com/blackabass/polyfence-core.git")
-            developerConnection.set("scm:git:ssh://github.com/blackabass/polyfence-core.git")
-            url.set("https://github.com/blackabass/polyfence-core")
+            connection.set("scm:git:git://github.com/polyfence/polyfence-core.git")
+            developerConnection.set("scm:git:ssh://github.com/polyfence/polyfence-core.git")
+            url.set("https://github.com/polyfence/polyfence-core")
         }
     }
 }

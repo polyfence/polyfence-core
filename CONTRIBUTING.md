@@ -1,6 +1,6 @@
 # Contributing to PolyfenceCore
 
-PolyfenceCore is the shared native geofencing engine powering [polyfence-flutter](https://github.com/blackabass/polyfence-flutter) and future platform bridges. Contributions are welcome.
+PolyfenceCore is the shared native geofencing engine powering [polyfence-flutter](https://github.com/polyfence/polyfence-flutter) and future platform bridges. Contributions are welcome.
 
 ## Code of Conduct
 
@@ -10,7 +10,7 @@ Be respectful, constructive, and collaborative. See [CODE_OF_CONDUCT.md](CODE_OF
 
 ### Reporting Bugs
 
-Before creating bug reports, please check existing [issues](https://github.com/blackabass/polyfence-core/issues) to avoid duplicates.
+Before creating bug reports, please check existing [issues](https://github.com/polyfence/polyfence-core/issues) to avoid duplicates.
 
 **When filing a bug report, include:**
 - **Clear title** describing the issue
