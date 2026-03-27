@@ -31,6 +31,7 @@ internal class TelemetryAggregator {
     // --- GPS accuracy at events ---
     private var eventAccuracies: [Double] = []
     private var eventSpeeds: [Double] = []
+    private var eventDistances: [Double] = []
     private var boundaryEventsCount: Int = 0
     private let boundaryThresholdM: Double = 50.0
 
@@ -62,6 +63,7 @@ internal class TelemetryAggregator {
     private var chargingDuringSession: Bool = false
     private var accuracyProfile: String?
     private var updateStrategy: String?
+    private var sessionStartHour: Int
 
     init() {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
@@ -69,6 +71,7 @@ internal class TelemetryAggregator {
         lastIntervalChangeTime = now
         sessionStartTime = now
         osVersionMajor = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        sessionStartHour = Calendar.current.component(.hour, from: Date())
     }
 
     private func currentTimeMs() -> Int64 {
@@ -136,6 +139,10 @@ internal class TelemetryAggregator {
 
             self.eventAccuracies.append(accuracyM)
             self.eventSpeeds.append(speedMps)
+
+            if distanceM >= 0 {
+                self.eventDistances.append(distanceM)
+            }
 
             if distanceM >= 0 && distanceM < self.boundaryThresholdM {
                 self.boundaryEventsCount += 1
@@ -275,8 +282,12 @@ internal class TelemetryAggregator {
             let totalDetections = detTimes.count
             let falseRatio = totalDetections > 0 ? Double(falseEventCount) / Double(totalDetections) : 0.0
 
-            // Dwell average
+            // Dwell statistics
             let avgDwell = dwellDurations.isEmpty ? 0.0 : dwellDurations.reduce(0, +) / Double(dwellDurations.count)
+            let maxDwell = dwellDurations.isEmpty ? 0.0 : dwellDurations.max() ?? 0.0
+
+            // Distance to boundary average
+            let avgDistanceToBoundary = eventDistances.isEmpty ? 0.0 : eventDistances.reduce(0, +) / Double(eventDistances.count)
 
             // Stationary ratio
             let statRatio = sessionDurationMs > 0 ? Double(totalStationary) / Double(sessionDurationMs) : 0.0
@@ -313,9 +324,13 @@ internal class TelemetryAggregator {
             telemetry.boundaryEventsCount = boundaryEventsCount
             telemetry.zoneTransitionCount = zoneTransitionCount
             telemetry.avgDwellMinutes = avgDwell
+            telemetry.maxDwellMinutes = maxDwell
+            telemetry.dwellDurationsMinutes = dwellDurations
+            telemetry.distanceToBoundaryAvgM = avgDistanceToBoundary
             telemetry.deviceCategory = deviceCategory
             telemetry.osVersionMajor = osVersionMajor
             telemetry.chargingDuringSession = chargingDuringSession
+            telemetry.sessionStartHour = sessionStartHour
 
             result = telemetry.toMap()
         }
@@ -350,6 +365,7 @@ internal class TelemetryAggregator {
 
             self.eventAccuracies.removeAll()
             self.eventSpeeds.removeAll()
+            self.eventDistances.removeAll()
             self.boundaryEventsCount = 0
 
             self.lastEventPerZone.removeAll()
@@ -358,6 +374,7 @@ internal class TelemetryAggregator {
             self.detectionTimesMs.removeAll()
             self.firstDetectionTimeMs = nil
             self.sessionStartTime = now
+            self.sessionStartHour = Calendar.current.component(.hour, from: Date())
 
             self.zoneTransitionCount = 0
             self.dwellDurations.removeAll()

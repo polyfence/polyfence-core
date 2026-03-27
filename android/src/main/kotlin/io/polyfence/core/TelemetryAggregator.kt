@@ -2,25 +2,27 @@ package io.polyfence.core
 
 import android.os.Build
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
-import kotlin.math.abs
 
 /**
  * Aggregates all session telemetry in the native layer (D016).
  * Each platform bridge (Flutter, RN, future) only calls getSessionTelemetry()
  * and POSTs the result — no per-bridge telemetry reimplementation needed.
  *
- * Thread-safe: all mutable state uses ConcurrentHashMap or synchronized blocks.
+ * Thread-safe: all mutable state is accessed under a single lock object,
+ * matching the Swift implementation's DispatchQueue(attributes: .concurrent)
+ * with barrier writes and sync reads.
  */
 internal class TelemetryAggregator {
 
+    private val lock = Any()
+
     // --- Activity distribution ---
-    private val activityTimeMs = ConcurrentHashMap<String, Long>()
+    private val activityTimeMs = mutableMapOf<String, Long>()
     private var lastActivityChangeTime: Long = System.currentTimeMillis()
     private var lastTrackedActivity: String = "unknown"
 
     // --- GPS interval distribution ---
-    private val intervalTimeMs = ConcurrentHashMap<Long, Long>()
+    private val intervalTimeMs = mutableMapOf<Long, Long>()
     private var lastIntervalChangeTime: Long = System.currentTimeMillis()
     private var lastTrackedInterval: Long = 10_000L
     private var totalIntervalMs: Long = 0L
@@ -33,20 +35,22 @@ internal class TelemetryAggregator {
     // --- GPS accuracy at events ---
     private val eventAccuracies = mutableListOf<Double>()
     private val eventSpeeds = mutableListOf<Double>()
+    private val eventDistances = mutableListOf<Double>()
     private var boundaryEventsCount: Int = 0
     private val BOUNDARY_THRESHOLD_M = 50.0
 
     // --- False event tracking ---
     private val lastEventPerZone = ConcurrentHashMap<String, Pair<String, Long>>()
-    private val falseEventCount = AtomicInteger(0)
+    private var falseEventCount: Int = 0
 
     // --- Detection timing ---
     private val detectionTimesMs = mutableListOf<Double>()
     private var firstDetectionTimeMs: Long? = null
     private var sessionStartTime: Long = System.currentTimeMillis()
+    private var sessionStartHour: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
 
     // --- Zone metrics ---
-    private val zoneTransitionCount = AtomicInteger(0)
+    private var zoneTransitionCount: Int = 0
     private val dwellDurations = mutableListOf<Double>()
 
     // --- GPS health ---
@@ -54,7 +58,7 @@ internal class TelemetryAggregator {
     private var goodGpsReadings: Int = 0
 
     // --- Error tracking ---
-    private val errorCounts = ConcurrentHashMap<String, Int>()
+    private val errorCounts = mutableMapOf<String, Int>()
 
     // --- Device & config info ---
     private var deviceCategory: String? = null
@@ -74,18 +78,23 @@ internal class TelemetryAggregator {
      * Call BEFORE updating the current activity.
      */
     fun recordActivityChange(activityType: String) {
-        val now = System.currentTimeMillis()
-        val elapsed = now - lastActivityChangeTime
-        if (elapsed > 0) {
-            activityTimeMs[lastTrackedActivity] =
-                (activityTimeMs[lastTrackedActivity] ?: 0L) + elapsed
+        synchronized(lock) {
+            val now = System.currentTimeMillis()
+            val elapsed = now - lastActivityChangeTime
+            if (elapsed > 0) {
+                activityTimeMs[lastTrackedActivity] =
+                    (activityTimeMs[lastTrackedActivity] ?: 0L) + elapsed
+            }
+            lastActivityChangeTime = now
+            lastTrackedActivity = activityType.lowercase()
         }
-        lastActivityChangeTime = now
-        lastTrackedActivity = activityType.lowercase()
     }
 
     /**
-     * Finalize the last activity segment. Must be called before reading distribution.
+     * Finalize the last activity segment. Useful for callers who want to
+     * explicitly close the current activity window. Note: getSessionTelemetry()
+     * snapshots activity data without calling this, so it is safe to call
+     * getSessionTelemetry() without finalizing first.
      */
     fun finalizeActivityTracking() {
         recordActivityChange(lastTrackedActivity)
@@ -95,29 +104,31 @@ internal class TelemetryAggregator {
      * Record a GPS update with the current interval and accuracy.
      */
     fun recordGpsUpdate(intervalMs: Long, accuracyM: Float) {
-        // Interval histogram
-        val now = System.currentTimeMillis()
-        val elapsed = now - lastIntervalChangeTime
-        if (elapsed > 0) {
-            intervalTimeMs[lastTrackedInterval] =
-                (intervalTimeMs[lastTrackedInterval] ?: 0L) + elapsed
-        }
-        lastIntervalChangeTime = now
-        lastTrackedInterval = intervalMs
-        totalIntervalMs += intervalMs
-        intervalSampleCount++
+        synchronized(lock) {
+            // Interval histogram
+            val now = System.currentTimeMillis()
+            val elapsed = now - lastIntervalChangeTime
+            if (elapsed > 0) {
+                intervalTimeMs[lastTrackedInterval] =
+                    (intervalTimeMs[lastTrackedInterval] ?: 0L) + elapsed
+            }
+            lastIntervalChangeTime = now
+            lastTrackedInterval = intervalMs
+            totalIntervalMs += intervalMs
+            intervalSampleCount++
 
-        // GPS health
-        totalGpsReadings++
-        if (accuracyM <= 100.0f) {
-            goodGpsReadings++
+            // GPS health
+            totalGpsReadings++
+            if (accuracyM <= 100.0f) {
+                goodGpsReadings++
+            }
         }
     }
 
     /**
      * Record a geofence event with context.
-     * @param isEntry true for ENTER, false for EXIT
-     * @param isFalse true if this is a detected false event (reversal within 30s)
+     * @param zoneId zone identifier
+     * @param eventType ENTER or EXIT
      * @param distanceM distance to zone boundary in meters
      * @param speedMps device speed in m/s at event time
      * @param accuracyM GPS accuracy in meters at event time
@@ -131,51 +142,58 @@ internal class TelemetryAggregator {
         accuracyM: Double,
         detectionTimeMs: Double
     ) {
-        zoneTransitionCount.incrementAndGet()
+        synchronized(lock) {
+            zoneTransitionCount++
 
-        // Detection timing
-        synchronized(detectionTimesMs) { detectionTimesMs.add(detectionTimeMs) }
-        if (firstDetectionTimeMs == null) {
-            firstDetectionTimeMs = System.currentTimeMillis() - sessionStartTime
-        }
-
-        // Event context
-        synchronized(eventAccuracies) { eventAccuracies.add(accuracyM) }
-        synchronized(eventSpeeds) { eventSpeeds.add(speedMps) }
-
-        // Boundary events
-        if (distanceM >= 0 && distanceM < BOUNDARY_THRESHOLD_M) {
-            boundaryEventsCount++
-        }
-
-        // False event detection (reversal within 30s on same zone)
-        val lastEvent = lastEventPerZone[zoneId]
-        if (lastEvent != null) {
-            val (lastType, lastTime) = lastEvent
-            val timeSince = System.currentTimeMillis() - lastTime
-            if (timeSince <= 30_000L && lastType != eventType) {
-                falseEventCount.incrementAndGet()
+            // Detection timing
+            this.detectionTimesMs.add(detectionTimeMs)
+            if (firstDetectionTimeMs == null) {
+                firstDetectionTimeMs = System.currentTimeMillis() - sessionStartTime
             }
+
+            // Event context
+            eventAccuracies.add(accuracyM)
+            eventSpeeds.add(speedMps)
+            if (distanceM >= 0) {
+                eventDistances.add(distanceM)
+            }
+
+            // Boundary events
+            if (distanceM >= 0 && distanceM < BOUNDARY_THRESHOLD_M) {
+                boundaryEventsCount++
+            }
+
+            // False event detection (reversal within 30s on same zone)
+            val lastEvent = lastEventPerZone[zoneId]
+            if (lastEvent != null) {
+                val (lastType, lastTime) = lastEvent
+                val timeSince = System.currentTimeMillis() - lastTime
+                if (timeSince <= 30_000L && lastType != eventType) {
+                    falseEventCount++
+                }
+            }
+            lastEventPerZone[zoneId] = Pair(eventType, System.currentTimeMillis())
         }
-        lastEventPerZone[zoneId] = Pair(eventType, System.currentTimeMillis())
     }
 
     /**
      * Record dwell completion (on EXIT, with how long device stayed inside).
      */
     fun recordDwellComplete(durationMinutes: Double) {
-        synchronized(dwellDurations) { dwellDurations.add(durationMinutes) }
+        synchronized(lock) { dwellDurations.add(durationMinutes) }
     }
 
     /**
      * Record stationary state change.
      */
     fun recordStationaryChange(isStationary: Boolean) {
-        if (isStationary && stationaryStartTime == null) {
-            stationaryStartTime = System.currentTimeMillis()
-        } else if (!isStationary && stationaryStartTime != null) {
-            cumulativeStationaryMs += System.currentTimeMillis() - stationaryStartTime!!
-            stationaryStartTime = null
+        synchronized(lock) {
+            if (isStationary && stationaryStartTime == null) {
+                stationaryStartTime = System.currentTimeMillis()
+            } else if (!isStationary && stationaryStartTime != null) {
+                cumulativeStationaryMs += System.currentTimeMillis() - stationaryStartTime!!
+                stationaryStartTime = null
+            }
         }
     }
 
@@ -183,116 +201,197 @@ internal class TelemetryAggregator {
      * Record an error occurrence.
      */
     fun recordError(errorType: String) {
-        errorCounts[errorType] = (errorCounts[errorType] ?: 0) + 1
+        synchronized(lock) {
+            errorCounts[errorType] = (errorCounts[errorType] ?: 0) + 1
+        }
     }
 
     /**
      * Set device info (call once at session start).
      */
     fun setDeviceInfo(category: String, osVersion: Int) {
-        deviceCategory = category
-        osVersionMajor = osVersion
+        synchronized(lock) {
+            deviceCategory = category
+            osVersionMajor = osVersion
+        }
     }
 
     /**
      * Set battery info.
      */
     fun setBatteryInfo(startPercent: Double?, endPercent: Double?, chargingDuring: Boolean) {
-        if (startPercent != null) batteryLevelStart = startPercent
-        if (endPercent != null) batteryLevelEnd = endPercent
-        chargingDuringSession = chargingDuring
+        synchronized(lock) {
+            if (startPercent != null) batteryLevelStart = startPercent
+            if (endPercent != null) batteryLevelEnd = endPercent
+            chargingDuringSession = chargingDuring
+        }
     }
 
     /**
      * Set configuration context.
      */
     fun setConfig(accuracyProfile: String, updateStrategy: String) {
-        this.accuracyProfile = accuracyProfile
-        this.updateStrategy = updateStrategy
+        synchronized(lock) {
+            this.accuracyProfile = accuracyProfile
+            this.updateStrategy = updateStrategy
+        }
     }
 
     // ========================================================================
-    // OUTPUT — returns complete v2 enhanced payload
+    // OUTPUT — returns complete v2 enhanced payload (snapshot, no mutation)
     // ========================================================================
 
     /**
      * Returns the complete v2 enhanced session telemetry payload.
      * This matches the schema defined in intelligence/DATA_STRATEGY.md.
      *
-     * Call finalizeActivityTracking() before this to capture the last activity segment.
+     * This method takes a consistent snapshot of all mutable state under the lock,
+     * then computes derived values outside the lock. Calling this method does NOT
+     * mutate any aggregator state — safe to call multiple times.
      */
     fun getSessionTelemetry(
         geofenceEngine: GeofenceEngine? = null
     ): Map<String, Any?> {
-        // Finalize activity tracking
-        finalizeActivityTracking()
+        // Snapshot all mutable state under lock
+        val now: Long
+        val activitySnapshot: Map<String, Long>
+        val intervalSnapshot: Map<Long, Long>
+        val snapshotLastIntervalChangeTime: Long
+        val snapshotLastTrackedInterval: Long
+        val snapshotTotalIntervalMs: Long
+        val snapshotIntervalSampleCount: Int
+        val snapshotTotalStationary: Long
+        val detTimesSnapshot: List<Double>
+        val accuraciesSnapshot: List<Double>
+        val speedsSnapshot: List<Double>
+        val distancesSnapshot: List<Double>
+        val dwellsSnapshot: List<Double>
+        val snapshotSessionStartTime: Long
+        val snapshotFirstDetectionTimeMs: Long?
+        val snapshotTotalGpsReadings: Int
+        val snapshotGoodGpsReadings: Int
+        val snapshotFalseEventCount: Int
+        val snapshotZoneTransitionCount: Int
+        val snapshotBoundaryEventsCount: Int
+        val snapshotErrorCounts: Map<String, Int>
+        val snapshotDeviceCategory: String?
+        val snapshotOsVersionMajor: Int
+        val snapshotBatteryLevelStart: Double?
+        val snapshotBatteryLevelEnd: Double?
+        val snapshotChargingDuringSession: Boolean
+        val snapshotAccuracyProfile: String?
+        val snapshotUpdateStrategy: String?
+        val snapshotSessionStartHour: Int
 
-        // Finalize stationary tracking
-        var totalStationary = cumulativeStationaryMs
-        stationaryStartTime?.let {
-            totalStationary += System.currentTimeMillis() - it
+        synchronized(lock) {
+            now = System.currentTimeMillis()
+
+            // Snapshot activity distribution (finalize last segment without mutating state)
+            val actSnap = HashMap(activityTimeMs)
+            val actElapsed = now - lastActivityChangeTime
+            if (actElapsed > 0) {
+                actSnap[lastTrackedActivity] = (actSnap[lastTrackedActivity] ?: 0L) + actElapsed
+            }
+            activitySnapshot = actSnap
+
+            // Snapshot interval distribution
+            val intSnap = HashMap(intervalTimeMs)
+            val intElapsed = now - lastIntervalChangeTime
+            if (intElapsed > 0) {
+                intSnap[lastTrackedInterval] = (intSnap[lastTrackedInterval] ?: 0L) + intElapsed
+            }
+            intervalSnapshot = intSnap
+            snapshotLastIntervalChangeTime = lastIntervalChangeTime
+            snapshotLastTrackedInterval = lastTrackedInterval
+            snapshotTotalIntervalMs = totalIntervalMs
+            snapshotIntervalSampleCount = intervalSampleCount
+
+            // Snapshot stationary
+            var totalStat = cumulativeStationaryMs
+            stationaryStartTime?.let { totalStat += now - it }
+            snapshotTotalStationary = totalStat
+
+            // Snapshot lists
+            detTimesSnapshot = detectionTimesMs.toList()
+            accuraciesSnapshot = eventAccuracies.toList()
+            speedsSnapshot = eventSpeeds.toList()
+            distancesSnapshot = eventDistances.toList()
+            dwellsSnapshot = dwellDurations.toList()
+
+            // Snapshot scalars
+            snapshotSessionStartTime = sessionStartTime
+            snapshotFirstDetectionTimeMs = firstDetectionTimeMs
+            snapshotTotalGpsReadings = totalGpsReadings
+            snapshotGoodGpsReadings = goodGpsReadings
+            snapshotFalseEventCount = falseEventCount
+            snapshotZoneTransitionCount = zoneTransitionCount
+            snapshotBoundaryEventsCount = boundaryEventsCount
+            snapshotErrorCounts = errorCounts.toMap()
+            snapshotDeviceCategory = deviceCategory
+            snapshotOsVersionMajor = osVersionMajor
+            snapshotBatteryLevelStart = batteryLevelStart
+            snapshotBatteryLevelEnd = batteryLevelEnd
+            snapshotChargingDuringSession = chargingDuringSession
+            snapshotAccuracyProfile = accuracyProfile
+            snapshotUpdateStrategy = updateStrategy
+            snapshotSessionStartHour = sessionStartHour
         }
 
-        val sessionDurationMs = System.currentTimeMillis() - sessionStartTime
+        // Compute derived values from snapshot (no lock needed)
+        val sessionDurationMs = now - snapshotSessionStartTime
         val sessionDurationMinutes = sessionDurationMs / 60_000.0
 
-        // Compute activity distribution
-        val totalActivityMs = activityTimeMs.values.sum().toDouble()
+        // Activity distribution
+        val totalActivityMs = activitySnapshot.values.sum().toDouble()
         val activityDist = if (totalActivityMs > 0) {
-            activityTimeMs.mapValues { (_, ms) -> ms / totalActivityMs }
+            activitySnapshot.mapValues { (_, ms) -> ms / totalActivityMs }
         } else emptyMap()
 
-        // Compute GPS interval distribution
-        val finalIntervalTimeMs = HashMap(intervalTimeMs)
-        val elapsed = System.currentTimeMillis() - lastIntervalChangeTime
-        if (elapsed > 0) {
-            finalIntervalTimeMs[lastTrackedInterval] =
-                (finalIntervalTimeMs[lastTrackedInterval] ?: 0L) + elapsed
-        }
-        val totalIntervalTimeMs = finalIntervalTimeMs.values.sum().toDouble()
+        // GPS interval distribution
+        val totalIntervalTimeMs = intervalSnapshot.values.sum().toDouble()
         val intervalDist = if (totalIntervalTimeMs > 0) {
-            finalIntervalTimeMs.mapKeys { (k, _) -> k.toString() }
+            intervalSnapshot.mapKeys { (k, _) -> k.toString() }
                 .mapValues { (_, ms) -> ms / totalIntervalTimeMs }
         } else emptyMap()
 
-        // Compute detection stats
-        val detTimes = synchronized(detectionTimesMs) { detectionTimesMs.toList() }
-        val detAvg = if (detTimes.isNotEmpty()) detTimes.average() else 0.0
-        val detP95 = if (detTimes.isNotEmpty()) {
-            val sorted = detTimes.sorted()
+        // Detection stats
+        val detAvg = if (detTimesSnapshot.isNotEmpty()) detTimesSnapshot.average() else 0.0
+        val detP95 = if (detTimesSnapshot.isNotEmpty()) {
+            val sorted = detTimesSnapshot.sorted()
             sorted[(sorted.size * 0.95).toInt().coerceAtMost(sorted.size - 1)]
         } else 0.0
 
-        // Compute event context averages
-        val accuracies = synchronized(eventAccuracies) { eventAccuracies.toList() }
-        val speeds = synchronized(eventSpeeds) { eventSpeeds.toList() }
-        val avgAccuracyAtEvent = if (accuracies.isNotEmpty()) accuracies.average() else 0.0
-        val avgSpeedAtEvent = if (speeds.isNotEmpty()) speeds.average() else 0.0
+        // Event context averages
+        val avgAccuracyAtEvent = if (accuraciesSnapshot.isNotEmpty()) accuraciesSnapshot.average() else 0.0
+        val avgSpeedAtEvent = if (speedsSnapshot.isNotEmpty()) speedsSnapshot.average() else 0.0
+        val avgDistanceToBoundary = if (distancesSnapshot.isNotEmpty()) distancesSnapshot.average() else 0.0
 
-        // Compute false event ratio
-        val totalDetections = detTimes.size
+        // False event ratio
+        val totalDetections = detTimesSnapshot.size
         val falseRatio = if (totalDetections > 0) {
-            falseEventCount.get().toDouble() / totalDetections
+            snapshotFalseEventCount.toDouble() / totalDetections
         } else 0.0
 
-        // Compute dwell average
-        val dwells = synchronized(dwellDurations) { dwellDurations.toList() }
-        val avgDwell = if (dwells.isNotEmpty()) dwells.average() else 0.0
-
-        // GPS accuracy average
-        val gpsAccAvg = if (accuracies.isNotEmpty()) accuracies.average() else 0.0
+        // Dwell statistics
+        val avgDwell = if (dwellsSnapshot.isNotEmpty()) dwellsSnapshot.average() else 0.0
+        val maxDwell = if (dwellsSnapshot.isNotEmpty()) dwellsSnapshot.max() else 0.0
 
         // Stationary ratio
         val stationaryRatio = if (sessionDurationMs > 0) {
-            totalStationary.toDouble() / sessionDurationMs
+            snapshotTotalStationary.toDouble() / sessionDurationMs
         } else 0.0
 
         // Average GPS interval
-        val avgInterval = if (intervalSampleCount > 0) {
-            (totalIntervalMs / intervalSampleCount).toInt()
+        val avgInterval = if (snapshotIntervalSampleCount > 0) {
+            (snapshotTotalIntervalMs / snapshotIntervalSampleCount).toInt()
         } else 0
 
-        // Zone metrics from engine
+        // GPS OK ratio
+        val gpsOk = if (snapshotTotalGpsReadings > 0) {
+            snapshotGoodGpsReadings.toDouble() / snapshotTotalGpsReadings
+        } else 0.0
+
+        // Zone metrics from engine (outside lock to avoid deadlock)
         val zoneCount = geofenceEngine?.getZoneCount() ?: 0
         val zoneSizeDist = geofenceEngine?.getZoneSizeDistribution() ?: emptyMap()
 
@@ -301,35 +400,37 @@ internal class TelemetryAggregator {
             detectionsTotal = totalDetections,
             detectionTimeAvgMs = detAvg,
             detectionTimeP95Ms = detP95,
-            gpsAccuracyAvgM = gpsAccAvg,
+            gpsAccuracyAvgM = avgAccuracyAtEvent,
             sessionDurationMinutes = sessionDurationMinutes,
-            errorCounts = errorCounts.toMap(),
-            ttfdMs = firstDetectionTimeMs ?: 0L,
+            errorCounts = snapshotErrorCounts,
+            ttfdMs = snapshotFirstDetectionTimeMs ?: 0L,
             hadDetection = totalDetections > 0,
-            gpsOkRatio = if (totalGpsReadings > 0) {
-                goodGpsReadings.toDouble() / totalGpsReadings
-            } else 0.0,
-            sampleEvents = totalGpsReadings,
-            batteryLevelStart = batteryLevelStart,
-            batteryLevelEnd = batteryLevelEnd,
-            accuracyProfile = accuracyProfile,
-            updateStrategy = updateStrategy,
+            gpsOkRatio = gpsOk,
+            sampleEvents = snapshotTotalGpsReadings,
+            batteryLevelStart = snapshotBatteryLevelStart,
+            batteryLevelEnd = snapshotBatteryLevelEnd,
+            accuracyProfile = snapshotAccuracyProfile,
+            updateStrategy = snapshotUpdateStrategy,
             activityDistribution = activityDist,
             gpsIntervalDistribution = intervalDist,
             stationaryRatio = stationaryRatio,
             avgGpsIntervalMs = avgInterval,
-            falseEventCount = falseEventCount.get(),
+            falseEventCount = snapshotFalseEventCount,
             falseEventRatio = falseRatio,
             avgGpsAccuracyAtEvent = avgAccuracyAtEvent,
             avgSpeedAtEventMps = avgSpeedAtEvent,
-            boundaryEventsCount = boundaryEventsCount,
+            boundaryEventsCount = snapshotBoundaryEventsCount,
+            distanceToBoundaryAvgM = avgDistanceToBoundary,
             zoneCount = zoneCount,
             zoneSizeDistribution = zoneSizeDist,
-            zoneTransitionCount = zoneTransitionCount.get(),
+            zoneTransitionCount = snapshotZoneTransitionCount,
             avgDwellMinutes = avgDwell,
-            deviceCategory = deviceCategory,
-            osVersionMajor = osVersionMajor,
-            chargingDuringSession = chargingDuringSession
+            maxDwellMinutes = maxDwell,
+            dwellDurationsMinutes = dwellsSnapshot,
+            deviceCategory = snapshotDeviceCategory,
+            osVersionMajor = snapshotOsVersionMajor,
+            chargingDuringSession = snapshotChargingDuringSession,
+            sessionStartHour = snapshotSessionStartHour
         )
 
         return telemetry.toMap()
@@ -339,41 +440,45 @@ internal class TelemetryAggregator {
      * Reset all telemetry for a new session.
      */
     fun resetTelemetry() {
-        activityTimeMs.clear()
-        lastActivityChangeTime = System.currentTimeMillis()
-        lastTrackedActivity = "unknown"
+        synchronized(lock) {
+            activityTimeMs.clear()
+            lastActivityChangeTime = System.currentTimeMillis()
+            lastTrackedActivity = "unknown"
 
-        intervalTimeMs.clear()
-        lastIntervalChangeTime = System.currentTimeMillis()
-        lastTrackedInterval = 10_000L
-        totalIntervalMs = 0L
-        intervalSampleCount = 0
+            intervalTimeMs.clear()
+            lastIntervalChangeTime = System.currentTimeMillis()
+            lastTrackedInterval = 10_000L
+            totalIntervalMs = 0L
+            intervalSampleCount = 0
 
-        cumulativeStationaryMs = 0L
-        stationaryStartTime = null
+            cumulativeStationaryMs = 0L
+            stationaryStartTime = null
 
-        synchronized(eventAccuracies) { eventAccuracies.clear() }
-        synchronized(eventSpeeds) { eventSpeeds.clear() }
-        boundaryEventsCount = 0
+            eventAccuracies.clear()
+            eventSpeeds.clear()
+            eventDistances.clear()
+            boundaryEventsCount = 0
 
-        lastEventPerZone.clear()
-        falseEventCount.set(0)
+            lastEventPerZone.clear()
+            falseEventCount = 0
 
-        synchronized(detectionTimesMs) { detectionTimesMs.clear() }
-        firstDetectionTimeMs = null
-        sessionStartTime = System.currentTimeMillis()
+            detectionTimesMs.clear()
+            firstDetectionTimeMs = null
+            sessionStartTime = System.currentTimeMillis()
+            sessionStartHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
 
-        zoneTransitionCount.set(0)
-        synchronized(dwellDurations) { dwellDurations.clear() }
+            zoneTransitionCount = 0
+            dwellDurations.clear()
 
-        totalGpsReadings = 0
-        goodGpsReadings = 0
+            totalGpsReadings = 0
+            goodGpsReadings = 0
 
-        errorCounts.clear()
+            errorCounts.clear()
 
-        batteryLevelStart = null
-        batteryLevelEnd = null
-        chargingDuringSession = false
+            batteryLevelStart = null
+            batteryLevelEnd = null
+            chargingDuringSession = false
+        }
     }
 
     // ========================================================================

@@ -45,15 +45,19 @@ struct SessionTelemetry {
     var avgGpsAccuracyAtEvent: Double = 0.0
     var avgSpeedAtEventMps: Double = 0.0
     var boundaryEventsCount: Int = 0
+    var distanceToBoundaryAvgM: Double = 0.0
 
     var zoneCount: Int = 0
     var zoneSizeDistribution: [String: Int] = [:]
     var zoneTransitionCount: Int = 0
     var avgDwellMinutes: Double = 0.0
+    var maxDwellMinutes: Double = 0.0
+    var dwellDurationsMinutes: [Double] = []
 
     var deviceCategory: String? = nil
     var osVersionMajor: Int = 0
     var chargingDuringSession: Bool = false
+    var sessionStartHour: Int = 0
 
     /// Convert to dictionary for JSON serialization.
     /// Returns the complete v2 enhanced payload matching DATA_STRATEGY.md schema.
@@ -102,11 +106,16 @@ struct SessionTelemetry {
         map["zone_count"] = zoneCount
         if !zoneSizeDistribution.isEmpty { map["zone_size_distribution"] = zoneSizeDistribution }
         map["zone_transition_count"] = zoneTransitionCount
-        map["avg_dwell_minutes"] = avgDwellMinutes
+        map["avg_dwell_duration_minutes"] = avgDwellMinutes
+        map["max_dwell_duration_minutes"] = maxDwellMinutes
+        if !dwellDurationsMinutes.isEmpty { map["dwell_durations_minutes"] = dwellDurationsMinutes }
+
+        map["distance_to_boundary_avg_m"] = distanceToBoundaryAvgM
 
         if let v = deviceCategory { map["device_category"] = v }
         map["os_version_major"] = osVersionMajor
         map["charging_during_session"] = chargingDuringSession
+        map["session_start_hour"] = sessionStartHour
 
         return map
     }

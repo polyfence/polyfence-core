@@ -59,17 +59,21 @@ data class SessionTelemetry(
     var avgGpsAccuracyAtEvent: Double = 0.0,
     var avgSpeedAtEventMps: Double = 0.0,
     var boundaryEventsCount: Int = 0,
+    var distanceToBoundaryAvgM: Double = 0.0,
 
     // Zone metrics
     var zoneCount: Int = 0,
     var zoneSizeDistribution: Map<String, Int> = emptyMap(),
     var zoneTransitionCount: Int = 0,
     var avgDwellMinutes: Double = 0.0,
+    var maxDwellMinutes: Double = 0.0,
+    var dwellDurationsMinutes: List<Double> = emptyList(),
 
     // Device info
     var deviceCategory: String? = null,
     var osVersionMajor: Int = 0,
-    var chargingDuringSession: Boolean = false
+    var chargingDuringSession: Boolean = false,
+    var sessionStartHour: Int = 0
 ) {
     /**
      * Convert to Map for JSON serialization.
@@ -122,17 +126,23 @@ data class SessionTelemetry(
         map["avg_gps_accuracy_at_event"] = avgGpsAccuracyAtEvent
         map["avg_speed_at_event_mps"] = avgSpeedAtEventMps
         map["boundary_events_count"] = boundaryEventsCount
+        map["distance_to_boundary_avg_m"] = distanceToBoundaryAvgM
 
         map["zone_count"] = zoneCount
         if (zoneSizeDistribution.isNotEmpty()) {
             map["zone_size_distribution"] = zoneSizeDistribution
         }
         map["zone_transition_count"] = zoneTransitionCount
-        map["avg_dwell_minutes"] = avgDwellMinutes
+        map["avg_dwell_duration_minutes"] = avgDwellMinutes
+        map["max_dwell_duration_minutes"] = maxDwellMinutes
+        if (dwellDurationsMinutes.isNotEmpty()) {
+            map["dwell_durations_minutes"] = dwellDurationsMinutes
+        }
 
         deviceCategory?.let { map["device_category"] = it }
         map["os_version_major"] = osVersionMajor
         map["charging_during_session"] = chargingDuringSession
+        map["session_start_hour"] = sessionStartHour
 
         return map
     }
