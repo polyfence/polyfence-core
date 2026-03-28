@@ -63,6 +63,7 @@ class LocationTracker: NSObject {
     // Notification properties
     private var notificationCenter: UNUserNotificationCenter?
     private var healthTimer: Timer?
+    private var healthScoreTimer: Timer?
 
     // Background Task Management
     private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
@@ -209,6 +210,14 @@ class LocationTracker: NSObject {
             }
         }
         RunLoop.main.add(healthTimer!, forMode: .common)
+
+        // Health score emitter (every 5 minutes)
+        healthScoreTimer?.invalidate()
+        healthScoreTimer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { [weak self] _ in
+            self?.emitHealthScore()
+        }
+        RunLoop.main.add(healthScoreTimer!, forMode: .common)
+
         fallbackTimer?.invalidate()
         fallbackTimer = nil
         // Request permissions if needed
@@ -243,6 +252,8 @@ class LocationTracker: NSObject {
         trackingEnabled = false
         healthTimer?.invalidate()
         healthTimer = nil
+        healthScoreTimer?.invalidate()
+        healthScoreTimer = nil
         fallbackTimer?.invalidate()
         fallbackTimer = nil
         locationManager.stopUpdatingLocation()
@@ -258,6 +269,46 @@ class LocationTracker: NSObject {
         activityRecognitionManager?.stop()
 
         // Location tracking stopped
+    }
+
+    // MARK: - Health Score
+
+    /// Compute and emit health score via onPerformanceEvent.
+    private func emitHealthScore() {
+        guard isRunning else { return }
+
+        let debugInfo = PolyfenceDebugCollector.getDebugInfo()
+        let telemetry = telemetryAggregator.getSessionTelemetry()
+
+        let gpsGoodRatio = telemetry.gpsOkRatio
+        let batteryMetrics = debugInfo["batteryMetrics"] as? [String: Any]
+        let batteryDrain = (batteryMetrics?["estimatedHourlyDrainPercent"] as? NSNumber)?.doubleValue ?? 0.0
+        let perfMetrics = debugInfo["performanceMetrics"] as? [String: Any]
+        let avgLatency = (perfMetrics?["averageDetectionLatencyMs"] as? NSNumber)?.doubleValue ?? 0.0
+        let errorCount = (debugInfo["errorHistory"] as? [[String: Any]])?.count ?? 0
+        let falseRatio = telemetry.falseEventRatio
+        let zoneCount = geofenceEngine.getActiveZones().count
+
+        let result = HealthScoreCalculator.calculate(
+            gpsGoodRatio: gpsGoodRatio,
+            batteryDrainPctPerHr: batteryDrain,
+            avgDetectionLatencyMs: avgLatency,
+            errorCountRecent: errorCount,
+            falseEventRatio: falseRatio,
+            isTracking: isRunning,
+            activeZoneCount: zoneCount
+        )
+
+        let payload: [String: Any] = [
+            "type": "health_score",
+            "score": result.score,
+            "topIssue": result.topIssue ?? "",
+            "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
+        ]
+
+        DispatchQueue.main.async { [weak self] in
+            self?.coreDelegate?.onPerformanceEvent(payload)
+        }
     }
 
     // MARK: - Background Task Management

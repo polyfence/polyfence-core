@@ -256,6 +256,8 @@ class LocationTracker : Service() {
     // Combined health check runs every 60s instead of separate 30s GPS + 60s permission checks
     private var combinedHealthCheckHandler: android.os.Handler? = null
     private val combinedHealthCheckInterval = 60_000L  // 60 seconds (unified interval)
+    private var healthScoreTickCount = 0
+    private val healthScoreEmitEveryNTicks = 5  // Emit health score every 5 ticks = 5 minutes
 
     // Throttle callbacks when stationary
     private var lastDelegateCallbackTime = 0L
@@ -565,6 +567,13 @@ class LocationTracker : Service() {
                     Log.e(TAG, "Health snapshot failed: ${e.message}")
                 }
 
+                // === Health Score Emission (every 5 minutes) ===
+                healthScoreTickCount++
+                if (healthScoreTickCount >= healthScoreEmitEveryNTicks) {
+                    healthScoreTickCount = 0
+                    emitHealthScore()
+                }
+
                 // Schedule next combined check
                 if (isRunning) {
                     combinedHealthCheckHandler?.postDelayed(this, combinedHealthCheckInterval)
@@ -581,7 +590,49 @@ class LocationTracker : Service() {
     private fun stopCombinedHealthMonitoring() {
         combinedHealthCheckHandler?.removeCallbacksAndMessages(null)
         combinedHealthCheckHandler = null
+        healthScoreTickCount = 0
         Log.d(TAG, "Combined health monitoring stopped")
+    }
+
+    /**
+     * Compute and emit health score via onPerformanceEvent.
+     * Reads from PolyfenceDebugCollector and TelemetryAggregator.
+     */
+    private fun emitHealthScore() {
+        try {
+            val debugInfo = PolyfenceDebugCollector.getDebugInfo()
+            val perfMetrics = debugInfo["performanceMetrics"] as? Map<*, *>
+            val telemetry = telemetryAggregator.getSessionTelemetry()
+
+            val gpsGoodRatio = telemetry.gpsOkRatio
+            val batteryMetrics = debugInfo["batteryMetrics"] as? Map<*, *>
+            val batteryDrain = (batteryMetrics?.get("estimatedHourlyDrainPercent") as? Number)?.toDouble() ?: 0.0
+            val avgLatency = (perfMetrics?.get("averageDetectionLatencyMs") as? Number)?.toDouble() ?: 0.0
+            val errorCount = (debugInfo["errorHistory"] as? List<*>)?.size ?: 0
+            val falseRatio = telemetry.falseEventRatio
+            val zoneCount = geofenceEngine.getActiveZones().size
+
+            val result = HealthScoreCalculator.calculate(
+                gpsGoodRatio = gpsGoodRatio,
+                batteryDrainPctPerHr = batteryDrain,
+                avgDetectionLatencyMs = avgLatency,
+                errorCountRecent = errorCount,
+                falseEventRatio = falseRatio,
+                isTracking = isRunning,
+                activeZoneCount = zoneCount
+            )
+
+            val payload = mapOf<String, Any>(
+                "type" to "health_score",
+                "score" to result.score,
+                "topIssue" to (result.topIssue ?: ""),
+                "timestamp" to System.currentTimeMillis()
+            )
+
+            coreDelegate?.onPerformanceEvent(payload)
+        } catch (e: Exception) {
+            Log.e(TAG, "Health score emission failed: ${e.message}")
+        }
     }
 
     private fun addZone(intent: Intent) {
