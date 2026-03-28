@@ -600,17 +600,17 @@ class LocationTracker : Service() {
      */
     private fun emitHealthScore() {
         try {
-            val debugInfo = PolyfenceDebugCollector.getDebugInfo()
-            val perfMetrics = debugInfo["performanceMetrics"] as? Map<*, *>
+            val debugInfo = PolyfenceDebugCollector.collectDebugInfo(applicationContext)
+            val perfMetrics = debugInfo["performance"] as? Map<*, *>
             val telemetry = telemetryAggregator.getSessionTelemetry()
 
-            val gpsGoodRatio = telemetry.gpsOkRatio
-            val batteryMetrics = debugInfo["batteryMetrics"] as? Map<*, *>
+            val gpsGoodRatio = (telemetry["gps_ok_ratio"] as? Number)?.toDouble() ?: 0.0
+            val batteryMetrics = debugInfo["battery"] as? Map<*, *>
             val batteryDrain = (batteryMetrics?.get("estimatedHourlyDrainPercent") as? Number)?.toDouble() ?: 0.0
             val avgLatency = (perfMetrics?.get("averageDetectionLatencyMs") as? Number)?.toDouble() ?: 0.0
-            val errorCount = (debugInfo["errorHistory"] as? List<*>)?.size ?: 0
-            val falseRatio = telemetry.falseEventRatio
-            val zoneCount = geofenceEngine.getActiveZones().size
+            val errorCount = (debugInfo["recentErrors"] as? List<*>)?.size ?: 0
+            val falseRatio = (telemetry["false_event_ratio"] as? Number)?.toDouble() ?: 0.0
+            val zoneCount = geofenceEngine.getZoneCount()
 
             val result = HealthScoreCalculator.calculate(
                 gpsGoodRatio = gpsGoodRatio,

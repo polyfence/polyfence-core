@@ -277,17 +277,17 @@ class LocationTracker: NSObject {
     private func emitHealthScore() {
         guard isRunning else { return }
 
-        let debugInfo = PolyfenceDebugCollector.getDebugInfo()
+        let debugInfo = PolyfenceDebugCollector.shared.collectDebugInfo()
         let telemetry = telemetryAggregator.getSessionTelemetry()
 
-        let gpsGoodRatio = telemetry.gpsOkRatio
-        let batteryMetrics = debugInfo["batteryMetrics"] as? [String: Any]
+        let gpsGoodRatio = (telemetry["gps_ok_ratio"] as? NSNumber)?.doubleValue ?? 0.0
+        let batteryMetrics = debugInfo["battery"] as? [String: Any]
         let batteryDrain = (batteryMetrics?["estimatedHourlyDrainPercent"] as? NSNumber)?.doubleValue ?? 0.0
-        let perfMetrics = debugInfo["performanceMetrics"] as? [String: Any]
+        let perfMetrics = debugInfo["performance"] as? [String: Any]
         let avgLatency = (perfMetrics?["averageDetectionLatencyMs"] as? NSNumber)?.doubleValue ?? 0.0
-        let errorCount = (debugInfo["errorHistory"] as? [[String: Any]])?.count ?? 0
-        let falseRatio = telemetry.falseEventRatio
-        let zoneCount = geofenceEngine.getActiveZones().count
+        let errorCount = (debugInfo["recentErrors"] as? [[String: Any]])?.count ?? 0
+        let falseRatio = (telemetry["false_event_ratio"] as? NSNumber)?.doubleValue ?? 0.0
+        let zoneCount = geofenceEngine.getZoneCount()
 
         let result = HealthScoreCalculator.calculate(
             gpsGoodRatio: gpsGoodRatio,
