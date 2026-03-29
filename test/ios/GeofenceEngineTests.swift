@@ -30,21 +30,21 @@ class GeofenceEngineTests: XCTestCase {
 
     // MARK: - Zone Lifecycle Tests
 
-    func testAddZoneCircleSuccessfully() {
+    func testAddZoneCircleSuccessfully() throws {
         let zoneData: [String: Any] = [
             "type": "circle",
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 100.0
         ]
 
-        engine.addZone(zoneId: "zone-1", zoneName: "NYC Zone", zoneData: zoneData)
+        try engine.addZone(zoneId: "zone-1", zoneName: "NYC Zone", zoneData: zoneData)
 
         XCTAssertTrue(engine.hasZones(), "Engine should have zones")
         XCTAssertEqual(engine.getZoneCount(), 1, "Zone count should be 1")
         XCTAssertEqual(engine.getZoneName("zone-1"), "NYC Zone", "Zone name should match")
     }
 
-    func testAddZonePolygonSuccessfully() {
+    func testAddZonePolygonSuccessfully() throws {
         let polygon: [[String: Any]] = [
             ["latitude": 0.0, "longitude": 0.0],
             ["latitude": 1.0, "longitude": 0.0],
@@ -56,36 +56,36 @@ class GeofenceEngineTests: XCTestCase {
             "polygon": polygon
         ]
 
-        engine.addZone(zoneId: "poly-1", zoneName: "Square Zone", zoneData: zoneData)
+        try engine.addZone(zoneId: "poly-1", zoneName: "Square Zone", zoneData: zoneData)
 
         XCTAssertEqual(engine.getZoneName("poly-1"), "Square Zone", "Zone name should match")
     }
 
-    func testRemoveZoneRemovesFromEngine() {
+    func testRemoveZoneRemovesFromEngine() throws {
         let zoneData: [String: Any] = [
             "type": "circle",
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 100.0
         ]
-        engine.addZone(zoneId: "zone-1", zoneName: "NYC Zone", zoneData: zoneData)
+        try engine.addZone(zoneId: "zone-1", zoneName: "NYC Zone", zoneData: zoneData)
         XCTAssertTrue(engine.hasZones(), "Zone should exist")
 
-        engine.removeZone("zone-1")
+        engine.removeZone(zoneId: "zone-1")
 
         XCTAssertFalse(engine.hasZones(), "Zone should be removed")
         XCTAssertEqual(engine.getZoneCount(), 0, "Zone count should be 0")
         XCTAssertNil(engine.getZoneName("zone-1"), "Zone name should be nil")
     }
 
-    func testRemoveAllZonesClearsAll() {
+    func testRemoveAllZonesClearsAll() throws {
         let zoneData: [String: Any] = [
             "type": "circle",
             "center": ["latitude": 40.7128, "longitude": -74.0060],
             "radius": 100.0
         ]
-        engine.addZone(zoneId: "zone-1", zoneName: "Zone 1", zoneData: zoneData)
-        engine.addZone(zoneId: "zone-2", zoneName: "Zone 2", zoneData: zoneData)
-        engine.addZone(zoneId: "zone-3", zoneName: "Zone 3", zoneData: zoneData)
+        try engine.addZone(zoneId: "zone-1", zoneName: "Zone 1", zoneData: zoneData)
+        try engine.addZone(zoneId: "zone-2", zoneName: "Zone 2", zoneData: zoneData)
+        try engine.addZone(zoneId: "zone-3", zoneName: "Zone 3", zoneData: zoneData)
 
         engine.clearAllZones()
 
@@ -450,7 +450,7 @@ class GeofenceEngineTests: XCTestCase {
         engine.checkLocation(outsideLocation)
 
         // Check if reversal is detected
-        let isReversal = engine.isRecentReversal("flip-zone", eventType: "EXIT")
+        let isReversal = engine.isRecentReversal(zoneId: "flip-zone", eventType: "EXIT")
         XCTAssertTrue(isReversal, "Quick exit should be flagged as reversal")
     }
 
@@ -463,7 +463,7 @@ class GeofenceEngineTests: XCTestCase {
         try! engine.addZone(zoneId: "slow-zone", zoneName: "Slow Test", zoneData: zoneData)
 
         // For testing, reversal detection requires actual time passage
-        let isReversal = engine.isRecentReversal("slow-zone", eventType: "EXIT")
+        let isReversal = engine.isRecentReversal(zoneId: "slow-zone", eventType: "EXIT")
         XCTAssertFalse(isReversal, "No reversal without recent enter")
     }
 
@@ -600,7 +600,7 @@ class GeofenceEngineTests: XCTestCase {
         try! engine.addZone(zoneId: "z2", zoneName: "Zone 2", zoneData: zoneData)
         XCTAssertEqual(engine.getZoneCount(), 2, "Count should be 2")
 
-        engine.removeZone("z1")
+        engine.removeZone(zoneId: "z1")
         XCTAssertEqual(engine.getZoneCount(), 1, "Count should be 1 after removal")
 
         engine.clearAllZones()
@@ -633,7 +633,7 @@ class GeofenceEngineTests: XCTestCase {
 
     private func createLocation(_ lat: Double, _ lng: Double, accuracy: CLLocationAccuracy = 10.0) -> CLLocation {
         let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
-        let location = CLLocation(coordinate: coordinate, accuracy: accuracy, altitude: 0, verticalAccuracy: -1, course: 0, speed: 0, timestamp: Date())
+        let location = CLLocation(coordinate: coordinate, altitude: 0, horizontalAccuracy: accuracy, verticalAccuracy: -1, course: 0, speed: 0, timestamp: Date())
         return location
     }
 }
