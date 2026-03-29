@@ -106,8 +106,6 @@ No third-party libraries beyond platform SDKs.
 
 ## Contact
 
-- **Security vulnerabilities**: hello@polyfence.io
-- **Privacy practices (this library)**: see [PRIVACY.md](./PRIVACY.md) — hello@polyfence.io
-- **General inquiries**: hello@polyfence.io
+- **Security vulnerabilities, privacy questions, or general inquiries**: hello@polyfence.io
 - **Technical questions**: Open a GitHub issue with `question` label
 - **Commercial support**: https://polyfence.io

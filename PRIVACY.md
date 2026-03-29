@@ -50,7 +50,5 @@ PolyfenceCore gives you the geofencing engine. What you build with it — and ho
 
 ## Contact
 
-- **Privacy questions and data requests:** [hello@polyfence.io](mailto:hello@polyfence.io)
-- **Security vulnerabilities:** [hello@polyfence.io](mailto:hello@polyfence.io) (or see [SECURITY.md](./SECURITY.md))
-- **General inquiries:** [hello@polyfence.io](mailto:hello@polyfence.io)
+- **Questions, data requests, security vulnerabilities, or general inquiries:** [hello@polyfence.io](mailto:hello@polyfence.io)
 - **Technical support:** [GitHub Issues](https://github.com/polyfence/polyfence-core/issues)
