@@ -8,14 +8,14 @@ Pod::Spec.new do |s|
     telemetry aggregation. No cloud required.
   DESC
   s.homepage         = 'https://github.com/polyfence/polyfence-core'
-  s.license          = { :type => 'MIT', :file => '../LICENSE' }
+  s.license          = { :type => 'MIT', :file => 'LICENSE' }
   s.author           = { 'Polyfence' => 'hello@polyfence.io' }
   s.source           = { :git => 'https://github.com/polyfence/polyfence-core.git', :tag => "v#{s.version}" }
 
   s.ios.deployment_target = '14.0'
   s.swift_version = '5.0'
 
-  s.source_files = 'Classes/**/*.swift'
+  s.source_files = 'ios/Classes/**/*.swift'
 
   s.frameworks = 'CoreLocation', 'CoreMotion', 'UserNotifications', 'BackgroundTasks', 'UIKit'
 
