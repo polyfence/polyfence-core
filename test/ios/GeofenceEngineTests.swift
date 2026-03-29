@@ -103,7 +103,8 @@ class GeofenceEngineTests: XCTestCase {
         XCTAssertThrowsError(
             try engine.addZone(zoneId: "bad-zone", zoneName: "Bad Zone", zoneData: invalidZoneData)
         ) { error in
-            XCTAssertTrue(error is GeofenceEngineError)
+            let nsError = error as NSError
+            XCTAssertEqual(nsError.domain, "GeofenceEngine")
         }
     }
 
@@ -116,7 +117,8 @@ class GeofenceEngineTests: XCTestCase {
         XCTAssertThrowsError(
             try engine.addZone(zoneId: "no-center", zoneName: "Bad Circle", zoneData: badCircle)
         ) { error in
-            XCTAssertTrue(error is GeofenceEngineError)
+            let nsError = error as NSError
+            XCTAssertEqual(nsError.domain, "GeofenceEngine")
         }
     }
 
@@ -129,13 +131,15 @@ class GeofenceEngineTests: XCTestCase {
         XCTAssertThrowsError(
             try engine.addZone(zoneId: "no-radius", zoneName: "Bad Circle", zoneData: badCircle)
         ) { error in
-            XCTAssertTrue(error is GeofenceEngineError)
+            let nsError = error as NSError
+            XCTAssertEqual(nsError.domain, "GeofenceEngine")
         }
     }
 
     // MARK: - Circle Containment Tests
 
     func testPointInsideCircleReturnsTrue() {
+        engine.setValidationConfig(requireConfirmation: false)
         let zoneData: [String: Any] = [
             "type": "circle",
             "center": ["latitude": 40.7128, "longitude": -74.0060],
@@ -152,6 +156,7 @@ class GeofenceEngineTests: XCTestCase {
     }
 
     func testPointOutsideCircleReturnsFalse() {
+        engine.setValidationConfig(requireConfirmation: false)
         let zoneData: [String: Any] = [
             "type": "circle",
             "center": ["latitude": 40.7128, "longitude": -74.0060],
@@ -168,6 +173,7 @@ class GeofenceEngineTests: XCTestCase {
     }
 
     func testZeroRadiusCircleAsPointMatch() {
+        engine.setValidationConfig(requireConfirmation: false)
         let zoneData: [String: Any] = [
             "type": "circle",
             "center": ["latitude": 40.7128, "longitude": -74.0060],
@@ -191,6 +197,7 @@ class GeofenceEngineTests: XCTestCase {
     // MARK: - Polygon Containment Tests
 
     func testPointInsidePolygonReturnsTrue() {
+        engine.setValidationConfig(requireConfirmation: false)
         let polygon: [[String: Any]] = [
             ["latitude": 0.0, "longitude": 0.0],
             ["latitude": 1.0, "longitude": 0.0],
@@ -212,6 +219,7 @@ class GeofenceEngineTests: XCTestCase {
     }
 
     func testPointOutsidePolygonReturnsFalse() {
+        engine.setValidationConfig(requireConfirmation: false)
         let polygon: [[String: Any]] = [
             ["latitude": 0.0, "longitude": 0.0],
             ["latitude": 1.0, "longitude": 0.0],
@@ -233,6 +241,7 @@ class GeofenceEngineTests: XCTestCase {
     }
 
     func testPointOnPolygonEdge() {
+        engine.setValidationConfig(requireConfirmation: false)
         let polygon: [[String: Any]] = [
             ["latitude": 0.0, "longitude": 0.0],
             ["latitude": 1.0, "longitude": 0.0],
@@ -255,6 +264,7 @@ class GeofenceEngineTests: XCTestCase {
     }
 
     func testPointOnPolygonVertex() {
+        engine.setValidationConfig(requireConfirmation: false)
         let polygon: [[String: Any]] = [
             ["latitude": 0.0, "longitude": 0.0],
             ["latitude": 1.0, "longitude": 0.0],
@@ -288,7 +298,8 @@ class GeofenceEngineTests: XCTestCase {
         XCTAssertThrowsError(
             try engine.addZone(zoneId: "bad-poly", zoneName: "Bad Polygon", zoneData: zoneData)
         ) { error in
-            XCTAssertTrue(error is GeofenceEngineError)
+            let nsError = error as NSError
+            XCTAssertEqual(nsError.domain, "GeofenceEngine")
         }
     }
 
@@ -308,7 +319,8 @@ class GeofenceEngineTests: XCTestCase {
         XCTAssertThrowsError(
             try engine.addZone(zoneId: "self-intersect", zoneName: "Bad Polygon", zoneData: zoneData)
         ) { error in
-            XCTAssertTrue(error is GeofenceEngineError)
+            let nsError = error as NSError
+            XCTAssertEqual(nsError.domain, "GeofenceEngine")
         }
     }
 
@@ -372,18 +384,21 @@ class GeofenceEngineTests: XCTestCase {
 
         let location = createLocation(40.7138, -74.0050)
 
-        // Enter and wait
+        // Enter and wait past dwell threshold
         engine.checkLocation(location)
         Thread.sleep(forTimeInterval: 0.15)
+        // Trigger checkLocation so the DWELL event fires
+        engine.checkLocation(location)
+        let initialDwellCount = events.filter { $0.eventType == "DWELL" }.count
+        XCTAssertEqual(initialDwellCount, 1, "DWELL should fire once after threshold")
         events.removeAll()
 
-        // Multiple checks - should not fire dwell multiple times
-        engine.checkLocation(location)
+        // Further checks should not fire dwell again
         Thread.sleep(forTimeInterval: 0.1)
         engine.checkLocation(location)
 
         let dwellEvents = events.filter { $0.eventType == "DWELL" }
-        XCTAssertEqual(dwellEvents.count, 0, "DWELL should already have fired")
+        XCTAssertEqual(dwellEvents.count, 0, "DWELL should not fire again after initial trigger")
     }
 
     func testExitingZoneStopsDwellTracking() {
@@ -434,6 +449,7 @@ class GeofenceEngineTests: XCTestCase {
     // MARK: - False Event Detection Tests (30-second reversal window)
 
     func testQuickExitAfterEnterIsFlaggedAsReversal() {
+        engine.setValidationConfig(requireConfirmation: false)
         let zoneData: [String: Any] = [
             "type": "circle",
             "center": ["latitude": 40.7128, "longitude": -74.0060],
@@ -455,6 +471,7 @@ class GeofenceEngineTests: XCTestCase {
     }
 
     func testExitAfterThirtySeondsIsNotFlaggedAsReversal() {
+        engine.setValidationConfig(requireConfirmation: false)
         let zoneData: [String: Any] = [
             "type": "circle",
             "center": ["latitude": 40.7128, "longitude": -74.0060],
@@ -529,6 +546,7 @@ class GeofenceEngineTests: XCTestCase {
     // MARK: - Edge Cases and Validation
 
     func testLocationWithPoorGPSAccuracyIsRejected() {
+        engine.setValidationConfig(requireConfirmation: false)
         engine.setGpsAccuracyThreshold(50.0) // 50m threshold
 
         let zoneData: [String: Any] = [
@@ -638,11 +656,3 @@ class GeofenceEngineTests: XCTestCase {
     }
 }
 
-// MARK: - Error Types (for testing purposes)
-enum GeofenceEngineError: Error {
-    case invalidZoneType
-    case missingCenter
-    case missingRadius
-    case invalidPolygon
-    case selfIntersectingPolygon
-}

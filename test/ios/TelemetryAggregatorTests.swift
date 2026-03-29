@@ -129,7 +129,7 @@ class TelemetryAggregatorTests: XCTestCase {
             "avg_gps_interval_ms", "false_event_count", "false_event_ratio",
             "avg_gps_accuracy_at_event", "avg_speed_at_event_mps",
             "boundary_events_count", "zone_count", "zone_transition_count",
-            "avg_dwell_minutes", "device_category", "os_version_major",
+            "avg_dwell_duration_minutes", "device_category", "os_version_major",
             "charging_during_session"
         ]
 
@@ -235,6 +235,6 @@ class TelemetryAggregatorTests: XCTestCase {
         aggregator.recordDwellComplete(durationMinutes: 30.0)
 
         let telemetry = aggregator.getSessionTelemetry()
-        XCTAssertEqual(telemetry["avg_dwell_minutes"] as! Double, 20.0, accuracy: 0.01)
+        XCTAssertEqual(telemetry["avg_dwell_duration_minutes"] as! Double, 20.0, accuracy: 0.01)
     }
 }
