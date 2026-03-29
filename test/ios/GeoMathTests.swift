@@ -175,9 +175,10 @@ class GeoMathTests: XCTestCase {
     }
 
     func testPointToSegmentDistancePerpendicularProjection() {
-        let point = CLLocationCoordinate2D(latitude: 0.0, longitude: 0.5)
-        let segmentStart = CLLocationCoordinate2D(latitude: -1.0, longitude: 0.5)
-        let segmentEnd = CLLocationCoordinate2D(latitude: 1.0, longitude: 0.5)
+        // Point offset perpendicular to a horizontal segment
+        let point = CLLocationCoordinate2D(latitude: 0.1, longitude: 0.5)
+        let segmentStart = CLLocationCoordinate2D(latitude: 0.0, longitude: 0.0)
+        let segmentEnd = CLLocationCoordinate2D(latitude: 0.0, longitude: 1.0)
 
         let distance = GeoMath.pointToSegmentDistance(p: point, a: segmentStart, b: segmentEnd)
 
@@ -249,7 +250,8 @@ class GeoMathTests: XCTestCase {
     }
 
     func testHaversineWithVeryLargeDistanceNearAntipodal() {
-        let distance = GeoMath.haversineDistance(lat1: 0.0, lng1: 0.0, lat2: -89.999, lng2: 180.0)
+        // Near-antipodal: (0°,0°) to (0.001°,180°) ≈ half Earth circumference
+        let distance = GeoMath.haversineDistance(lat1: 0.0, lng1: 0.0, lat2: 0.001, lng2: 180.0)
 
         XCTAssertGreaterThan(distance, 19900000, "Near-antipodal distance should be large")
     }

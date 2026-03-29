@@ -29,13 +29,30 @@ for PHONE in "iPhone 16" "iPhone 15" "iPhone SE (3rd generation)"; do
   for OS in 18.6 18.5 18.4 18.2 18.1 17.5; do
     DEST="platform=iOS Simulator,name=${PHONE},OS=${OS}"
     echo "Trying: $DEST"
-    # test implies build — single compile pass
-    if xcodebuild test -scheme "$SCHEME" -destination "$DEST" 2>&1; then
-      exit 0
-    fi
+
+    # Capture output and exit code separately
+    set +e
+    OUTPUT=$(xcodebuild test -scheme "$SCHEME" -destination "$DEST" 2>&1)
     EXIT_CODE=$?
-    # Exit code 65 = test/build failure (not a destination issue) — no point retrying
-    if [[ $EXIT_CODE -eq 65 ]]; then
+    set -e
+    echo "$OUTPUT"
+
+    if [[ $EXIT_CODE -eq 0 ]]; then
+      # xcodebuild succeeded — but check for test failures in output
+      if echo "$OUTPUT" | grep -q "TEST EXECUTE SUCCEEDED"; then
+        echo "All tests passed."
+        exit 0
+      elif echo "$OUTPUT" | grep -q "** TEST SUCCEEDED **"; then
+        echo "All tests passed."
+        exit 0
+      elif echo "$OUTPUT" | grep -q "TEST.*FAILED"; then
+        echo "::error::Tests failed (xcodebuild exited 0 but tests reported failures)"
+        exit 1
+      fi
+      # No failure markers found — treat as success
+      exit 0
+    elif [[ $EXIT_CODE -eq 65 ]]; then
+      # Exit 65 = build/test failure — no point retrying other destinations
       echo "::error::Build or test failure (exit 65) — not retrying other destinations"
       exit 1
     fi
