@@ -99,20 +99,17 @@ jobs:
     name: Publish to CocoaPods
     runs-on: macos-latest
     needs: [validate-version-sync, ios-test-ci]
-    defaults:
-      run:
-        working-directory: ios
     steps:
       - uses: actions/checkout@v4
 
       - name: Lint podspec
-        run: pod lib lint PolyfenceCore.podspec --allow-warnings --skip-import-validation
+        run: pod lib lint ios/PolyfenceCore.podspec --allow-warnings --skip-import-validation
 
       - name: Push to CocoaPods trunk
         if: ${{ !contains(github.ref_name, 'rc') }}
         env:
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
-        run: pod trunk push PolyfenceCore.podspec
+        run: pod trunk push ios/PolyfenceCore.podspec
 
   github-release:
     name: Create GitHub Release
