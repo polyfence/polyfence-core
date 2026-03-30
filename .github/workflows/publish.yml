@@ -23,7 +23,7 @@ jobs:
           echo "Android version: $ANDROID_VERSION"
 
           # Extract iOS version from podspec
-          IOS_VERSION=$(grep -oP "s\.version\s*=\s*'\K[^']+" ios/PolyfenceCore.podspec)
+          IOS_VERSION=$(grep -oP "s\.version\s*=\s*'\K[^']+" PolyfenceCore.podspec)
           echo "iOS version: $IOS_VERSION"
 
           # Validate all versions match
@@ -103,13 +103,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Lint podspec
-        run: pod lib lint ios/PolyfenceCore.podspec --allow-warnings --skip-import-validation
+        run: pod lib lint PolyfenceCore.podspec --allow-warnings --skip-import-validation
 
       - name: Push to CocoaPods trunk
         if: ${{ !contains(github.ref_name, 'rc') }}
         env:
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
-        run: pod trunk push ios/PolyfenceCore.podspec
+        run: pod trunk push PolyfenceCore.podspec
 
   github-release:
     name: Create GitHub Release
