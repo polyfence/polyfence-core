@@ -40,3 +40,22 @@ jobs:
 
       - name: Test
         run: ./gradlew test
+
+  ios:
+    name: iOS Build & Test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          for xc in /Applications/Xcode_16.4.app /Applications/Xcode_16.3.app /Applications/Xcode.app; do
+            [ -d "$xc" ] && { sudo xcode-select -s "$xc"; break; }
+          done
+          xcodebuild -version
+
+      - name: Build and test Swift package
+        run: bash scripts/ci-ios-swift-tests.sh PolyfenceCore
+
+      - name: Lint podspec
+        run: pod lib lint PolyfenceCore.podspec --allow-warnings --skip-import-validation
