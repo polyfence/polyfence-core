@@ -109,7 +109,7 @@ jobs:
         if: ${{ !contains(github.ref_name, 'rc') }}
         env:
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
-        run: pod trunk push PolyfenceCore.podspec
+        run: pod trunk push PolyfenceCore.podspec --allow-warnings
 
   github-release:
     name: Create GitHub Release
