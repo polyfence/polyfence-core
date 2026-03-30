@@ -98,6 +98,15 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Update smart GPS configuration.
+         * Stores the config and delegates to the running instance if available.
+         */
+        fun updateSmartConfiguration(config: SmartGpsConfig) {
+            currentSmartConfig = config
+            currentInstance?.updateSmartConfiguration(config)
+        }
+
+        /**
          * Set whether alert notifications should be shown
          */
         fun setAlertNotificationsEnabled(enabled: Boolean) {

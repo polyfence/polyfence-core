@@ -33,6 +33,11 @@ class LocationTracker: NSObject {
     private var lastLocationTime: TimeInterval = 0
     private var consecutiveGpsFailures: Int = 0
     private var isRunning: Bool = false
+
+    /// Whether the tracker is currently running
+    func isTracking() -> Bool {
+        return isRunning
+    }
     private var pendingStartAfterAuthorization: Bool = false
 
     // GPS Health Tracking
@@ -1036,6 +1041,11 @@ extension LocationTracker: CLLocationManagerDelegate {
         TrackingScheduler.shared.updateConfig(scheduleSettings)
     }
 
+    /// Clear all schedule configuration
+    func clearScheduleConfig() {
+        setScheduleConfig(nil)
+    }
+
     /**
      * Configure activity recognition
      * @param activitySettingsMap Activity configuration map from bridge
@@ -1095,6 +1105,11 @@ extension LocationTracker: CLLocationManagerDelegate {
         }
 
         config.logConfiguration(tag: Self.TAG)
+    }
+
+    /// Reset smart GPS configuration to defaults
+    func resetSmartConfiguration() {
+        updateSmartConfiguration(SmartGpsConfig())
     }
 
     /**
