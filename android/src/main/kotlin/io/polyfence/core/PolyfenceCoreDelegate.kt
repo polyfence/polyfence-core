@@ -21,4 +21,7 @@ interface PolyfenceCoreDelegate {
 
     /** Called when an error occurs */
     fun onError(errorData: Map<String, Any>)
+
+    /** Whether the bridge is currently tracking (used by core for state queries) */
+    fun isTrackingEnabled(): Boolean
 }
