@@ -146,9 +146,8 @@ public class LocationTracker: NSObject {
     private func setupNotificationCenter() {
         notificationCenter = UNUserNotificationCenter.current()
 
-        // REMOVED delegate to fix background notifications
-        // Setting delegate breaks background delivery - let iOS handle automatically
-        // notificationCenter?.delegate = self
+        // Set delegate to enable foreground notification delivery
+        notificationCenter?.delegate = self
 
         // Request standard notification permissions (no critical alerts)
         notificationCenter?.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
@@ -998,8 +997,29 @@ extension LocationTracker: CLLocationManagerDelegate {
     public func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         // Exited region
     }
+}
 
-    // MARK: - Smart GPS Configuration Methods
+// MARK: - UNUserNotificationCenterDelegate
+
+extension LocationTracker: UNUserNotificationCenterDelegate {
+
+    public func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // Show notifications even when app is in foreground
+        if #available(iOS 14.0, *) {
+            completionHandler([.banner, .sound, .badge])
+        } else {
+            completionHandler([.alert, .sound, .badge])
+        }
+    }
+}
+
+// MARK: - Smart GPS Configuration Methods
+
+extension LocationTracker {
 
     /**
      * Update smart GPS configuration
