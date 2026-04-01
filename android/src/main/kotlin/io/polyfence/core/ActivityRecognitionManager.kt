@@ -75,6 +75,11 @@ class ActivityRecognitionManager(private val context: Context) {
             return
         }
 
+        // Stop existing recognition before restarting to avoid receiver leaks
+        if (isEnabled) {
+            stop()
+        }
+
         settings = activitySettings
         onActivityChanged = callback
         isEnabled = true
