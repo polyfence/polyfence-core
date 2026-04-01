@@ -689,8 +689,13 @@ class LocationTracker : Service() {
             intent.getSerializableExtra("zoneData") as? Map<String, Any>
         } ?: return
 
-        // Add to engine
-        geofenceEngine.addZone(zoneId, zoneName, zoneData)
+        // Add to engine (skip invalid zones instead of crashing)
+        try {
+            geofenceEngine.addZone(zoneId, zoneName, zoneData)
+        } catch (e: Exception) {
+            Log.w(TAG, "Skipping invalid zone $zoneId: ${e.message}")
+            return
+        }
 
         // Save to persistent storage
         zonePersistence.saveZone(zoneId, zoneName, zoneData)
