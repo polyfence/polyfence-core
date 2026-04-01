@@ -835,7 +835,7 @@ public class LocationTracker: NSObject {
 
 extension LocationTracker: CLLocationManagerDelegate {
 
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         // CRITICAL: Only process locations if tracking is explicitly enabled
         guard trackingEnabled, let location = locations.last, isRunning else {
             return
@@ -913,7 +913,7 @@ extension LocationTracker: CLLocationManagerDelegate {
         }
     }
 
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+    public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         consecutiveGpsFailures += 1
 
         // Track GPS availability drop for health metrics
@@ -940,12 +940,12 @@ extension LocationTracker: CLLocationManagerDelegate {
     }
 
     // iOS < 14 callback
-    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+    public func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         handleAuthorizationChange(status: status)
     }
 
     // iOS 14+ callback
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status: CLAuthorizationStatus
         if #available(iOS 14.0, *) {
             status = manager.authorizationStatus
@@ -987,15 +987,15 @@ extension LocationTracker: CLLocationManagerDelegate {
         }
     }
 
-    func locationManager(_ manager: CLLocationManager, didStartMonitoringFor region: CLRegion) {
+    public func locationManager(_ manager: CLLocationManager, didStartMonitoringFor region: CLRegion) {
         // Started monitoring region
     }
 
-    func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+    public func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         // Entered region
     }
 
-    func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
+    public func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         // Exited region
     }
 
