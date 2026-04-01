@@ -12,7 +12,7 @@ import UIKit
  * Single responsibility: GPS updates -> GeofenceEngine -> Notifications
  * Ported from Android LocationTracker.kt
  */
-class LocationTracker: NSObject {
+public class LocationTracker: NSObject {
 
     // MARK: - Constants
     private static let TAG = "LocationTracker"
@@ -35,7 +35,7 @@ class LocationTracker: NSObject {
     private var isRunning: Bool = false
 
     /// Whether the tracker is currently running
-    func isTracking() -> Bool {
+    public func isTracking() -> Bool {
         return isRunning
     }
     private var pendingStartAfterAuthorization: Bool = false
@@ -78,7 +78,7 @@ class LocationTracker: NSObject {
     private var geofenceCallback: (([String: Any]) -> Void)?
 
     // Core delegate for platform bridge communication
-    weak var coreDelegate: PolyfenceCoreDelegate?
+    public weak var coreDelegate: PolyfenceCoreDelegate?
 
     // Smart GPS Configuration
     private var smartConfig = SmartGpsConfig()
@@ -114,7 +114,7 @@ class LocationTracker: NSObject {
     private var activitySettings: ActivitySettings = ActivitySettings()
     private var currentActivity: ActivityType = .unknown
 
-    override init() {
+    public override init() {
         super.init()
         // Initialize persistence first so it's available for geofence engine
         zonePersistence = ZonePersistence()
@@ -146,9 +146,8 @@ class LocationTracker: NSObject {
     private func setupNotificationCenter() {
         notificationCenter = UNUserNotificationCenter.current()
 
-        // REMOVED delegate to fix background notifications
-        // Setting delegate breaks background delivery - let iOS handle automatically
-        // notificationCenter?.delegate = self
+        // Set delegate to enable foreground notification delivery
+        notificationCenter?.delegate = self
 
         // Request standard notification permissions (no critical alerts)
         notificationCenter?.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
@@ -183,7 +182,7 @@ class LocationTracker: NSObject {
     /**
      * Start location tracking
      */
-    func startTracking() {
+    public func startTracking() {
         guard locationManager != nil else {
             return
         }
@@ -250,7 +249,7 @@ class LocationTracker: NSObject {
     /**
      * Stop location tracking
      */
-    func stopTracking() {
+    public func stopTracking() {
         guard let locationManager = locationManager else { return }
 
         isRunning = false
@@ -334,7 +333,7 @@ class LocationTracker: NSObject {
     /**
      * Add zone for monitoring
      */
-    func addZone(zoneId: String, zoneName: String, zoneData: [String: Any]) {
+    public func addZone(zoneId: String, zoneName: String, zoneData: [String: Any]) {
         geofenceQueue.async { [weak self] in
             guard let self = self else { return }
             do {
@@ -362,7 +361,7 @@ class LocationTracker: NSObject {
     /**
      * Remove zone from monitoring
      */
-    func removeZone(zoneId: String) {
+    public func removeZone(zoneId: String) {
         geofenceQueue.async { [weak self] in
             self?.geofenceEngine.removeZone(zoneId: zoneId)
         }
@@ -372,7 +371,7 @@ class LocationTracker: NSObject {
     /**
      * Clear all zones
      */
-    func clearAllZones() {
+    public func clearAllZones() {
         geofenceQueue.async { [weak self] in
             self?.geofenceEngine.clearAllZones()
         }
@@ -382,18 +381,18 @@ class LocationTracker: NSObject {
     /**
      * Set callbacks
      */
-    func setLocationCallback(_ callback: @escaping ([String: Any]) -> Void) {
+    public func setLocationCallback(_ callback: @escaping ([String: Any]) -> Void) {
         locationCallback = callback
     }
 
-    func setGeofenceCallback(_ callback: @escaping ([String: Any]) -> Void) {
+    public func setGeofenceCallback(_ callback: @escaping ([String: Any]) -> Void) {
         geofenceCallback = callback
     }
 
     /**
      * Set whether alert notifications should be shown
      */
-    func setAlertNotificationsEnabled(_ enabled: Bool) {
+    public func setAlertNotificationsEnabled(_ enabled: Bool) {
         alertNotificationsEnabled = enabled
         NSLog("[LocationTracker] Alert notifications \(enabled ? "enabled" : "disabled")")
     }
@@ -401,14 +400,14 @@ class LocationTracker: NSObject {
     /**
      * Set which bridge platform is calling core.
      */
-    func setBridgePlatform(_ platform: String) {
+    public func setBridgePlatform(_ platform: String) {
         telemetryAggregator.setBridgePlatform(platform: platform)
     }
 
     /**
      * Request permissions using the same CLLocationManager instance
      */
-    func requestPermissions(always: Bool = false) {
+    public func requestPermissions(always: Bool = false) {
         let status = locationManager?.authorizationStatus ?? .notDetermined
         if status == .notDetermined {
             pendingStartAfterAuthorization = false
@@ -428,7 +427,7 @@ class LocationTracker: NSObject {
     /**
      * Get last known location as a dictionary for bridge consumption
      */
-    func getLastKnownLocationData() -> [String: Any]? {
+    public func getLastKnownLocationData() -> [String: Any]? {
         guard let loc = locationManager?.location else { return nil }
         return [
             "latitude": loc.coordinate.latitude,
@@ -835,7 +834,7 @@ class LocationTracker: NSObject {
 
 extension LocationTracker: CLLocationManagerDelegate {
 
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         // CRITICAL: Only process locations if tracking is explicitly enabled
         guard trackingEnabled, let location = locations.last, isRunning else {
             return
@@ -913,7 +912,7 @@ extension LocationTracker: CLLocationManagerDelegate {
         }
     }
 
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+    public func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         consecutiveGpsFailures += 1
 
         // Track GPS availability drop for health metrics
@@ -940,12 +939,12 @@ extension LocationTracker: CLLocationManagerDelegate {
     }
 
     // iOS < 14 callback
-    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+    public func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         handleAuthorizationChange(status: status)
     }
 
     // iOS 14+ callback
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status: CLAuthorizationStatus
         if #available(iOS 14.0, *) {
             status = manager.authorizationStatus
@@ -987,19 +986,40 @@ extension LocationTracker: CLLocationManagerDelegate {
         }
     }
 
-    func locationManager(_ manager: CLLocationManager, didStartMonitoringFor region: CLRegion) {
+    public func locationManager(_ manager: CLLocationManager, didStartMonitoringFor region: CLRegion) {
         // Started monitoring region
     }
 
-    func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+    public func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         // Entered region
     }
 
-    func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
+    public func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         // Exited region
     }
+}
 
-    // MARK: - Smart GPS Configuration Methods
+// MARK: - UNUserNotificationCenterDelegate
+
+extension LocationTracker: UNUserNotificationCenterDelegate {
+
+    public func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // Show notifications even when app is in foreground
+        if #available(iOS 14.0, *) {
+            completionHandler([.banner, .sound, .badge])
+        } else {
+            completionHandler([.alert, .sound, .badge])
+        }
+    }
+}
+
+// MARK: - Smart GPS Configuration Methods
+
+extension LocationTracker {
 
     /**
      * Update smart GPS configuration
@@ -1007,7 +1027,7 @@ extension LocationTracker: CLLocationManagerDelegate {
     /**
      * Set GPS accuracy threshold for GeofenceEngine
      */
-    func setGpsAccuracyThreshold(_ threshold: Double) {
+    public func setGpsAccuracyThreshold(_ threshold: Double) {
         geofenceEngine.setGpsAccuracyThreshold(threshold)
     }
 
@@ -1016,7 +1036,7 @@ extension LocationTracker: CLLocationManagerDelegate {
      * @param enabled Whether dwell detection is enabled
      * @param thresholdMs How long (milliseconds) device must stay in zone before DWELL fires
      */
-    func setDwellConfig(enabled: Bool, thresholdMs: Int) {
+    public func setDwellConfig(enabled: Bool, thresholdMs: Int) {
         // Convert milliseconds to seconds for iOS
         let thresholdSeconds = TimeInterval(thresholdMs) / 1000.0
         geofenceEngine.setDwellConfig(enabled: enabled, thresholdSeconds: thresholdSeconds)
@@ -1028,7 +1048,7 @@ extension LocationTracker: CLLocationManagerDelegate {
      * @param activeRadiusMeters Radius to check zones within
      * @param refreshDistanceMeters Distance to move before refreshing active cluster
      */
-    func setClusterConfig(enabled: Bool, activeRadiusMeters: Double, refreshDistanceMeters: Double) {
+    public func setClusterConfig(enabled: Bool, activeRadiusMeters: Double, refreshDistanceMeters: Double) {
         geofenceEngine.setClusterConfig(enabled: enabled, activeRadiusMeters: activeRadiusMeters, refreshDistanceMeters: refreshDistanceMeters)
     }
 
@@ -1036,13 +1056,13 @@ extension LocationTracker: CLLocationManagerDelegate {
      * Configure scheduled tracking
      * @param scheduleSettings Schedule configuration map from bridge
      */
-    func setScheduleConfig(_ scheduleSettings: [String: Any]?) {
+    public func setScheduleConfig(_ scheduleSettings: [String: Any]?) {
         TrackingScheduler.shared.setLocationTracker(self)
         TrackingScheduler.shared.updateConfig(scheduleSettings)
     }
 
     /// Clear all schedule configuration
-    func clearScheduleConfig() {
+    public func clearScheduleConfig() {
         setScheduleConfig(nil)
     }
 
@@ -1050,7 +1070,7 @@ extension LocationTracker: CLLocationManagerDelegate {
      * Configure activity recognition
      * @param activitySettingsMap Activity configuration map from bridge
      */
-    func setActivityConfig(_ activitySettingsMap: [String: Any]?) {
+    public func setActivityConfig(_ activitySettingsMap: [String: Any]?) {
         guard let settingsMap = activitySettingsMap else {
             // Disable activity recognition if no settings provided
             activityRecognitionManager?.stop()
@@ -1096,7 +1116,7 @@ extension LocationTracker: CLLocationManagerDelegate {
         }
     }
 
-    func updateSmartConfiguration(_ config: SmartGpsConfig) {
+    public func updateSmartConfiguration(_ config: SmartGpsConfig) {
         self.smartConfig = config
 
         // Apply configuration if tracking is active
@@ -1108,14 +1128,14 @@ extension LocationTracker: CLLocationManagerDelegate {
     }
 
     /// Reset smart GPS configuration to defaults
-    func resetSmartConfiguration() {
+    public func resetSmartConfiguration() {
         updateSmartConfiguration(SmartGpsConfig())
     }
 
     /**
      * Get current smart GPS configuration
      */
-    func getCurrentSmartConfiguration() -> SmartGpsConfig {
+    public func getCurrentSmartConfiguration() -> SmartGpsConfig {
         return smartConfig
     }
 
@@ -1124,7 +1144,7 @@ extension LocationTracker: CLLocationManagerDelegate {
      * Returns which zones the plugin believes the device is currently inside
      * @return Dictionary of zoneId to isInside state
      */
-    func getCurrentZoneStates() -> [String: Bool] {
+    public func getCurrentZoneStates() -> [String: Bool] {
         return geofenceEngine.getCurrentZoneStates()
     }
 
@@ -1478,7 +1498,7 @@ extension LocationTracker: CLLocationManagerDelegate {
     /**
      * Collect session telemetry from all native components.
      */
-    func getSessionTelemetryData() -> [String: Any] {
+    public func getSessionTelemetryData() -> [String: Any] {
         // Set device/config info before collecting (D016)
         telemetryAggregator.setDeviceInfo(
             category: TelemetryAggregator.getDeviceCategory(),

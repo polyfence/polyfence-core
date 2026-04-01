@@ -5,15 +5,15 @@ import CoreLocation
  * Zone data model for proximity calculation
  */
 public struct Zone {
-    let id: String
-    let name: String
-    let type: ZoneType
-    let center: CLLocationCoordinate2D?
-    let radius: Double?
-    let points: [CLLocationCoordinate2D]
+    public let id: String
+    public let name: String
+    public let type: ZoneType
+    public let center: CLLocationCoordinate2D?
+    public let radius: Double?
+    public let points: [CLLocationCoordinate2D]
 
-    var isCircle: Bool { return type == .circle }
-    var isPolygon: Bool { return type == .polygon }
+    public var isCircle: Bool { return type == .circle }
+    public var isPolygon: Bool { return type == .polygon }
 }
 
 public enum ZoneType: String {

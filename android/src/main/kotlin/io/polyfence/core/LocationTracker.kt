@@ -689,8 +689,13 @@ class LocationTracker : Service() {
             intent.getSerializableExtra("zoneData") as? Map<String, Any>
         } ?: return
 
-        // Add to engine
-        geofenceEngine.addZone(zoneId, zoneName, zoneData)
+        // Add to engine (skip invalid zones instead of crashing)
+        try {
+            geofenceEngine.addZone(zoneId, zoneName, zoneData)
+        } catch (e: Exception) {
+            Log.w(TAG, "Skipping invalid zone $zoneId: ${e.message}")
+            return
+        }
 
         // Save to persistent storage
         zonePersistence.saveZone(zoneId, zoneName, zoneData)
@@ -726,17 +731,25 @@ class LocationTracker : Service() {
     private fun restoreZonesFromStorage() {
         try {
             val savedZones = zonePersistence.loadAllZones()
+            var restored = 0
+            var failed = 0
 
             savedZones.forEach { (zoneId, zoneInfo) ->
-                val (id, name, data) = zoneInfo
-                geofenceEngine.addZone(id, name, data)
+                try {
+                    val (id, name, data) = zoneInfo
+                    geofenceEngine.addZone(id, name, data)
+                    restored++
+                } catch (e: Exception) {
+                    Log.w(TAG, "Skipping invalid zone $zoneId: ${e.message}")
+                    failed++
+                }
             }
 
             // Load persisted zone states AFTER zones are loaded
             // This restores the "inside/outside" state from before service restart
             geofenceEngine.loadPersistedZoneStates()
 
-            Log.i(TAG, "Restored ${savedZones.size} zones from storage")
+            Log.i(TAG, "Restored $restored zones from storage ($failed failed)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to restore zones: ${e.message}")
         }

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-04-01
+
+### Fixed
+- **iOS public access control** — `LocationTracker`, `ZonePersistence`, `PolyfenceConfig`, `SmartGpsConfig`, `SmartGpsConfigFactory`, and `Zone` types made `public` for CocoaPods consumers. Without `public`, these types were invisible when imported as a framework module (`import PolyfenceCore`). Android (Kotlin) was unaffected as `internal` is package-level, not module-level.
+
 ## [1.0.3] - 2026-04-01
 
 ### Fixed

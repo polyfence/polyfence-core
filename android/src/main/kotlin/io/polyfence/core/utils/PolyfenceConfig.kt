@@ -24,7 +24,7 @@ class PolyfenceConfig(context: Context) {
         // Zone Validation Configuration
         const val DEFAULT_CONFIDENCE_POINTS = 2
         const val DEFAULT_CONFIDENCE_TIMEOUT_MS = 10000L
-        const val DEFAULT_REQUIRE_CONFIRMATION = true
+        const val DEFAULT_REQUIRE_CONFIRMATION = false
         const val LARGE_ZONE_RADIUS_THRESHOLD_METERS = 200.0
         const val MIN_SINGLE_POINT_ZONE_RADIUS_METERS = 50.0
         const val MIN_POLYGON_POINTS = 3

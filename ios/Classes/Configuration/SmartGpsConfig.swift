@@ -5,29 +5,29 @@ import CoreLocation
  * Smart GPS Configuration System for Polyfence iOS
  * Provides flexible GPS accuracy/battery profiles for different use cases
  */
-struct SmartGpsConfig {
-    let accuracyProfile: AccuracyProfile
-    let updateStrategy: UpdateStrategy
-    let proximitySettings: ProximitySettings?
-    let movementSettings: MovementSettings?
-    let batterySettings: BatterySettings?
-    let enableDebugLogging: Bool
+public struct SmartGpsConfig {
+    public let accuracyProfile: AccuracyProfile
+    public let updateStrategy: UpdateStrategy
+    public let proximitySettings: ProximitySettings?
+    public let movementSettings: MovementSettings?
+    public let batterySettings: BatterySettings?
+    public let enableDebugLogging: Bool
 
-    enum AccuracyProfile: String, CaseIterable {
+    public enum AccuracyProfile: String, CaseIterable {
         case maxAccuracy = "MAX_ACCURACY"
         case balanced = "BALANCED"
         case batteryOptimal = "BATTERY_OPTIMAL"
         case adaptive = "ADAPTIVE"
     }
 
-    enum UpdateStrategy: String, CaseIterable {
+    public enum UpdateStrategy: String, CaseIterable {
         case continuous = "CONTINUOUS"
         case proximityBased = "PROXIMITY_BASED"
         case movementBased = "MOVEMENT_BASED"
         case intelligent = "INTELLIGENT"
     }
 
-    init(
+    public init(
         accuracyProfile: AccuracyProfile = .balanced,  // Changed from maxAccuracy for better battery
         updateStrategy: UpdateStrategy = .continuous,
         proximitySettings: ProximitySettings? = nil,
@@ -46,7 +46,7 @@ struct SmartGpsConfig {
     /**
      * Get CLLocationAccuracy based on accuracy profile
      */
-    func getCLLocationAccuracy() -> CLLocationAccuracy {
+    public func getCLLocationAccuracy() -> CLLocationAccuracy {
         switch accuracyProfile {
         case .maxAccuracy:
             return kCLLocationAccuracyBest
@@ -62,7 +62,7 @@ struct SmartGpsConfig {
     /**
      * Get distance filter for GPS updates
      */
-    func getDistanceFilter() -> CLLocationDistance {
+    public func getDistanceFilter() -> CLLocationDistance {
         switch accuracyProfile {
         case .maxAccuracy:
             return 10.0  // 10 meters
@@ -78,7 +78,7 @@ struct SmartGpsConfig {
     /**
      * Get base update interval based on accuracy profile
      */
-    func getBaseUpdateInterval() -> TimeInterval {
+    public func getBaseUpdateInterval() -> TimeInterval {
         switch accuracyProfile {
         case .maxAccuracy:
             return 5.0      // 5 seconds
@@ -94,7 +94,7 @@ struct SmartGpsConfig {
     /**
      * Whether to pause location updates automatically
      */
-    func shouldPauseAutomatically() -> Bool {
+    public func shouldPauseAutomatically() -> Bool {
         switch accuracyProfile {
         case .maxAccuracy:
             return false
@@ -110,7 +110,7 @@ struct SmartGpsConfig {
     /**
      * Log configuration for debugging
      */
-    func logConfiguration(tag: String) {
+    public func logConfiguration(tag: String) {
         if enableDebugLogging {
             NSLog("%@", "\(tag): Smart GPS Config - profile: \(accuracyProfile), strategy: \(updateStrategy)")
             if let proximity = proximitySettings {
@@ -129,13 +129,13 @@ struct SmartGpsConfig {
 /**
  * Proximity-based optimization settings
  */
-struct ProximitySettings {
-    let nearZoneThresholdMeters: Double
-    let farZoneThresholdMeters: Double
-    let nearZoneUpdateIntervalMs: TimeInterval
-    let farZoneUpdateIntervalMs: TimeInterval
+public struct ProximitySettings {
+    public let nearZoneThresholdMeters: Double
+    public let farZoneThresholdMeters: Double
+    public let nearZoneUpdateIntervalMs: TimeInterval
+    public let farZoneUpdateIntervalMs: TimeInterval
 
-    init(
+    public init(
         nearZoneThresholdMeters: Double = 500.0,
         farZoneThresholdMeters: Double = 2000.0,
         nearZoneUpdateIntervalMs: TimeInterval = 5.0,
@@ -147,7 +147,7 @@ struct ProximitySettings {
         self.farZoneUpdateIntervalMs = farZoneUpdateIntervalMs
     }
 
-    static func fromMap(_ map: [String: Any]) -> ProximitySettings {
+    public static func fromMap(_ map: [String: Any]) -> ProximitySettings {
         return ProximitySettings(
             nearZoneThresholdMeters: (map["nearZoneThresholdMeters"] as? NSNumber)?.doubleValue ?? 500.0,
             farZoneThresholdMeters: (map["farZoneThresholdMeters"] as? NSNumber)?.doubleValue ?? 2000.0,
@@ -156,7 +156,7 @@ struct ProximitySettings {
         )
     }
 
-    func toMap() -> [String: Any] {
+    public func toMap() -> [String: Any] {
         return [
             "nearZoneThresholdMeters": nearZoneThresholdMeters,
             "farZoneThresholdMeters": farZoneThresholdMeters,
@@ -169,13 +169,13 @@ struct ProximitySettings {
 /**
  * Movement-based optimization settings
  */
-struct MovementSettings {
-    let stationaryThresholdMs: TimeInterval
-    let movementThresholdMeters: Double
-    let stationaryUpdateIntervalMs: TimeInterval
-    let movingUpdateIntervalMs: TimeInterval
+public struct MovementSettings {
+    public let stationaryThresholdMs: TimeInterval
+    public let movementThresholdMeters: Double
+    public let stationaryUpdateIntervalMs: TimeInterval
+    public let movingUpdateIntervalMs: TimeInterval
 
-    init(
+    public init(
         stationaryThresholdMs: TimeInterval = 300.0,     // 5 minutes
         movementThresholdMeters: Double = 50.0,
         stationaryUpdateIntervalMs: TimeInterval = 120.0, // 2 minutes
@@ -187,7 +187,7 @@ struct MovementSettings {
         self.movingUpdateIntervalMs = movingUpdateIntervalMs
     }
 
-    static func fromMap(_ map: [String: Any]) -> MovementSettings {
+    public static func fromMap(_ map: [String: Any]) -> MovementSettings {
         return MovementSettings(
             stationaryThresholdMs: (map["stationaryThresholdMs"] as? NSNumber)?.doubleValue ?? 300000.0 / 1000.0,
             movementThresholdMeters: (map["movementThresholdMeters"] as? NSNumber)?.doubleValue ?? 50.0,
@@ -196,7 +196,7 @@ struct MovementSettings {
         )
     }
 
-    func toMap() -> [String: Any] {
+    public func toMap() -> [String: Any] {
         return [
             "stationaryThresholdMs": stationaryThresholdMs * 1000.0,
             "movementThresholdMeters": movementThresholdMeters,
@@ -209,13 +209,13 @@ struct MovementSettings {
 /**
  * Battery-aware optimization settings
  */
-struct BatterySettings {
-    let lowBatteryThreshold: Int
-    let criticalBatteryThreshold: Int
-    let lowBatteryUpdateIntervalMs: TimeInterval
-    let pauseOnCriticalBattery: Bool
+public struct BatterySettings {
+    public let lowBatteryThreshold: Int
+    public let criticalBatteryThreshold: Int
+    public let lowBatteryUpdateIntervalMs: TimeInterval
+    public let pauseOnCriticalBattery: Bool
 
-    init(
+    public init(
         lowBatteryThreshold: Int = 20,
         criticalBatteryThreshold: Int = 10,
         lowBatteryUpdateIntervalMs: TimeInterval = 30.0,  // 30 seconds
@@ -227,7 +227,7 @@ struct BatterySettings {
         self.pauseOnCriticalBattery = pauseOnCriticalBattery
     }
 
-    static func fromMap(_ map: [String: Any]) -> BatterySettings {
+    public static func fromMap(_ map: [String: Any]) -> BatterySettings {
         return BatterySettings(
             lowBatteryThreshold: (map["lowBatteryThreshold"] as? NSNumber)?.intValue ?? 20,
             criticalBatteryThreshold: (map["criticalBatteryThreshold"] as? NSNumber)?.intValue ?? 10,
@@ -236,7 +236,7 @@ struct BatterySettings {
         )
     }
 
-    func toMap() -> [String: Any] {
+    public func toMap() -> [String: Any] {
         return [
             "lowBatteryThreshold": lowBatteryThreshold,
             "criticalBatteryThreshold": criticalBatteryThreshold,
@@ -354,8 +354,8 @@ struct ActivitySettings {
 /**
  * Factory for creating SmartGpsConfig from bridge configuration data
  */
-struct SmartGpsConfigFactory {
-    static func fromMap(_ map: [String: Any]) -> SmartGpsConfig {
+public struct SmartGpsConfigFactory {
+    public static func fromMap(_ map: [String: Any]) -> SmartGpsConfig {
         let accuracyProfile = parseEnum(
             map["accuracyProfile"] as? String,
             allCases: SmartGpsConfig.AccuracyProfile.allCases,
@@ -385,7 +385,7 @@ struct SmartGpsConfigFactory {
         )
     }
 
-    static func toMap(_ config: SmartGpsConfig) -> [String: Any] {
+    public static func toMap(_ config: SmartGpsConfig) -> [String: Any] {
         var map: [String: Any] = [
             "accuracyProfile": config.accuracyProfile.rawValue,
             "updateStrategy": config.updateStrategy.rawValue,

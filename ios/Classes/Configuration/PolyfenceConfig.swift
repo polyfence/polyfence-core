@@ -5,17 +5,17 @@ import Foundation
  * Single responsibility: Runtime configuration and persistence
  * iOS counterpart of Android PolyfenceConfig.kt
  */
-class PolyfenceConfig {
+public class PolyfenceConfig {
 
     private static let TAG = "PolyfenceConfig"
     private static let suiteName = "polyfence_config"
 
     // MARK: - Default GPS Configuration
-    static let DEFAULT_GPS_INTERVAL_MS: Int = 5000
-    static let DEFAULT_GPS_ACCURACY_THRESHOLD: Double = 100.0
-    static let DEFAULT_MIN_UPDATE_INTERVAL_MS: Int = 1000
-    static let DEFAULT_MAX_UPDATE_DELAY_MS: Int = 6000
-    static let MIN_UPDATE_DISTANCE_METERS: Double = 10.0
+    public static let DEFAULT_GPS_INTERVAL_MS: Int = 5000
+    public static let DEFAULT_GPS_ACCURACY_THRESHOLD: Double = 100.0
+    public static let DEFAULT_MIN_UPDATE_INTERVAL_MS: Int = 1000
+    public static let DEFAULT_MAX_UPDATE_DELAY_MS: Int = 6000
+    public static let MIN_UPDATE_DISTANCE_METERS: Double = 10.0
 
     // MARK: - Zone Validation Configuration
     static let DEFAULT_CONFIDENCE_POINTS: Int = 2
@@ -55,13 +55,13 @@ class PolyfenceConfig {
 
     private let defaults: UserDefaults
 
-    init() {
+    public init() {
         self.defaults = UserDefaults(suiteName: PolyfenceConfig.suiteName) ?? UserDefaults.standard
     }
 
     // MARK: - GPS Configuration Properties
 
-    var gpsIntervalMs: Int {
+    public var gpsIntervalMs: Int {
         get {
             let val = defaults.integer(forKey: "gps_interval_ms")
             return val != 0 ? val : PolyfenceConfig.DEFAULT_GPS_INTERVAL_MS
@@ -69,7 +69,7 @@ class PolyfenceConfig {
         set { defaults.set(newValue, forKey: "gps_interval_ms") }
     }
 
-    var gpsAccuracyThreshold: Double {
+    public var gpsAccuracyThreshold: Double {
         get {
             let val = defaults.double(forKey: "gps_accuracy_threshold")
             return val != 0 ? val : PolyfenceConfig.DEFAULT_GPS_ACCURACY_THRESHOLD
@@ -77,7 +77,7 @@ class PolyfenceConfig {
         set { defaults.set(newValue, forKey: "gps_accuracy_threshold") }
     }
 
-    var minUpdateIntervalMs: Int {
+    public var minUpdateIntervalMs: Int {
         get {
             let val = defaults.integer(forKey: "min_update_interval_ms")
             return val != 0 ? val : PolyfenceConfig.DEFAULT_MIN_UPDATE_INTERVAL_MS
@@ -85,7 +85,7 @@ class PolyfenceConfig {
         set { defaults.set(newValue, forKey: "min_update_interval_ms") }
     }
 
-    var maxUpdateDelayMs: Int {
+    public var maxUpdateDelayMs: Int {
         get {
             let val = defaults.integer(forKey: "max_update_delay_ms")
             return val != 0 ? val : PolyfenceConfig.DEFAULT_MAX_UPDATE_DELAY_MS
@@ -95,7 +95,7 @@ class PolyfenceConfig {
 
     // MARK: - Validation Configuration Properties
 
-    var requireConfirmation: Bool {
+    public var requireConfirmation: Bool {
         get {
             if defaults.object(forKey: "require_confirmation") != nil {
                 return defaults.bool(forKey: "require_confirmation")
@@ -105,7 +105,7 @@ class PolyfenceConfig {
         set { defaults.set(newValue, forKey: "require_confirmation") }
     }
 
-    var confidencePoints: Int {
+    public var confidencePoints: Int {
         get {
             let val = defaults.integer(forKey: "confidence_points")
             return val != 0 ? val : PolyfenceConfig.DEFAULT_CONFIDENCE_POINTS
@@ -113,7 +113,7 @@ class PolyfenceConfig {
         set { defaults.set(newValue, forKey: "confidence_points") }
     }
 
-    var confidenceTimeoutMs: Int {
+    public var confidenceTimeoutMs: Int {
         get {
             let val = defaults.integer(forKey: "confidence_timeout_ms")
             return val != 0 ? val : PolyfenceConfig.DEFAULT_CONFIDENCE_TIMEOUT_MS
@@ -123,14 +123,14 @@ class PolyfenceConfig {
 
     // MARK: - Operations
 
-    func resetToDefaults() {
+    public func resetToDefaults() {
         guard let suiteName = defaults.persistentDomain(forName: PolyfenceConfig.suiteName) else { return }
         for key in suiteName.keys {
             defaults.removeObject(forKey: key)
         }
     }
 
-    func getConfigurationMap() -> [String: Any] {
+    public func getConfigurationMap() -> [String: Any] {
         return [
             "gps_interval_ms": gpsIntervalMs,
             "gps_accuracy_threshold": gpsAccuracyThreshold,
@@ -142,7 +142,7 @@ class PolyfenceConfig {
         ]
     }
 
-    func updateFromMap(_ configMap: [String: Any]) {
+    public func updateFromMap(_ configMap: [String: Any]) {
         if let val = configMap["gps_interval_ms"] as? Int { gpsIntervalMs = val }
         if let val = configMap["gps_accuracy_threshold"] as? Double { gpsAccuracyThreshold = val }
         if let val = configMap["min_update_interval_ms"] as? Int { minUpdateIntervalMs = val }
