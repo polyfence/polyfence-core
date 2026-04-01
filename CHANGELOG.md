@@ -7,12 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-03-30
+
 ### Added
 - **Bridge platform identification** — `TelemetryAggregator.setBridgePlatform()` and `SessionTelemetry.bridgePlatform` field. Bridges (Flutter, React Native) set their identity during initialization; carried through telemetry payload as `bridge_platform`.
 - **Pending bridge pattern** — `LocationTracker.setBridgePlatform()` stores value when called before Android service exists, applies in `onCreate()`. Matches existing `pendingActivitySettings` pattern.
+- **Missing bridge APIs** — `updateSmartConfiguration()` added to `LocationTracker.Companion` (Android). `clearScheduleConfig()`, `resetSmartConfiguration()`, `isTracking()` added to `LocationTracker` (iOS). All thin wrappers required by Flutter and React Native bridges.
 
 ### Fixed
 - **Thread safety** — `TelemetryAggregator` (Kotlin) unified under single `synchronized(lock)`. Snapshot-only reads in `getSessionTelemetry()` — no mutation of aggregator state.
+
+## [1.0.1] - 2026-03-29
+
+### Added
+- **iOS CI** — iOS build, test, and pod lint added to CI workflow, running in parallel with Android.
+
+### Fixed
+- **Delegate interface alignment** — `isTrackingEnabled()` added to `PolyfenceCoreDelegate` in both Kotlin and Swift. Published v1.0.0 Maven artifact included this method but the source on main did not, causing build failures for downstream consumers implementing the interface.
 
 ## [1.0.0] - 2026-03-24
 
