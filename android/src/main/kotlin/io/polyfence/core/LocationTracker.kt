@@ -726,17 +726,25 @@ class LocationTracker : Service() {
     private fun restoreZonesFromStorage() {
         try {
             val savedZones = zonePersistence.loadAllZones()
+            var restored = 0
+            var failed = 0
 
             savedZones.forEach { (zoneId, zoneInfo) ->
-                val (id, name, data) = zoneInfo
-                geofenceEngine.addZone(id, name, data)
+                try {
+                    val (id, name, data) = zoneInfo
+                    geofenceEngine.addZone(id, name, data)
+                    restored++
+                } catch (e: Exception) {
+                    Log.w(TAG, "Skipping invalid zone $zoneId: ${e.message}")
+                    failed++
+                }
             }
 
             // Load persisted zone states AFTER zones are loaded
             // This restores the "inside/outside" state from before service restart
             geofenceEngine.loadPersistedZoneStates()
 
-            Log.i(TAG, "Restored ${savedZones.size} zones from storage")
+            Log.i(TAG, "Restored $restored zones from storage ($failed failed)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to restore zones: ${e.message}")
         }
