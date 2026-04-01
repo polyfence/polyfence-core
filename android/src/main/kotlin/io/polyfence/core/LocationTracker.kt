@@ -1,5 +1,6 @@
 package io.polyfence.core
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.app.*
 import android.content.Context
@@ -506,7 +507,9 @@ class LocationTracker : Service() {
             // This ensures the app gets a position immediately on a stationary device.
             if (!hasReceivedFirstLocation) {
                 try {
-                    fusedLocationClient?.lastLocation?.addOnSuccessListener { location ->
+                    @SuppressLint("MissingPermission")  // Permissions verified in startTracking()
+                    val lastLocTask = fusedLocationClient?.lastLocation
+                    lastLocTask?.addOnSuccessListener { location ->
                         if (location != null && firstLocationAfterRestart && isRunning) {
                             Log.d(TAG, "Seeding initial location from lastLocation cache")
                             lastLocationTime = System.currentTimeMillis()
