@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'PolyfenceCore'
-  s.version          = '1.0.3'
+  s.version          = '1.0.4'
   s.summary          = 'Privacy-first polygon and circle geofencing engine for iOS'
   s.description      = <<-DESC
     Standalone native geofencing SDK. On-device polygon (ray-casting) and circle

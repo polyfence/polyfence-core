@@ -4,7 +4,7 @@ import Foundation
  * Zone persistence using UserDefaults (iOS equivalent to Android SharedPreferences)
  * Single responsibility: Save/load zones across app restarts
  */
-class ZonePersistence {
+public class ZonePersistence {
 
     // MARK: - Constants
     internal static let TAG = "ZonePersistence"
@@ -23,13 +23,15 @@ class ZonePersistence {
         attributes: .concurrent
     )
 
+    public init() {}
+
     // MARK: - Public Methods
 
     /**
      * Save zone to persistent storage
      * Thread-safe: Uses barrier queue to prevent race conditions in concurrent writes
      */
-    func saveZone(zoneId: String, zoneName: String, zoneData: [String: Any]) {
+    public func saveZone(zoneId: String, zoneName: String, zoneData: [String: Any]) {
         persistenceQueue.async(flags: .barrier) {
             do {
                 // Save zone data
@@ -59,7 +61,7 @@ class ZonePersistence {
      * Remove zone from persistent storage
      * Thread-safe: Uses barrier queue to prevent race conditions in concurrent writes
      */
-    func removeZone(zoneId: String) {
+    public func removeZone(zoneId: String) {
         persistenceQueue.async(flags: .barrier) {
             // Remove zone data
             let zoneDataKey = "\(ZonePersistence.ZONES_KEY)_\(zoneId)"
@@ -82,7 +84,7 @@ class ZonePersistence {
      * Clear all zones from persistent storage
      * Thread-safe: Uses barrier queue to prevent race conditions
      */
-    func clearAllZones() {
+    public func clearAllZones() {
         persistenceQueue.async(flags: .barrier) {
             let zoneIds = self.userDefaults.stringArray(forKey: ZonePersistence.ZONES_KEY) ?? []
 
@@ -104,7 +106,7 @@ class ZonePersistence {
      * Load all zones from persistent storage
      * Thread-safe: Uses sync to ensure consistent reads
      */
-    func loadAllZones() -> [String: (String, String, [String: Any])] {
+    public func loadAllZones() -> [String: (String, String, [String: Any])] {
         return persistenceQueue.sync {
             let zoneIds = self.userDefaults.stringArray(forKey: ZonePersistence.ZONES_KEY) ?? []
             var zones: [String: (String, String, [String: Any])] = [:]
@@ -138,7 +140,7 @@ class ZonePersistence {
      * Check if zone exists in storage
      * Thread-safe: Uses sync to ensure consistent reads
      */
-    func zoneExists(zoneId: String) -> Bool {
+    public func zoneExists(zoneId: String) -> Bool {
         return persistenceQueue.sync {
             let zoneIds = self.userDefaults.stringArray(forKey: ZonePersistence.ZONES_KEY) ?? []
             return zoneIds.contains(zoneId)
@@ -149,7 +151,7 @@ class ZonePersistence {
      * Get zone count
      * Thread-safe: Uses sync to ensure consistent reads
      */
-    func getZoneCount() -> Int {
+    public func getZoneCount() -> Int {
         return persistenceQueue.sync {
             let zoneIds = self.userDefaults.stringArray(forKey: ZonePersistence.ZONES_KEY) ?? []
             return zoneIds.count
@@ -165,7 +167,7 @@ class ZonePersistence {
      * Called immediately when zone state changes to prevent data loss
      * Thread-safe: Uses barrier queue to prevent race conditions
      */
-    func saveZoneStates(_ states: [String: Bool]) {
+    public func saveZoneStates(_ states: [String: Bool]) {
         persistenceQueue.async(flags: .barrier) {
             self.userDefaults.set(states, forKey: ZonePersistence.ZONE_STATES_KEY)
             self.userDefaults.set(Date().timeIntervalSince1970, forKey: ZonePersistence.LAST_STATE_UPDATE_KEY)
@@ -179,7 +181,7 @@ class ZonePersistence {
      * Save single zone state (write-through)
      * More efficient for single state changes
      */
-    func saveZoneState(zoneId: String, isInside: Bool) {
+    public func saveZoneState(zoneId: String, isInside: Bool) {
         persistenceQueue.async(flags: .barrier) {
             var existingStates = self.userDefaults.dictionary(forKey: ZonePersistence.ZONE_STATES_KEY) as? [String: Bool] ?? [:]
             existingStates[zoneId] = isInside
@@ -196,7 +198,7 @@ class ZonePersistence {
      * Returns empty dictionary if no states saved (fresh install / data wipe)
      * Thread-safe: Uses sync for consistent reads
      */
-    func loadZoneStates() -> [String: Bool] {
+    public func loadZoneStates() -> [String: Bool] {
         return persistenceQueue.sync {
             let states = self.userDefaults.dictionary(forKey: ZonePersistence.ZONE_STATES_KEY) as? [String: Bool] ?? [:]
             let insideCount = states.values.filter { $0 }.count
@@ -208,7 +210,7 @@ class ZonePersistence {
     /**
      * Remove zone state from persistent storage
      */
-    func removeZoneState(zoneId: String) {
+    public func removeZoneState(zoneId: String) {
         persistenceQueue.async(flags: .barrier) {
             var existingStates = self.userDefaults.dictionary(forKey: ZonePersistence.ZONE_STATES_KEY) as? [String: Bool] ?? [:]
             existingStates.removeValue(forKey: zoneId)
@@ -220,7 +222,7 @@ class ZonePersistence {
     /**
      * Clear all zone states from persistent storage
      */
-    func clearAllZoneStates() {
+    public func clearAllZoneStates() {
         persistenceQueue.async(flags: .barrier) {
             self.userDefaults.removeObject(forKey: ZonePersistence.ZONE_STATES_KEY)
             self.userDefaults.removeObject(forKey: ZonePersistence.LAST_STATE_UPDATE_KEY)
@@ -232,7 +234,7 @@ class ZonePersistence {
      * Check if zone states exist in storage
      * Returns false for fresh install / data wipe
      */
-    func hasPersistedZoneStates() -> Bool {
+    public func hasPersistedZoneStates() -> Bool {
         return persistenceQueue.sync {
             return self.userDefaults.object(forKey: ZonePersistence.ZONE_STATES_KEY) != nil
         }
@@ -242,7 +244,7 @@ class ZonePersistence {
      * Get timestamp of last zone state update
      * Returns 0 if never updated
      */
-    func getLastStateUpdateTime() -> TimeInterval {
+    public func getLastStateUpdateTime() -> TimeInterval {
         return persistenceQueue.sync {
             return self.userDefaults.double(forKey: ZonePersistence.LAST_STATE_UPDATE_KEY)
         }
