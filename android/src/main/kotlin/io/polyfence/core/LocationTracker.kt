@@ -1,5 +1,6 @@
 package io.polyfence.core
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.app.*
 import android.content.Context
@@ -413,16 +414,21 @@ class LocationTracker : Service() {
     private var gpsStartDeferred = false
 
     private fun startTracking() {
-        // Verify permissions before starting foreground service
+        // Must call startForeground() immediately — Android requires it within ~10s
+        // of startForegroundService(). Do this BEFORE any checks that might bail out.
+        startForeground(NOTIFICATION_ID, createTrackingNotification())
+
         if (!hasLocationPerms()) {
-            Log.e(TAG, "Cannot start foreground service - missing permissions")
+            Log.e(TAG, "Cannot start tracking - missing permissions")
+            @Suppress("DEPRECATION")
+            stopForeground(true)
             stopSelf()
             return
         }
 
         isRunning = true
         firstLocationAfterRestart = true  // Reset for state reconciliation
-        startForeground(NOTIFICATION_ID, createTrackingNotification())
+        hasReceivedFirstLocation = false  // Reset for distance filter deferral
 
         // Persist tracking state for restart recovery (used by ScheduleReceiver)
         getSharedPreferences("polyfence_tracking", Context.MODE_PRIVATE)
@@ -471,11 +477,17 @@ class LocationTracker : Service() {
         val priority = smartConfig.getLocationPriority()
         val interval = calculateCurrentInterval()
 
+        // Defer distance filter until first location is received. Without this,
+        // FusedLocationProvider suppresses ALL callbacks on a stationary device
+        // because setMinUpdateDistanceMeters requires movement before delivering.
+        // iOS handles this with requestLocation() + locationManager.location seed.
+        val distanceFilter = if (!hasReceivedFirstLocation) 0f else smartConfig.getDistanceFilter()
+
         val locationRequest = LocationRequest.Builder(priority, interval)
             .setMinUpdateIntervalMillis(interval / 2)
             .setMaxUpdateDelayMillis(interval * 2)
             .setWaitForAccurateLocation(smartConfig.shouldWaitForAccurateLocation())
-            .setMinUpdateDistanceMeters(smartConfig.getDistanceFilter())  // Apply distance filter from profile
+            .setMinUpdateDistanceMeters(distanceFilter)
             .build()
 
         try {
@@ -488,7 +500,29 @@ class LocationTracker : Service() {
                 callback,
                 Looper.getMainLooper()
             )
-            Log.d(TAG, "GPS updates started with profile: ${smartConfig.accuracyProfile}")
+            Log.d(TAG, "GPS updates started with profile: ${smartConfig.accuracyProfile}, distanceFilter=${distanceFilter}m")
+
+            // Seed initial location from FusedLocationProvider cache (mirrors iOS
+            // pattern: requestLocation() + locationManager.location on startup).
+            // This ensures the app gets a position immediately on a stationary device.
+            if (!hasReceivedFirstLocation) {
+                try {
+                    @SuppressLint("MissingPermission")  // Permissions verified in startTracking()
+                    val lastLocTask = fusedLocationClient?.lastLocation
+                    lastLocTask?.addOnSuccessListener { location ->
+                        if (location != null && firstLocationAfterRestart && isRunning) {
+                            Log.d(TAG, "Seeding initial location from lastLocation cache")
+                            lastLocationTime = System.currentTimeMillis()
+                            sendLocationToDelegate(location)
+                            firstLocationAfterRestart = false
+                            geofenceEngine.reconcileZoneStates(location)
+                            updateMovementState(location)
+                        }
+                    }
+                } catch (e: SecurityException) {
+                    Log.w(TAG, "Cannot seed lastLocation - permission denied")
+                }
+            }
         } catch (e: SecurityException) {
             Log.e(TAG, "Location permission denied: ${e.message}")
             PolyfenceErrorManager.reportError(
@@ -710,6 +744,7 @@ class LocationTracker : Service() {
 
     // Track if first location after restart has been processed
     private var firstLocationAfterRestart = true
+    private var hasReceivedFirstLocation = false
 
 private fun handleGeofenceEvent(zoneId: String, eventType: String, location: android.location.Location, detectionTimeMs: Double) {
     // Get zone name from GeofenceEngine
@@ -1002,6 +1037,15 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                     firstLocationAfterRestart = false
                     Log.i(TAG, "First location after restart - reconciling zone states")
                     geofenceEngine.reconcileZoneStates(location)
+                }
+
+                // After first real GPS callback, re-apply location request with the
+                // profile's distance filter. Initial request uses 0m to guarantee
+                // delivery on a stationary device.
+                if (!hasReceivedFirstLocation) {
+                    hasReceivedFirstLocation = true
+                    Log.d(TAG, "First GPS fix received - applying profile distance filter")
+                    updateLocationRequest()
                 }
 
                 // Update movement state for smart GPS
@@ -1368,11 +1412,14 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         val priority = smartConfig.getLocationPriority()
         val interval = calculateCurrentInterval()
 
+        // Defer distance filter until first location is received (same as startGpsUpdates)
+        val distanceFilter = if (!hasReceivedFirstLocation) 0f else smartConfig.getDistanceFilter()
+
         val locationRequest = LocationRequest.Builder(priority, interval)
             .setMinUpdateIntervalMillis(interval / 2)
             .setMaxUpdateDelayMillis(interval * 2)
             .setWaitForAccurateLocation(smartConfig.shouldWaitForAccurateLocation())
-            .setMinUpdateDistanceMeters(smartConfig.getDistanceFilter())  // Apply distance filter from profile
+            .setMinUpdateDistanceMeters(distanceFilter)
             .build()
 
         // Stop current location updates
