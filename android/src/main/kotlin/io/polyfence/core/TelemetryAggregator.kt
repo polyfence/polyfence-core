@@ -444,7 +444,8 @@ internal class TelemetryAggregator {
             osVersionMajor = snapshotOsVersionMajor,
             chargingDuringSession = snapshotChargingDuringSession,
             sessionStartHour = snapshotSessionStartHour,
-            bridgePlatform = snapshotBridgePlatform
+            bridgePlatform = snapshotBridgePlatform,
+            coreVersion = PolyfenceCoreVersion.VERSION
         )
 
         return telemetry.toMap()
