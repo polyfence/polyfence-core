@@ -323,6 +323,7 @@ internal class TelemetryAggregator {
             telemetry.accuracyProfile = accuracyProfile
             telemetry.updateStrategy = updateStrategy
             telemetry.bridgePlatform = bridgePlatform
+            telemetry.coreVersion = PolyfenceCoreVersion.version
             telemetry.activityDistribution = activityDist
             telemetry.gpsIntervalDistribution = intervalDist
             telemetry.stationaryRatio = statRatio
