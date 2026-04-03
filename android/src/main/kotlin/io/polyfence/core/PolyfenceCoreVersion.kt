@@ -5,5 +5,5 @@ package io.polyfence.core
  * Must be updated in sync with build.gradle.kts and PolyfenceCore.podspec.
  */
 object PolyfenceCoreVersion {
-    const val VERSION = "1.0.4"
+    const val VERSION = "1.0.5"
 }
