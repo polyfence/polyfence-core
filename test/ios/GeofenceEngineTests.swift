@@ -647,6 +647,83 @@ class GeofenceEngineTests: XCTestCase {
         XCTAssertTrue(hasExitEvent, "Exit event should fire immediately without confirmation")
     }
 
+    // MARK: - Boundary Hysteresis Tests
+
+    func testHysteresisPreventExitWhenNearBoundaryAndCurrentlyInside() {
+        engine.setValidationConfig(requireConfirmation: false)
+        let zoneData: [String: Any] = [
+            "type": "circle",
+            "center": ["latitude": 40.7128, "longitude": -74.0060],
+            "radius": 100.0 // 100m radius
+        ]
+        try! engine.addZone(zoneId: "hyst-zone", zoneName: "Hysteresis Test", zoneData: zoneData)
+
+        // First enter well inside the zone
+        let insideLocation = createLocation(40.71289, -74.00590)
+        engine.checkLocation(insideLocation)
+        XCTAssertTrue(engine.getCurrentZoneStates()["hyst-zone"] ?? false, "Should be inside")
+
+        // Move to just outside radius (~105m from center — within hysteresis margin of 20m)
+        let borderLocation = createLocation(40.71375, -74.0060)
+        engine.checkLocation(borderLocation)
+
+        // With hysteresis, should still be inside (distance ~105m, within radius + 20m = 120m)
+        XCTAssertTrue(engine.getCurrentZoneStates()["hyst-zone"] ?? false, "Should remain inside due to hysteresis")
+    }
+
+    func testHysteresisPreventEnterWhenNearBoundaryAndCurrentlyOutside() {
+        engine.setValidationConfig(requireConfirmation: false)
+        let zoneData: [String: Any] = [
+            "type": "circle",
+            "center": ["latitude": 40.7128, "longitude": -74.0060],
+            "radius": 100.0 // 100m radius
+        ]
+        try! engine.addZone(zoneId: "hyst-zone2", zoneName: "Hysteresis Test 2", zoneData: zoneData)
+
+        // Point just inside radius (~90m from center — within hysteresis margin)
+        // With hysteresis, need to be within radius - 20m = 80m to enter
+        let borderLocation = createLocation(40.71361, -74.0060)
+        engine.checkLocation(borderLocation)
+
+        // Should remain outside due to hysteresis (90m > radius - 20m = 80m)
+        XCTAssertFalse(engine.getCurrentZoneStates()["hyst-zone2"] ?? true, "Should remain outside due to hysteresis")
+    }
+
+    // MARK: - Accuracy-Aware Confirmation Tests
+
+    func testPoorAccuracyRequiresMoreConfirmationPoints() {
+        let zoneData: [String: Any] = [
+            "type": "circle",
+            "center": ["latitude": 40.7128, "longitude": -74.0060],
+            "radius": 1000.0
+        ]
+        try! engine.addZone(zoneId: "acc-zone", zoneName: "Accuracy Zone", zoneData: zoneData)
+        engine.setValidationConfig(requireConfirmation: true)
+
+        // Single check with poor accuracy (100m) should NOT enter
+        let poorLocation = createLocation(40.7138, -74.0050, accuracy: 100.0)
+        engine.checkLocation(poorLocation)
+
+        XCTAssertFalse(engine.getCurrentZoneStates()["acc-zone"] ?? true, "Single poor-accuracy check should not trigger enter")
+    }
+
+    func testGoodAccuracyWithConfirmationEntersAfterTwoPoints() {
+        let zoneData: [String: Any] = [
+            "type": "circle",
+            "center": ["latitude": 40.7128, "longitude": -74.0060],
+            "radius": 1000.0
+        ]
+        try! engine.addZone(zoneId: "acc-zone2", zoneName: "Good Accuracy Zone", zoneData: zoneData)
+        engine.setValidationConfig(requireConfirmation: true)
+
+        // Two checks with good accuracy (10m) should enter
+        let goodLocation = createLocation(40.7138, -74.0050)
+        engine.checkLocation(goodLocation)
+        engine.checkLocation(goodLocation)
+
+        XCTAssertTrue(engine.getCurrentZoneStates()["acc-zone2"] ?? false, "Two good-accuracy checks should trigger enter")
+    }
+
     // MARK: - Helper Functions
 
     private func createLocation(_ lat: Double, _ lng: Double, accuracy: CLLocationAccuracy = 10.0) -> CLLocation {

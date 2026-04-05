@@ -207,4 +207,28 @@ internal object GeoMath {
     fun pointToSegmentDistance(p: LatLng, a: LatLng, b: LatLng): Double {
         return pointToSegmentDistance(p.latitude, p.longitude, a.latitude, a.longitude, b.latitude, b.longitude)
     }
+
+    /**
+     * Minimum distance from a point to a polygon boundary in meters.
+     * Iterates over all edges of the polygon and returns the smallest point-to-segment distance.
+     *
+     * @param pLat Point latitude
+     * @param pLng Point longitude
+     * @param polygon List of (latitude, longitude) pairs forming the polygon
+     * @return Minimum distance in meters from the point to any polygon edge
+     */
+    fun pointToPolygonDistance(pLat: Double, pLng: Double, polygon: List<Pair<Double, Double>>): Double {
+        if (polygon.size < 2) return Double.MAX_VALUE
+        var minDist = Double.MAX_VALUE
+        for (i in polygon.indices) {
+            val j = (i + 1) % polygon.size
+            val dist = pointToSegmentDistance(
+                pLat, pLng,
+                polygon[i].first, polygon[i].second,
+                polygon[j].first, polygon[j].second
+            )
+            if (dist < minDist) minDist = dist
+        }
+        return minDist
+    }
 }

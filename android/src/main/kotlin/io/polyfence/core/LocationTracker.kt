@@ -213,7 +213,9 @@ class LocationTracker : Service() {
     private var currentGpsAccuracy: Float? = null
     private val gpsAvailabilityDropTimestamps = Collections.synchronizedList(mutableListOf<Long>())
     private var lastGpsUnreliableErrorTime: Long = 0L
-    private val GPS_UNRELIABLE_ERROR_COOLDOWN_MS = 60_000L // Emit error max once per minute
+    private val GPS_UNRELIABLE_ERROR_BASE_COOLDOWN_MS = 60_000L // Base cooldown: 1 minute
+    private val GPS_UNRELIABLE_ERROR_MAX_COOLDOWN_MS = 300_000L // Max cooldown: 5 minutes
+    private var gpsUnreliableConsecutiveCount: Int = 0
 
     // Wake Lock Management
     private var wakeLock: PowerManager.WakeLock? = null
@@ -786,13 +788,15 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         "zoneId" to zoneId,
         "zoneName" to zoneName,
         "eventType" to eventType,
+        "timestamp" to System.currentTimeMillis(),
         "latitude" to location.latitude,
         "longitude" to location.longitude,
         "detectionTimeMs" to detectionTimeMs,
         "gpsAccuracy" to gpsAccuracy,
         "speedMps" to speedMps,
         "activityAtEvent" to activityType,
-        "distanceToBoundaryM" to distanceToBoundary
+        "distanceToBoundaryM" to distanceToBoundary,
+        "isQuickReversal" to geofenceEngine.isRecentReversal(zoneId, eventType)
     ))
 
     // Terse geofence event log
@@ -1072,6 +1076,11 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 consecutiveGpsFailures = 0
                 currentGpsAccuracy = if (location.hasAccuracy()) location.accuracy else null
 
+                // Reset GPS unreliable backoff when we get a good fix
+                if (location.hasAccuracy() && location.accuracy < 50.0f) {
+                    gpsUnreliableConsecutiveCount = 0
+                }
+
                 // Record in centralized telemetry aggregator (D016)
                 telemetryAggregator.recordGpsUpdate(
                     intervalMs = currentGpsInterval,
@@ -1275,11 +1284,17 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
      */
     private fun emitGpsUnreliableError(drops: Int, accuracy: Double? = null) {
         val currentTime = System.currentTimeMillis()
-        if (currentTime - lastGpsUnreliableErrorTime < GPS_UNRELIABLE_ERROR_COOLDOWN_MS) {
+        // Exponential backoff: 60s → 120s → 300s (capped at 5 min)
+        val cooldown = minOf(
+            GPS_UNRELIABLE_ERROR_BASE_COOLDOWN_MS * (1L shl minOf(gpsUnreliableConsecutiveCount, 3)),
+            GPS_UNRELIABLE_ERROR_MAX_COOLDOWN_MS
+        )
+        if (currentTime - lastGpsUnreliableErrorTime < cooldown) {
             return // Cooldown active - don't spam errors
         }
 
         lastGpsUnreliableErrorTime = currentTime
+        gpsUnreliableConsecutiveCount++
 
         val message = if (accuracy != null) {
             "GPS signal unreliable - poor accuracy (${accuracy.toInt()}m)"

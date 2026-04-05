@@ -210,4 +210,27 @@ internal enum GeoMath {
             lng2: projLng
         )
     }
+
+    /**
+     * Minimum distance from a point to a polygon boundary in meters.
+     * Iterates over all edges of the polygon and returns the smallest point-to-segment distance.
+     *
+     * - Parameters:
+     *   - point: The point to measure from
+     *   - polygon: Array of coordinates forming the polygon
+     * - Returns: Minimum distance in meters from the point to any polygon edge
+     */
+    static func pointToPolygonDistance(
+        point: CLLocationCoordinate2D,
+        polygon: [CLLocationCoordinate2D]
+    ) -> Double {
+        guard polygon.count >= 2 else { return Double.greatestFiniteMagnitude }
+        var minDist = Double.greatestFiniteMagnitude
+        for i in 0..<polygon.count {
+            let j = (i + 1) % polygon.count
+            let dist = pointToSegmentDistance(p: point, a: polygon[i], b: polygon[j])
+            if dist < minDist { minDist = dist }
+        }
+        return minDist
+    }
 }

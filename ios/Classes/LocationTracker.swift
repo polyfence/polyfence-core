@@ -44,7 +44,9 @@ public class LocationTracker: NSObject {
     private var currentGpsAccuracy: Double?
     private var gpsAvailabilityDropTimestamps: [TimeInterval] = []
     private var lastGpsUnreliableErrorTime: TimeInterval = 0
-    private let gpsUnreliableErrorCooldownSeconds: TimeInterval = 60.0 // Emit error max once per minute
+    private let gpsUnreliableErrorBaseCooldownSeconds: TimeInterval = 60.0 // Base cooldown: 1 minute
+    private let gpsUnreliableErrorMaxCooldownSeconds: TimeInterval = 300.0 // Max cooldown: 5 minutes
+    private var gpsUnreliableConsecutiveCount: Int = 0
 
     // CRITICAL: Prevent auto-tracking to match Android behavior
     private var trackingEnabled: Bool = false
@@ -561,7 +563,8 @@ public class LocationTracker: NSObject {
             "accuracy": gpsAccuracy,
             "speedMps": speedMps,
             "activityAtEvent": activityType,
-            "distanceToBoundaryM": distanceToBoundary
+            "distanceToBoundaryM": distanceToBoundary,
+            "isQuickReversal": geofenceEngine.isRecentReversal(zoneId: zoneId, eventType: eventType)
         ]
 
         // Send event to delegate on main thread
@@ -861,6 +864,11 @@ extension LocationTracker: CLLocationManagerDelegate {
         lastLocationTime = Date().timeIntervalSince1970
         consecutiveGpsFailures = 0
         currentGpsAccuracy = location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil
+
+        // Reset GPS unreliable backoff when we get a good fix
+        if location.horizontalAccuracy >= 0 && location.horizontalAccuracy < 50.0 {
+            gpsUnreliableConsecutiveCount = 0
+        }
 
         // Check for unreliable GPS (large accuracy swings, poor accuracy)
         checkGpsReliability(location)
@@ -1639,11 +1647,18 @@ extension LocationTracker {
      */
     private func emitGpsUnreliableError(drops: Int, accuracy: Double?) {
         let currentTime = Date().timeIntervalSince1970
-        if currentTime - lastGpsUnreliableErrorTime < gpsUnreliableErrorCooldownSeconds {
+        // Exponential backoff: 60s → 120s → 300s (capped at 5 min)
+        let backoffMultiplier = Double(1 << min(gpsUnreliableConsecutiveCount, 3))
+        let cooldown = min(
+            gpsUnreliableErrorBaseCooldownSeconds * backoffMultiplier,
+            gpsUnreliableErrorMaxCooldownSeconds
+        )
+        if currentTime - lastGpsUnreliableErrorTime < cooldown {
             return // Cooldown active - don't spam errors
         }
 
         lastGpsUnreliableErrorTime = currentTime
+        gpsUnreliableConsecutiveCount += 1
 
         let message: String
         var context: [String: Any] = [

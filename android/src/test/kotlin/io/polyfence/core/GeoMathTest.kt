@@ -289,6 +289,58 @@ class GeoMathTest {
         assertTrue("Extreme latitude should still compute", distance >= 0)
     }
 
+    // ========================================================================
+    // Point-to-Polygon Distance Tests
+    // ========================================================================
+
+    @Test
+    fun `pointToPolygonDistance returns min distance to nearest edge`() {
+        val square = listOf(
+            Pair(0.0, 0.0),
+            Pair(0.0, 1.0),
+            Pair(1.0, 1.0),
+            Pair(1.0, 0.0)
+        )
+        // Point outside square, nearest to bottom edge
+        val distance = GeoMath.pointToPolygonDistance(-0.1, 0.5, square)
+        // ~11km (0.1 degrees at equator)
+        assertTrue("Distance should be positive", distance > 0)
+        assertTrue("Distance should be reasonable", distance < 15000)
+    }
+
+    @Test
+    fun `pointToPolygonDistance point inside polygon returns small distance`() {
+        val square = listOf(
+            Pair(0.0, 0.0),
+            Pair(0.0, 1.0),
+            Pair(1.0, 1.0),
+            Pair(1.0, 0.0)
+        )
+        // Point inside, near center - distance to nearest edge should be ~55km
+        val distance = GeoMath.pointToPolygonDistance(0.5, 0.5, square)
+        assertTrue("Inside point should have positive distance to boundary", distance > 0)
+    }
+
+    @Test
+    fun `pointToPolygonDistance degenerate polygon returns max value`() {
+        val singlePoint = listOf(Pair(0.0, 0.0))
+        val distance = GeoMath.pointToPolygonDistance(1.0, 1.0, singlePoint)
+        assertEquals("Single point polygon should return MAX_VALUE", Double.MAX_VALUE, distance, 0.0)
+    }
+
+    @Test
+    fun `pointToPolygonDistance point on edge returns near zero`() {
+        val square = listOf(
+            Pair(0.0, 0.0),
+            Pair(0.0, 1.0),
+            Pair(1.0, 1.0),
+            Pair(1.0, 0.0)
+        )
+        // Point on the bottom edge
+        val distance = GeoMath.pointToPolygonDistance(0.0, 0.5, square)
+        assertTrue("Point on edge should have near-zero distance", distance < 10.0)
+    }
+
     @Test
     fun `isPointInPolygon consistent with multiple calls`() {
         val polygon = listOf(

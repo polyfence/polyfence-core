@@ -43,6 +43,15 @@ class GeofenceEngine {
     private var confirmationPoints: Int = 2
     private var confirmationTimeoutMs: TimeInterval = 10.0 // 10 seconds
 
+    // Accuracy-aware confirmation thresholds
+    private let goodAccuracyThreshold: Double = 35.0   // meters - normal confirmation
+    private let poorAccuracyThreshold: Double = 75.0   // meters - stricter confirmation
+    private let poorAccuracyConfirmationPoints: Int = 3
+    private let poorAccuracyTimeoutSeconds: TimeInterval = 25.0  // 25 seconds
+
+    // Boundary hysteresis margin in meters
+    private let hysteresisMargin: Double = 20.0
+
     // GPS accuracy threshold in meters (default: 100m to match Android)
     private var gpsAccuracyThreshold: Double = 100.0
 
@@ -430,6 +439,7 @@ class GeofenceEngine {
         }
         let overallStartTime = CFAbsoluteTimeGetCurrent()
         let speed = location.speed * 3.6 // Convert m/s to km/h
+        let accuracy = location.horizontalAccuracy
 
         var zoneCheckCount = 0
         var totalAlgorithmTime: TimeInterval = 0
@@ -440,15 +450,15 @@ class GeofenceEngine {
             let zoneStartTime = CFAbsoluteTimeGetCurrent()
             let currentState = syncQueue.sync { self.zoneStates[zoneId] ?? false }
 
-            // Precise algorithm timing
+            // Precise algorithm timing — apply hysteresis when transitioning
             let algorithmStartTime = CFAbsoluteTimeGetCurrent()
-            let isInside = zone.contains(location)
+            let isInside = zone.containsWithHysteresis(location, currentState: currentState, margin: hysteresisMargin)
             let algorithmDuration = CFAbsoluteTimeGetCurrent() - algorithmStartTime
             totalAlgorithmTime += algorithmDuration
             _ = (CFAbsoluteTimeGetCurrent() - zoneStartTime) * 1000
 
-            // Smart validation: Use confirmation based on speed and zone characteristics
-            let useConfirmation = requireConfirmation ? shouldUseConfirmation(speed: speed, zoneRadius: zone.radius) : false
+            // Smart validation: Use confirmation based on speed, zone, and accuracy
+            let useConfirmation = requireConfirmation ? shouldUseConfirmation(speed: speed, zoneRadius: zone.radius, accuracy: accuracy) : false
 
             if useConfirmation {
                 let confidenceStartTime = CFAbsoluteTimeGetCurrent()
@@ -470,14 +480,19 @@ class GeofenceEngine {
     /**
      * Smart validation: Single point for obvious cases, 2-point for edge cases (ported from Android)
      */
-    private func shouldUseConfirmation(speed: Double, zoneRadius: Double?) -> Bool {
+    private func shouldUseConfirmation(speed: Double, zoneRadius: Double?, accuracy: Double = 0.0) -> Bool {
+        // Poor GPS accuracy always needs confirmation (prevent flapping)
+        if accuracy > poorAccuracyThreshold {
+            return true
+        }
+
         // Large zones always need confirmation (reduce false positives)
         if let radius = zoneRadius, radius > 200 {
             return true
         }
 
-        // High speed + reasonable zones = single point OK
-        if speed > 40 && (zoneRadius == nil || zoneRadius! > 50) {
+        // High speed + reasonable zones + good accuracy = single point OK
+        if speed > 40 && (zoneRadius == nil || zoneRadius! > 50) && accuracy <= goodAccuracyThreshold {
             return false
         }
 
@@ -489,6 +504,8 @@ class GeofenceEngine {
      * Process with confidence validation - returns true if state changed (ported from Android)
      */
     private func processWithConfidence(zoneId: String, zone: ZoneData, isInside: Bool, currentState: Bool, currentTime: TimeInterval, location: CLLocation, checkStartTime: CFAbsoluteTime) -> Bool {
+        let accuracy = location.horizontalAccuracy
+
         let (hasConfidence, lastDetection) = syncQueue.sync { () -> (Bool, TimeInterval) in
             let confidence = self.zoneConfidence[zoneId] ?? ZoneConfidence()
             // Persist confidence across calls
@@ -505,8 +522,10 @@ class GeofenceEngine {
 
             confidence.lastDetection = currentTime
 
-            // Check if we have enough confidence for state change
-            let requiredCount = self.confirmationPoints
+            // Accuracy-aware: require more confirmation points when GPS is poor
+            let requiredCount = accuracy > self.poorAccuracyThreshold
+                ? self.poorAccuracyConfirmationPoints
+                : self.confirmationPoints
             let hasConfidence = isInside ? confidence.insideCount >= requiredCount : confidence.outsideCount >= requiredCount
 
             return (hasConfidence, confidence.lastDetection)
@@ -542,7 +561,11 @@ class GeofenceEngine {
         }
 
         // Timeout: reset confidence if no consistent readings
-        if currentTime - lastDetection > confirmationTimeoutMs {
+        // Use longer timeout when GPS accuracy is poor
+        let activeTimeout = accuracy > poorAccuracyThreshold
+            ? poorAccuracyTimeoutSeconds
+            : confirmationTimeoutMs
+        if currentTime - lastDetection > activeTimeout {
             syncQueue.sync {
                 self.zoneConfidence[zoneId]?.insideCount = 0
                 self.zoneConfidence[zoneId]?.outsideCount = 0
@@ -886,6 +909,44 @@ class ZoneData {
         case .polygon:
             guard let polygon = polygon else { return false }
             return GeoMath.isPointInPolygon(point: location.coordinate, polygon: polygon)
+        }
+    }
+
+    /**
+     * Check if location is inside this zone with boundary hysteresis.
+     * When already inside, expands the zone boundary by margin (harder to exit).
+     * When already outside, shrinks the zone boundary by margin (harder to enter).
+     * Within the deadband, the current state is preserved to prevent GPS jitter oscillation.
+     *
+     * - Parameters:
+     *   - location: Current location
+     *   - currentState: Whether we currently consider the device inside this zone
+     *   - margin: Hysteresis margin in meters (default 20m)
+     * - Returns: Whether the device should be considered inside the zone
+     */
+    func containsWithHysteresis(_ location: CLLocation, currentState: Bool, margin: Double = 20.0) -> Bool {
+        switch type {
+        case .circle:
+            guard let center = center, let radius = radius else { return false }
+            let distance = GeoMath.haversineDistance(point1: center, point2: location.coordinate)
+            if currentState {
+                // Currently inside: must move beyond radius + margin to exit
+                return distance <= radius + margin
+            } else {
+                // Currently outside: must move within radius - margin to enter
+                return distance <= radius - margin
+            }
+
+        case .polygon:
+            guard let polygon = polygon else { return false }
+            let rawInside = GeoMath.isPointInPolygon(point: location.coordinate, polygon: polygon)
+            let distToBoundary = GeoMath.pointToPolygonDistance(point: location.coordinate, polygon: polygon)
+            if distToBoundary < margin {
+                // Within deadband — preserve current state
+                return currentState
+            } else {
+                return rawInside
+            }
         }
     }
 

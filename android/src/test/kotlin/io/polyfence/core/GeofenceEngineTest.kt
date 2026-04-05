@@ -683,6 +683,96 @@ class GeofenceEngineTest {
     }
 
     // ========================================================================
+    // Boundary Hysteresis Tests
+    // ========================================================================
+
+    @Test
+    fun `hysteresis prevents exit when near boundary and currently inside`() {
+        val zoneData = mapOf(
+            "type" to "circle",
+            "center" to mapOf("latitude" to 40.7128, "longitude" to -74.0060),
+            "radius" to 100.0 // 100m radius
+        )
+        engine.addZone("hyst-zone", "Hysteresis Test", zoneData)
+        engine.setValidationConfig(requireConfirmation = false)
+
+        // First enter well inside the zone (10m from center)
+        val insideLocation = createLocation(40.71289, -74.00590)
+        engine.checkLocation(insideLocation)
+        assertTrue("Should be inside", engine.getCurrentZoneStates()["hyst-zone"] ?: false)
+
+        // Move to just outside radius (e.g., 105m from center — within hysteresis margin of 20m)
+        // At ~40.71° lat, 0.001° ≈ 111m
+        val borderLocation = createLocation(40.71375, -74.0060, accuracy = 10.0f)
+        engine.checkLocation(borderLocation)
+
+        // With hysteresis, should still be inside (distance ~105m, within radius + 20m = 120m)
+        assertTrue("Should remain inside due to hysteresis", engine.getCurrentZoneStates()["hyst-zone"] ?: false)
+    }
+
+    @Test
+    fun `hysteresis prevents enter when near boundary and currently outside`() {
+        val zoneData = mapOf(
+            "type" to "circle",
+            "center" to mapOf("latitude" to 40.7128, "longitude" to -74.0060),
+            "radius" to 100.0 // 100m radius
+        )
+        engine.addZone("hyst-zone2", "Hysteresis Test 2", zoneData)
+        engine.setValidationConfig(requireConfirmation = false)
+
+        // Point just inside radius (e.g., 90m from center — within hysteresis margin)
+        // With hysteresis, need to be within radius - 20m = 80m to enter
+        // At 40.71° lat, 0.00081° ≈ 90m
+        val borderLocation = createLocation(40.71361, -74.0060)
+        engine.checkLocation(borderLocation)
+
+        // Should remain outside due to hysteresis (90m > radius - 20m = 80m)
+        assertFalse("Should remain outside due to hysteresis", engine.getCurrentZoneStates()["hyst-zone2"] ?: true)
+    }
+
+    // ========================================================================
+    // Accuracy-Aware Confirmation Tests
+    // ========================================================================
+
+    @Test
+    fun `poor accuracy requires more confirmation points`() {
+        val zoneData = mapOf(
+            "type" to "circle",
+            "center" to mapOf("latitude" to 40.7128, "longitude" to -74.0060),
+            "radius" to 1000.0
+        )
+        engine.addZone("acc-zone", "Accuracy Zone", zoneData)
+        // Enable confirmation mode (default)
+        engine.setValidationConfig(requireConfirmation = true)
+
+        // Single check with poor accuracy (100m) should NOT enter
+        val poorLocation = createLocation(40.7138, -74.0050, accuracy = 100.0f)
+        engine.checkLocation(poorLocation)
+
+        assertFalse("Single poor-accuracy check should not trigger enter",
+                     engine.getCurrentZoneStates()["acc-zone"] ?: true)
+    }
+
+    @Test
+    fun `good accuracy with confirmation enters after 2 points`() {
+        val zoneData = mapOf(
+            "type" to "circle",
+            "center" to mapOf("latitude" to 40.7128, "longitude" to -74.0060),
+            "radius" to 1000.0
+        )
+        engine.addZone("acc-zone2", "Good Accuracy Zone", zoneData)
+        engine.setValidationConfig(requireConfirmation = true)
+
+        // Two checks with good accuracy (10m) should enter
+        val goodLocation = createLocation(40.7138, -74.0050, accuracy = 10.0f)
+        engine.checkLocation(goodLocation)
+        engine.checkLocation(goodLocation)
+
+        assertTrue("Two good-accuracy checks should trigger enter",
+                   engine.getCurrentZoneStates()["acc-zone2"] ?: false)
+    }
+
+    // ========================================================================
     // Helper Functions
     // ========================================================================
 

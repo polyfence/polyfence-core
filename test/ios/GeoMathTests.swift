@@ -266,6 +266,57 @@ class GeoMathTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(distance, 0, "Extreme latitude should still compute")
     }
 
+    // MARK: - Point-to-Polygon Distance Tests
+
+    func testPointToPolygonDistanceReturnsMinDistanceToNearestEdge() {
+        let square = [
+            CLLocationCoordinate2D(latitude: 0.0, longitude: 0.0),
+            CLLocationCoordinate2D(latitude: 0.0, longitude: 1.0),
+            CLLocationCoordinate2D(latitude: 1.0, longitude: 1.0),
+            CLLocationCoordinate2D(latitude: 1.0, longitude: 0.0)
+        ]
+        // Point outside square, nearest to bottom edge
+        let point = CLLocationCoordinate2D(latitude: -0.1, longitude: 0.5)
+        let distance = GeoMath.pointToPolygonDistance(point: point, polygon: square)
+
+        XCTAssertGreaterThan(distance, 0, "Distance should be positive")
+        XCTAssertLessThan(distance, 15000, "Distance should be reasonable")
+    }
+
+    func testPointToPolygonDistanceInsidePolygonReturnsSmallDistance() {
+        let square = [
+            CLLocationCoordinate2D(latitude: 0.0, longitude: 0.0),
+            CLLocationCoordinate2D(latitude: 0.0, longitude: 1.0),
+            CLLocationCoordinate2D(latitude: 1.0, longitude: 1.0),
+            CLLocationCoordinate2D(latitude: 1.0, longitude: 0.0)
+        ]
+        let point = CLLocationCoordinate2D(latitude: 0.5, longitude: 0.5)
+        let distance = GeoMath.pointToPolygonDistance(point: point, polygon: square)
+
+        XCTAssertGreaterThan(distance, 0, "Inside point should have positive distance to boundary")
+    }
+
+    func testPointToPolygonDistanceDegeneratePolygonReturnsMaxValue() {
+        let singlePoint = [CLLocationCoordinate2D(latitude: 0.0, longitude: 0.0)]
+        let point = CLLocationCoordinate2D(latitude: 1.0, longitude: 1.0)
+        let distance = GeoMath.pointToPolygonDistance(point: point, polygon: singlePoint)
+
+        XCTAssertEqual(distance, Double.greatestFiniteMagnitude, "Single point polygon should return max value")
+    }
+
+    func testPointToPolygonDistancePointOnEdgeReturnsNearZero() {
+        let square = [
+            CLLocationCoordinate2D(latitude: 0.0, longitude: 0.0),
+            CLLocationCoordinate2D(latitude: 0.0, longitude: 1.0),
+            CLLocationCoordinate2D(latitude: 1.0, longitude: 1.0),
+            CLLocationCoordinate2D(latitude: 1.0, longitude: 0.0)
+        ]
+        let point = CLLocationCoordinate2D(latitude: 0.0, longitude: 0.5)
+        let distance = GeoMath.pointToPolygonDistance(point: point, polygon: square)
+
+        XCTAssertLessThan(distance, 10.0, "Point on edge should have near-zero distance")
+    }
+
     func testIsPointInPolygonConsistentWithMultipleCalls() {
         let polygon = [
             CLLocationCoordinate2D(latitude: 0.0, longitude: 0.0),

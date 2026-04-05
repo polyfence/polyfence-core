@@ -105,6 +105,15 @@ class GeofenceEngine {
     private var confirmationPoints = 2
     private var confirmationTimeoutMs = 10000L // 10 seconds
 
+    // Accuracy-aware confirmation thresholds
+    private val GOOD_ACCURACY_THRESHOLD = 35.0  // meters - normal confirmation
+    private val POOR_ACCURACY_THRESHOLD = 75.0  // meters - stricter confirmation
+    private val POOR_ACCURACY_CONFIRMATION_POINTS = 3
+    private val POOR_ACCURACY_TIMEOUT_MS = 25_000L  // 25 seconds
+
+    // Boundary hysteresis margin in meters
+    private val HYSTERESIS_MARGIN = 20.0
+
     // GPS accuracy threshold in meters (default: 100m for platform parity)
     private var gpsAccuracyThreshold = 100.0f
 
@@ -463,6 +472,7 @@ fun getZoneName(zoneId: String): String? {
 
         val overallStartTime = System.nanoTime()
         val speed = if (location.hasSpeed()) location.speed * 3.6 else 0.0 // Convert m/s to km/h
+        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else 0.0
 
         var zoneCheckCount = 0
         var totalAlgorithmTime = 0L
@@ -476,15 +486,15 @@ fun getZoneName(zoneId: String): String? {
             val zoneCheckStartTime = System.nanoTime() // Start timing for this zone
             val currentState = zoneStates[zoneId] ?: false
 
-            // Precise algorithm timing
+            // Precise algorithm timing — apply hysteresis when transitioning
             val algorithmStartTime = System.nanoTime()
-            val isInside = zone.contains(location)
+            val isInside = zone.containsWithHysteresis(location, currentState)
             val algorithmDuration = System.nanoTime() - algorithmStartTime
             totalAlgorithmTime += algorithmDuration
 
-            // Smart validation: Use confirmation based on speed and zone characteristics
+            // Smart validation: Use confirmation based on speed, zone, and accuracy
             val useConfirmation = if (requireConfirmation) {
-                shouldUseConfirmation(speed, zone.radius)
+                shouldUseConfirmation(speed, zone.radius, accuracy)
             } else {
                 false
             }
@@ -504,14 +514,17 @@ fun getZoneName(zoneId: String): String? {
 
     }
 
-    // Smart validation: Single point for obvious cases, 2-point for edge cases
-    fun shouldUseConfirmation(speed: Double, zoneRadius: Double?): Boolean {
+    // Smart validation: Single point for obvious cases, multi-point for edge cases
+    fun shouldUseConfirmation(speed: Double, zoneRadius: Double?, accuracy: Double = 0.0): Boolean {
         return when {
+            // Poor GPS accuracy always needs confirmation (prevent flapping)
+            accuracy > POOR_ACCURACY_THRESHOLD -> true
+
             // Large zones always need confirmation (reduce false positives)
             zoneRadius != null && zoneRadius > 200 -> true
 
-            // High speed + reasonable zones = single point OK
-            speed > 40 && (zoneRadius == null || zoneRadius > 50) -> false
+            // High speed + reasonable zones + good accuracy = single point OK
+            speed > 40 && (zoneRadius == null || zoneRadius > 50) && accuracy <= GOOD_ACCURACY_THRESHOLD -> false
 
             // Default: Use 2-point for reliability
             else -> true
@@ -531,6 +544,7 @@ fun getZoneName(zoneId: String): String? {
         checkStartTime: Long
     ): Boolean {
         val confidence = zoneConfidence.getOrPut(zoneId) { ZoneConfidence() }
+        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else 0.0
 
         // Update confidence counters
         if (isInside) {
@@ -543,8 +557,12 @@ fun getZoneName(zoneId: String): String? {
 
         confidence.lastDetection = currentTime
 
-        // Check if we have enough confidence for state change
-        val requiredCount = confirmationPoints
+        // Accuracy-aware: require more confirmation points when GPS is poor
+        val requiredCount = if (accuracy > POOR_ACCURACY_THRESHOLD) {
+            POOR_ACCURACY_CONFIRMATION_POINTS
+        } else {
+            confirmationPoints
+        }
         val hasConfidence = if (isInside) {
             confidence.insideCount >= requiredCount
         } else {
@@ -576,8 +594,13 @@ fun getZoneName(zoneId: String): String? {
             return true // State changed
         }
 
-        // Timeout: reset confidence if no consistent readings
-        if (currentTime - confidence.lastDetection > confirmationTimeoutMs) {
+        // Timeout: reset confidence if no consistent readings (longer timeout for poor accuracy)
+        val activeTimeout = if (accuracy > POOR_ACCURACY_THRESHOLD) {
+            POOR_ACCURACY_TIMEOUT_MS
+        } else {
+            confirmationTimeoutMs
+        }
+        if (currentTime - confidence.lastDetection > activeTimeout) {
             confidence.insideCount = 0
             confidence.outsideCount = 0
         }
@@ -729,6 +752,42 @@ fun getZoneName(zoneId: String): String? {
                 ZoneType.POLYGON -> {
                     val zonePolygon = polygon ?: return false
                     GeoMath.isPointInPolygon(location.latitude, location.longitude, zonePolygon.map { Pair(it.latitude, it.longitude) })
+                }
+            }
+        }
+
+        /**
+         * Hysteresis-aware containment check.
+         * To transition INTO a zone, the point must be at least [margin] meters inside the boundary.
+         * To transition OUT of a zone, the point must be at least [margin] meters outside the boundary.
+         * This creates a deadband around the boundary that prevents GPS jitter from causing flapping.
+         * When [currentState] matches the raw containment, returns the current state (no change).
+         */
+        fun containsWithHysteresis(location: Location, currentState: Boolean, margin: Double = 20.0): Boolean {
+            return when (type) {
+                ZoneType.CIRCLE -> {
+                    val zoneCenter = center ?: return false
+                    val zoneRadius = radius ?: return false
+                    val distance = GeoMath.haversineDistance(location.latitude, location.longitude, zoneCenter.latitude, zoneCenter.longitude)
+                    if (currentState) {
+                        // Currently inside: must be margin meters OUTSIDE boundary to exit
+                        distance <= zoneRadius + margin
+                    } else {
+                        // Currently outside: must be margin meters INSIDE boundary to enter
+                        distance <= zoneRadius - margin
+                    }
+                }
+                ZoneType.POLYGON -> {
+                    val zonePolygon = polygon ?: return false
+                    val rawInside = GeoMath.isPointInPolygon(location.latitude, location.longitude, zonePolygon.map { Pair(it.latitude, it.longitude) })
+                    // For polygons, use point-to-boundary distance for hysteresis
+                    val distToBoundary = GeoMath.pointToPolygonDistance(location.latitude, location.longitude, zonePolygon.map { Pair(it.latitude, it.longitude) })
+                    if (distToBoundary < margin) {
+                        // Within the deadband — maintain current state
+                        currentState
+                    } else {
+                        rawInside
+                    }
                 }
             }
         }
