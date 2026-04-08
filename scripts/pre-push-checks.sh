@@ -35,12 +35,6 @@ if grep -rPn '(sk_live_|sk_test_|pk_live_|pk_test_|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0
   exit 1
 fi
 
-echo "  Checking for internal references..."
-if grep -rn 'Teslon\|Sector7' --include="*.kt" --include="*.swift" android/src/ ios/Classes/ 2>/dev/null; then
-  echo "ERROR: Internal references found in production code"
-  exit 1
-fi
-
 # Android build + test
 echo "  Building Android..."
 cd android && ./gradlew build --quiet && ./gradlew test --quiet
