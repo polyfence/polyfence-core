@@ -929,12 +929,15 @@ class ZoneData {
         case .circle:
             guard let center = center, let radius = radius else { return false }
             let distance = GeoMath.haversineDistance(point1: center, point2: location.coordinate)
+            // Clamp effective margin so it never exceeds the zone radius
+            // (prevents negative effective radius for very small/zero-radius zones)
+            let effectiveMargin = min(margin, radius)
             if currentState {
                 // Currently inside: must move beyond radius + margin to exit
-                return distance <= radius + margin
+                return distance <= radius + effectiveMargin
             } else {
                 // Currently outside: must move within radius - margin to enter
-                return distance <= radius - margin
+                return distance <= radius - effectiveMargin
             }
 
         case .polygon:

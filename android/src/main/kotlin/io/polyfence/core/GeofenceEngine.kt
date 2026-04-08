@@ -769,12 +769,15 @@ fun getZoneName(zoneId: String): String? {
                     val zoneCenter = center ?: return false
                     val zoneRadius = radius ?: return false
                     val distance = GeoMath.haversineDistance(location.latitude, location.longitude, zoneCenter.latitude, zoneCenter.longitude)
+                    // Clamp effective margin so it never exceeds the zone radius
+                    // (prevents negative effective radius for very small/zero-radius zones)
+                    val effectiveMargin = margin.coerceAtMost(zoneRadius)
                     if (currentState) {
                         // Currently inside: must be margin meters OUTSIDE boundary to exit
-                        distance <= zoneRadius + margin
+                        distance <= zoneRadius + effectiveMargin
                     } else {
                         // Currently outside: must be margin meters INSIDE boundary to enter
-                        distance <= zoneRadius - margin
+                        distance <= zoneRadius - effectiveMargin
                     }
                 }
                 ZoneType.POLYGON -> {
