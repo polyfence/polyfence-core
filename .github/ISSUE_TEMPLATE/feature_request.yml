@@ -60,7 +60,7 @@ body:
       options:
         - label: I have searched existing issues/PRs to avoid duplicates
           required: true
-        - label: This feature aligns with Polyfence's privacy-first philosophy
+        - label: This feature aligns with Polyfence's privacy posture (no network calls from this library; aggregate telemetry only; no coordinates or identifiers in telemetry; raw positions live only in the optional server-side opt-in retention path)
           required: true
         - label: I am willing to help implement this feature
           required: false
