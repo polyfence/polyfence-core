@@ -54,6 +54,10 @@ Or in Xcode: File → Add Package Dependencies → paste the repository URL.
 implementation("io.polyfence:polyfence-core:1.0.0")
 ```
 
+### Who this is for
+
+polyfence-core is the mobile/native entry point to the Polyfence platform. If you're integrating geofencing into a mobile app, start here. If you're integrating into a Flutter or React Native app, use polyfence-flutter or polyfence-react-native (they wrap this library). If you're integrating into IoT firmware, use polyfence-embedded. If you're calling the API from a server, use the OpenAPI spec at polyfence.io.
+
 ## Quick Start
 
 ### Android (Kotlin)
@@ -210,7 +214,7 @@ These algorithms are implemented identically in Kotlin and Swift for cross-platf
 
 All geofencing runs on-device. Zero location data is transmitted by default.
 
-Polyfence collects zero PII and zero identifiable data about your end users. Telemetry is **opt-out** (enabled by default) when used through platform bridges like [polyfence-flutter](https://github.com/polyfence/polyfence-flutter) and [polyfence-react-native](https://github.com/polyfence/polyfence-react-native). The `TelemetryAggregator` in this library collects anonymous aggregate metrics — detection latency, GPS accuracy, battery drain, zone type counts. No GPS coordinates, zone definitions, user identifiers, or PII. Native consumers building custom bridges control telemetry defaults in their own configuration. See telemetry docs for [Flutter](https://github.com/polyfence/polyfence-flutter/blob/main/doc/TELEMETRY.md) and [React Native](https://github.com/polyfence/polyfence-react-native/blob/main/doc/TELEMETRY.md) for full details. One line of code disables it in any bridge — see telemetry docs for Flutter and React Native for the exact API.
+Polyfence collects zero PII and zero identifiable data about your end users. Telemetry is **opt-out** (enabled by default) when used through platform bridges like [polyfence-flutter](https://github.com/polyfence/polyfence-flutter) and [polyfence-react-native](https://github.com/polyfence/polyfence-react-native). The `TelemetryAggregator` in this library collects anonymous aggregate metrics — detection latency, GPS accuracy, battery drain, zone type counts. No GPS coordinates, zone definitions, user identifiers, or PII. Telemetry is one line of code to disable in any bridge — see telemetry docs for [Flutter](https://github.com/polyfence/polyfence-flutter/blob/main/doc/TELEMETRY.md) and [React Native](https://github.com/polyfence/polyfence-react-native/blob/main/doc/TELEMETRY.md) for the exact API. Native consumers building custom bridges decide whether to wire telemetry at all.
 
 ## Relationship to Other Repos
 
