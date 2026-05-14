@@ -26,7 +26,7 @@ Before creating bug reports, please check existing [issues](https://github.com/p
 
 Before suggesting:
 1. Check if it's already requested in issues
-2. Ensure it aligns with Polyfence's privacy-first philosophy
+2. Ensure it aligns with Polyfence's privacy posture — see brand position summary in CLAUDE.md. Specifically: no network calls from this library; telemetry stays aggregate-only (never coordinates, never identifiers, never PII); features that would collect or transmit raw positions from this library are out of scope (those belong in the optional opt-in retention path on the server, not in this engine).
 3. Consider whether it belongs here (native engine) or in a bridge repo (Flutter/React Native)
 
 **When suggesting a feature:**

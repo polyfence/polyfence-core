@@ -78,7 +78,7 @@ mavenPublishing {
 
     pom {
         name.set("Polyfence Core")
-        description.set("Privacy-first polygon and circle geofencing engine for Android")
+        description.set("Mobile surface of the Polyfence geofence layer — on-device polygon and circle geofencing for Android. Same zones run on mobile, IoT, and server.")
         url.set("https://github.com/polyfence/polyfence-core")
         licenses {
             license {

@@ -5,7 +5,7 @@
 [![CocoaPods](https://img.shields.io/cocoapods/v/PolyfenceCore)](https://cocoapods.org/pods/PolyfenceCore)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Standalone, privacy-first geofencing engine for iOS and Android. Runs entirely on-device with zero cloud dependencies.
+polyfence-core is the mobile surface of the Polyfence geofence layer — the same zones you define once run on your mobile app, your IoT device, and your server. This repo is the native Kotlin + Swift engine that powers polyfence-flutter and polyfence-react-native; it runs entirely on-device with zero cloud dependencies.
 
 Polyfence Core is the shared native engine that powers [polyfence-flutter](https://github.com/polyfence/polyfence-flutter) and [polyfence-react-native](https://github.com/polyfence/polyfence-react-native). It contains all geofencing algorithms, GPS management, and telemetry aggregation logic.
 
@@ -18,7 +18,7 @@ Polyfence Core is the shared native engine that powers [polyfence-flutter](https
 - **Dwell detection** — Fire events when a device remains in a zone for a configurable duration
 - **Zone clustering** — Performance optimization for large zone sets (100+ zones)
 - **Scheduled tracking** — Time-window and day-of-week tracking schedules
-- **Telemetry aggregation** — Session-level performance metrics collected natively (no GPS coordinates or PII)
+- **Telemetry aggregation** — Session-level performance metrics collected natively. Zero PII about your end users; never coordinates, never identifiers.
 - **Zone persistence** — Zone state recovery across app restarts
 
 ## Requirements
@@ -53,6 +53,10 @@ Or in Xcode: File → Add Package Dependencies → paste the repository URL.
 ```kotlin
 implementation("io.polyfence:polyfence-core:1.0.0")
 ```
+
+### Who this is for
+
+polyfence-core is the mobile/native entry point to the Polyfence platform. If you're integrating geofencing into a mobile app, start here. If you're integrating into a Flutter or React Native app, use polyfence-flutter or polyfence-react-native (they wrap this library). If you're integrating into IoT firmware, use polyfence-embedded. If you're calling the API from a server, use the OpenAPI spec at polyfence.io.
 
 ## Quick Start
 
@@ -210,7 +214,7 @@ These algorithms are implemented identically in Kotlin and Swift for cross-platf
 
 All geofencing runs on-device. Zero location data is transmitted by default.
 
-Telemetry is **opt-out** (enabled by default) when used through platform bridges like [polyfence-flutter](https://github.com/polyfence/polyfence-flutter) and [polyfence-react-native](https://github.com/polyfence/polyfence-react-native). The `TelemetryAggregator` in this library collects anonymous aggregate metrics — detection latency, GPS accuracy, battery drain, zone type counts. No GPS coordinates, zone definitions, user identifiers, or PII. Native consumers building custom bridges control telemetry defaults in their own configuration. See telemetry docs for [Flutter](https://github.com/polyfence/polyfence-flutter/blob/main/doc/TELEMETRY.md) and [React Native](https://github.com/polyfence/polyfence-react-native/blob/main/doc/TELEMETRY.md) for full details.
+Polyfence collects zero PII and zero identifiable data about your end users. Telemetry is **opt-out** (enabled by default) when used through platform bridges like [polyfence-flutter](https://github.com/polyfence/polyfence-flutter) and [polyfence-react-native](https://github.com/polyfence/polyfence-react-native). The `TelemetryAggregator` in this library collects anonymous aggregate metrics — detection latency, GPS accuracy, battery drain, zone type counts. No GPS coordinates, zone definitions, user identifiers, or PII. Telemetry is one line of code to disable in any bridge — see telemetry docs for [Flutter](https://github.com/polyfence/polyfence-flutter/blob/main/doc/TELEMETRY.md) and [React Native](https://github.com/polyfence/polyfence-react-native/blob/main/doc/TELEMETRY.md) for the exact API. Native consumers building custom bridges decide whether to wire telemetry at all.
 
 ## Relationship to Other Repos
 

@@ -1,11 +1,13 @@
 Pod::Spec.new do |s|
   s.name             = 'PolyfenceCore'
   s.version          = '1.0.5'
-  s.summary          = 'Privacy-first polygon and circle geofencing engine for iOS'
+  s.summary          = 'Mobile surface of the Polyfence geofence layer — on-device polygon and circle geofencing for iOS.'
   s.description      = <<-DESC
-    Standalone native geofencing SDK. On-device polygon (ray-casting) and circle
-    (haversine) geofencing with SmartGPS, activity recognition, and built-in
-    telemetry aggregation. No cloud required.
+    Native iOS engine for the Polyfence platform — the same zones you define
+    once run on mobile, IoT, and server. On-device polygon (ray-casting) and
+    circle (haversine) geofencing with SmartGPS, activity recognition, and
+    aggregate-only telemetry. No coordinates, no identifiers, no PII about
+    your end users. No cloud required from this library.
   DESC
   s.homepage         = 'https://github.com/polyfence/polyfence-core'
   s.license          = { :type => 'MIT', :file => 'LICENSE' }

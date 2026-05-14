@@ -6,11 +6,19 @@
 
 ---
 
+## Where this fits in the Polyfence platform
+
+polyfence-core is the mobile surface of the Polyfence platform — the same zones you define once also run on IoT devices (polyfence-embedded) and on the Polyfence server (polyfence.io). Each surface has its own privacy posture. This library has the strongest one: it never makes network calls, never collects, never transmits, never stores. Aggregate telemetry — when you opt into it through a bridge like polyfence-flutter or polyfence-react-native — never includes coordinates, identifiers, or PII.
+
+---
+
 ## Overview
 
 PolyfenceCore is a standalone on-device geofencing engine. It performs geometric calculations (haversine distance, ray-casting point-in-polygon, boundary distance) on coordinates your app provides. That's all it does.
 
-**This library makes no network calls to Polyfence, includes no vendor telemetry, and does not send us any data.** All geofence math runs on-device. Any zone or location data remains under **your** app's control.
+### Zero PII about your end users
+
+This library **never collects, transmits, or stores** location data, identifiers, or PII. It makes no network calls to Polyfence, includes no vendor telemetry, and does not send us any data. All geofence math runs on-device. Any zone or location data remains under **your** app's control.
 
 ---
 
