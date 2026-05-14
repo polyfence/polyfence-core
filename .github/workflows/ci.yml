@@ -60,18 +60,18 @@ jobs:
       - name: Lint podspec
         run: pod lib lint PolyfenceCore.podspec --allow-warnings --skip-import-validation
 
-  code-quality:
-    name: Code Quality
+  repo-policy:
+    name: Repo Policy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: No internal files tracked
+      - name: No internal bootstrap files tracked
         run: |
           for f in CLAUDE.md .cursorrules; do
-            if git ls-files --error-unmatch "$f" 2>/dev/null; then
+            if git ls-files --error-unmatch "$f"; then
               echo "FAIL: $f is tracked — internal bootstrap files must never be committed to this public repo"
               exit 1
             fi
           done
-          echo "PASS: No internal files tracked"
+          echo "PASS: No internal bootstrap files tracked"
