@@ -5,7 +5,7 @@
 [![CocoaPods](https://img.shields.io/cocoapods/v/PolyfenceCore)](https://cocoapods.org/pods/PolyfenceCore)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Standalone, privacy-first geofencing engine for iOS and Android. Runs entirely on-device with zero cloud dependencies.
+polyfence-core is the mobile surface of the Polyfence geofence layer — the same zones you define once run on your mobile app, your IoT device, and your server. This repo is the native Kotlin + Swift engine that powers polyfence-flutter and polyfence-react-native; it runs entirely on-device with zero cloud dependencies.
 
 Polyfence Core is the shared native engine that powers [polyfence-flutter](https://github.com/polyfence/polyfence-flutter) and [polyfence-react-native](https://github.com/polyfence/polyfence-react-native). It contains all geofencing algorithms, GPS management, and telemetry aggregation logic.
 
@@ -18,7 +18,7 @@ Polyfence Core is the shared native engine that powers [polyfence-flutter](https
 - **Dwell detection** — Fire events when a device remains in a zone for a configurable duration
 - **Zone clustering** — Performance optimization for large zone sets (100+ zones)
 - **Scheduled tracking** — Time-window and day-of-week tracking schedules
-- **Telemetry aggregation** — Session-level performance metrics collected natively (no GPS coordinates or PII)
+- **Telemetry aggregation** — Session-level performance metrics collected natively. Zero PII about your end users; never coordinates, never identifiers.
 - **Zone persistence** — Zone state recovery across app restarts
 
 ## Requirements
