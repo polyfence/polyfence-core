@@ -1,0 +1,27 @@
+# Phase 2 declarative drift checks — polyfence-core
+checks:
+  - id: bootstrap-files-not-tracked
+    description: CLAUDE.md, .cursorrules, tasks/, prompts/, .claude/ must never be tracked
+    type: subprocess
+    runs: bash scripts/consistency-bootstrap-not-tracked.sh
+    fix: Remove tracked bootstrap/internal paths — git rm --cached them — keep local-only copies per CONTRIBUTING guidance.
+
+  - id: podspec-gradle-version-match
+    description: CocoaPods PolyfenceCore.podspec version matches android/build.gradle.kts library version
+    type: subprocess
+    runs: bash scripts/consistency-podspec-gradle-version.sh
+    fix: Bump s.version and the Gradle library version together before tagging dual-platform releases.
+
+  - id: readme-cites-brand-positioning
+    description: README carries canonical positioning anchor (brand doc path or geofence-layer phrase)
+    type: regex-presence
+    files:
+      - README.md
+    pattern: "(BRAND_POSITIONING\\.md|geofence layer)"
+    fix: Align README intro copy against polyfence-internal commercial/BRAND_POSITIONING.md canonical pitch.
+
+  - id: gradle-build-clean
+    description: optional full Gradle build when POLYFENCE_RUN_GRADLE=1
+    type: subprocess
+    runs: bash scripts/consistency-gradle-build-optional.sh
+    fix: Fix Gradle compilation failures surfaced when POLYFENCE_RUN_GRADLE=1 is set OR investigate deterministic failures locally via cd android && ./gradlew build.

@@ -40,4 +40,7 @@ echo "  Building Android..."
 cd android && ./gradlew build --quiet && ./gradlew test --quiet
 cd "$REPO_ROOT"
 
+echo "  Running consistency checks..."
+bash scripts/consistency-check.sh --local-only
+
 echo "All pre-push checks passed."
