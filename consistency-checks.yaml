@@ -1,4 +1,4 @@
-# Phase 2 declarative drift checks — polyfence-core
+# Phase 3 declarative drift checks — polyfence-core
 checks:
   - id: bootstrap-files-not-tracked
     description: CLAUDE.md, .cursorrules, tasks/, prompts/, .claude/ must never be tracked
@@ -25,3 +25,19 @@ checks:
     type: subprocess
     runs: bash scripts/consistency-gradle-build-optional.sh
     fix: Fix Gradle compilation failures surfaced when POLYFENCE_RUN_GRADLE=1 is set OR investigate deterministic failures locally via cd android && ./gradlew build.
+
+  - id: privacy-md-zero-pii-headline
+    description: PRIVACY.md keeps the zero-PII-about-end-users headline (template anchor)
+    type: regex-presence
+    files:
+      - PRIVACY.md
+    pattern: "(?i)Zero PII about your end users"
+    fix: Restore the templates/PRIVACY_ROLE1.md zero-PII headline block; do not paraphrase the canonical line.
+
+  - id: readme-canonical-define-once-phrase
+    description: README repeats the define-once / three-surfaces pitch fragment from brand positioning
+    type: regex-presence
+    files:
+      - README.md
+    pattern: "(?i)define once"
+    fix: Sync README lead sentence against commercial/BRAND_POSITIONING.md three-follow-up / one-sentence pitch snippets.
