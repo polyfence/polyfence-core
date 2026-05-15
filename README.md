@@ -5,7 +5,9 @@
 [![CocoaPods](https://img.shields.io/cocoapods/v/PolyfenceCore)](https://cocoapods.org/pods/PolyfenceCore)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-polyfence-core is the mobile surface of the Polyfence geofence layer — the same zones you define once run on your mobile app, your IoT device, and your server. This repo is the native Kotlin + Swift engine that powers polyfence-flutter and polyfence-react-native; it runs entirely on-device with zero cloud dependencies.
+**Define once. Evaluate anywhere.**
+
+polyfence-core is the mobile surface of the Polyfence geofence layer — the native Kotlin + Swift engine that evaluates zones on-device in mobile apps. Those same zone definitions power IoT and server-side evaluation elsewhere in the Polyfence platform. This repo powers polyfence-flutter and polyfence-react-native; it runs entirely on-device with zero cloud dependencies.
 
 Polyfence Core is the shared native engine that powers [polyfence-flutter](https://github.com/polyfence/polyfence-flutter) and [polyfence-react-native](https://github.com/polyfence/polyfence-react-native). It contains all geofencing algorithms, GPS management, and telemetry aggregation logic.
 
