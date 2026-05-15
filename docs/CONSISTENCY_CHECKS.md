@@ -1,5 +1,11 @@
 # Consistency Checks
 
+## Requires
+
+Ruby ≥ 2.6 for the runner. macOS ships this by default. The `scripts/consistency-check.sh` bash dispatcher exits with a clear message if `ruby` is not on `PATH`. (The org's other consistency-check installs use TypeScript or Python; the YAML schema is identical across all runtime ports.)
+
+## Overview
+
 Declarative registry: `consistency-checks.yaml` at repo root. Runner entrypoint: `scripts/consistency-check.sh` (invokes `scripts/consistency_check_runner.rb`). Runs locally before push via `scripts/pre-push-checks.sh`.
 
 ## Commands
