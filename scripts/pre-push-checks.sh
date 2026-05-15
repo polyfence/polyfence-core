@@ -1,10 +1,16 @@
 #!/bin/bash
 # Pre-push quality checks — runs locally before push to save CI minutes
 # Install: cp scripts/pre-push-checks.sh .git/hooks/pre-push && chmod +x .git/hooks/pre-push
-set -e
+set -euo pipefail
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
+
+if [ -z "${JAVA_HOME:-}" ] || [ ! -d "$JAVA_HOME" ]; then
+  echo "FAIL: JAVA_HOME is not set or points to a missing directory: '${JAVA_HOME:-<unset>}'" >&2
+  echo "      Set JAVA_HOME to your Java installation root (e.g. /opt/homebrew/opt/openjdk@17)" >&2
+  exit 1
+fi
 
 echo "Running pre-push checks..."
 
