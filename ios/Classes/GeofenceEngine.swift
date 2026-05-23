@@ -975,23 +975,34 @@ class ZoneData {
                     }
                 }
             }
-            let points = parsedPoints
+            // Normalize for the self-intersection check:
+            //  1. Strip the trailing point if it equals the first (closed polygon
+            //     supplied with explicit closing vertex). Otherwise edges 0 and
+            //     n-2 share `points[0] == points[n-1]` and the CCW segment-
+            //     intersection test trips a false positive at the seam.
+            //  2. Drop consecutive duplicate vertices — they create zero-length
+            //     edges and the same shared-endpoint false positive.
+            let normalized = normalizeForSelfIntersectCheck(parsedPoints)
 
-            guard points.count >= 3 else {
+            guard normalized.count >= 3 else {
                 throw NSError(domain: "GeofenceEngine", code: 4, userInfo: [NSLocalizedDescriptionKey: "Polygon must have at least 3 points"])
             }
 
-            // Check for self-intersecting polygon
-            if isPolygonSelfIntersecting(points: points) {
-                throw NSError(domain: "GeofenceEngine", code: 6, userInfo: [NSLocalizedDescriptionKey: "Polygon is self-intersecting and cannot be used for geofencing"])
+            // Soft check: only WARN on residual self-intersections. Point-in-
+            // polygon (ray casting) is well-defined even for self-intersecting
+            // polygons (caller gets the even-odd-rule interior), so rejecting
+            // the zone outright hurts real-world geocoded boundaries (e.g.
+            // London CC, ULEZ) that have minor topology quirks.
+            if isPolygonSelfIntersecting(points: normalized) {
+                NSLog("[GeofenceEngine] Polygon has self-intersections after normalization — accepting with warning (even-odd-rule interior used)")
             }
 
             // Warn about poles (reduced accuracy near ±85°)
-            checkPoleWarning(points: points)
+            checkPoleWarning(points: normalized)
 
             center = nil
             radius = nil
-            polygon = points
+            polygon = normalized
 
         } else {
             throw NSError(domain: "GeofenceEngine", code: 5, userInfo: [NSLocalizedDescriptionKey: "Unknown zone type: \(typeString)"])
@@ -1043,6 +1054,34 @@ class ZoneData {
             return coords
         }
         return coords
+    }
+
+    /**
+     * Normalize polygon points for the self-intersection check:
+     *  - Strip the trailing point if it duplicates the first (closed-polygon
+     *    inputs supplied with explicit closing vertex).
+     *  - Collapse consecutive duplicate vertices.
+     *
+     * Without normalization the CCW segment-intersection test trips false
+     * positives where two non-adjacent edges share an endpoint (the closure
+     * seam, or coincident-point duplicates seen in geocoded boundary data).
+     */
+    private static func normalizeForSelfIntersectCheck(_ points: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
+        let eps = 1e-9
+        func same(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Bool {
+            return abs(a.latitude - b.latitude) < eps && abs(a.longitude - b.longitude) < eps
+        }
+        var working = points
+        if working.count > 1, let first = working.first, let last = working.last, same(first, last) {
+            working.removeLast()
+        }
+        var deduped: [CLLocationCoordinate2D] = []
+        deduped.reserveCapacity(working.count)
+        for p in working {
+            if let prev = deduped.last, same(prev, p) { continue }
+            deduped.append(p)
+        }
+        return deduped
     }
 
     /**

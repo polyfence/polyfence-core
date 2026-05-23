@@ -389,7 +389,7 @@ public class LocationTracker: NSObject {
                     }
                 }
             } catch {
-                // Failed to add zone
+                NSLog("[LocationTracker] Failed to add zone %@: %@", zoneId, "\(error)")
             }
         }
     }
@@ -505,6 +505,23 @@ public class LocationTracker: NSObject {
         if let lastKnown = locationManager.location {
             self.lastLocationTime = Date().timeIntervalSince1970
             self.sendLocationToDelegate(location: lastKnown)
+
+            // Fire initial zone reconciliation against the cached location so
+            // ENTER events for zones the user is already inside arrive as soon
+            // as tracking starts — without waiting for CLLocationManager to
+            // deliver a fresh `didUpdateLocations` callback (which can be
+            // delayed indefinitely on a stationary device under
+            // `pausesLocationUpdatesAutomatically=true` + distance-filter
+            // gating). Subsequent `didUpdateLocations` will see
+            // `firstLocationAfterRestart=false` and skip the re-reconcile —
+            // they fall through to the normal `checkLocation` path.
+            if firstLocationAfterRestart {
+                firstLocationAfterRestart = false
+                NSLog("[LocationTracker] Reconciling against cached location on startGpsUpdates")
+                geofenceQueue.sync { [weak self] in
+                    self?.geofenceEngine.reconcileZoneStates(lastKnown)
+                }
+            }
         }
         if #available(iOS 9.0, *) {
             locationManager.startMonitoringSignificantLocationChanges()
