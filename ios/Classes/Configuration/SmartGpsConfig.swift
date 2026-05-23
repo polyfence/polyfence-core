@@ -92,19 +92,22 @@ public struct SmartGpsConfig {
     }
 
     /**
-     * Whether to pause location updates automatically
+     * Whether iOS should automatically pause `CLLocationManager` when it
+     * thinks the device is stationary.
+     *
+     * Always `false` for geofencing: when iOS pauses updates, it also
+     * lets the system suspend the app, which means the next
+     * cross-the-boundary event arrives at a dead delegate (or doesn't
+     * arrive at all) and ENTER/EXIT/DWELL are missed. Battery saving
+     * here comes at the cost of correctness, and geofence apps live or
+     * die on correctness.
+     *
+     * Equivalent to Android's foreground service holding the GPS stream
+     * open — without that we get the multi-hour event gaps users see
+     * after a stationary period.
      */
     public func shouldPauseAutomatically() -> Bool {
-        switch accuracyProfile {
-        case .maxAccuracy:
-            return false
-        case .balanced:
-            return true
-        case .batteryOptimal:
-            return true
-        case .adaptive:
-            return true
-        }
+        return false
     }
 
     /**
