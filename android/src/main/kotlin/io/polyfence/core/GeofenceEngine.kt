@@ -287,11 +287,19 @@ fun getZoneName(zoneId: String): String? {
     }
 
     /**
-     * Get zones to check based on clustering configuration
+     * Get zones to check based on clustering configuration.
+     *
+     * With clustering enabled, distant zones leave [activeZoneIds] — zones we still consider **inside**
+     * must remain in the evaluated set until an EXIT is detected, otherwise state and notifications stall.
      */
     private fun getZonesToCheck(): Map<String, ZoneData> {
         return if (clusteringEnabled && activeZoneIds.isNotEmpty()) {
-            zones.filterKeys { it in activeZoneIds }
+            val ids = activeZoneIds.toMutableSet().apply {
+                zoneStates.forEach { (zoneId, inside) ->
+                    if (inside) add(zoneId)
+                }
+            }
+            zones.filterKeys { it in ids }
         } else {
             zones
         }

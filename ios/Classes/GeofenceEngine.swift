@@ -184,13 +184,22 @@ class GeofenceEngine {
 
     /**
      * Get zones to check based on clustering configuration
+     *
+     * When clustering is on, distant zones drop out of `activeZoneIds` for performance — but **any zone
+     * still marked INSIDE must keep being evaluated** or we never observe the exit crossing (no EXIT
+     * events, stale `zoneStates`, missing notifications).
+     *
+     * Must only run on `syncQueue` (same assumption as callers of `checkLocation`).
      */
     private func getZonesToCheck() -> [String: ZoneData] {
         if clusteringEnabled && !activeZoneIds.isEmpty {
-            return zones.filter { activeZoneIds.contains($0.key) }
-        } else {
-            return zones
+            var ids = activeZoneIds
+            for (zoneId, inside) in zoneStates where inside {
+                ids.insert(zoneId)
+            }
+            return zones.filter { ids.contains($0.key) }
         }
+        return zones
     }
 
     /**
