@@ -150,6 +150,14 @@ public class LocationTracker: NSObject {
         // because callers rely on `locationManager` being non-nil
         // immediately after init() returns (e.g. startTracking() guards on
         // it and bails out otherwise). No-op when already on main.
+        // Deadlock assumption: this `.sync` is safe because (a) the
+        // `Thread.isMainThread` gate above prevents calling `.sync` from main
+        // (the canonical self-deadlock), and (b) `LocationTracker.init()` is
+        // only invoked from bridge-init entry points (PolyfenceModule.initialize
+        // on RN; Flutter plugin registration). Those entry points run on a
+        // dispatch queue, not under any lock or semaphore that main is itself
+        // waiting on, so blocking the calling thread until main has executed
+        // this block cannot deadlock.
         if !Thread.isMainThread {
             DispatchQueue.main.sync { self.setupLocationManager() }
             return
