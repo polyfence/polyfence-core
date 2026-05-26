@@ -390,6 +390,18 @@ public class LocationTracker: NSObject {
                 DispatchQueue.main.async {
                     self.checkLocationManagerHealth()
 
+                    // Diagnostic — temporary while validating the multi-zone
+                    // cold-start fix; lets us see in device logs which branch
+                    // each addZone takes and whether locationManager.location
+                    // is populated. Remove once verified.
+                    let hasCachedLoc = self.locationManager?.location != nil
+                    os_log("PF-RECONCILE addZone gpsDeferred=%{public}d isRunning=%{public}d hasCachedLoc=%{public}d zoneId=%{public}@",
+                           log: pfCoreLog, type: .error,
+                           self.gpsStartDeferred ? 1 : 0,
+                           self.isRunning ? 1 : 0,
+                           hasCachedLoc ? 1 : 0,
+                           zoneId)
+
                     // If GPS was deferred, start it now that we have zones
                     if self.gpsStartDeferred && self.isRunning {
                         NSLog("[LocationTracker] First zone added - starting deferred GPS")
