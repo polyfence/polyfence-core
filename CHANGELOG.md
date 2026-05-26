@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-05-26
+
 ### Changed
 - **iOS `pausesLocationUpdatesAutomatically` now always `false`** — `SmartGpsConfig.shouldPauseAutomatically()` previously returned `true` for the `balanced`, `batteryOptimal`, and `adaptive` profiles, which let iOS pause CLLocationManager when it considered the device stationary and then suspend the host app. The next time the user crossed a boundary, CLLocationManager arrived at a suspended app (and often at a delegate that had been deallocated) so the ENTER/EXIT/DWELL was dropped. Symptom: iOS RN consumers caught a small fraction of the events that Android RN / Android Flutter / iOS Flutter siblings caught — multi-hour gaps in the Events Log after any stationary period. Geofencing lives or dies on correctness; the slight battery saving from auto-pause was buying app suspension at the cost of every event we exist to deliver. Now always `false` across all accuracy profiles, matching how the Android side stays continuously alive via its foreground service.
 
