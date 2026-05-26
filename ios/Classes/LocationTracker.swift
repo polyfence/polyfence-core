@@ -427,6 +427,12 @@ public class LocationTracker: NSObject {
                 }
             } catch {
                 NSLog("[LocationTracker] Failed to add zone %@: %@", zoneId, "\(error)")
+                // Diagnostic — make failed-add visible in release-build logs
+                // (NSLog above gets redacted to <private>). Remove with the
+                // PF-RECONCILE diag.
+                os_log("PF-ADDZONE-FAIL zoneId=%{public}@ error=%{public}@",
+                       log: pfCoreLog, type: .error,
+                       zoneId, "\(error)")
             }
         }
     }
