@@ -40,6 +40,15 @@ public class PolyfenceDebugCollector {
     private func collectSystemStatus() -> [String: Any] {
         return syncQueue.sync {
             return [
+                // Throwaway CLLocationManager instances used here for a one-shot
+                // synchronous `authorizationStatus` read. No delegate is set,
+                // no `startUpdating…` is called, and the instance goes out of
+                // scope immediately — so the run-loop-on-creating-thread
+                // requirement that affects LocationTracker's long-lived manager
+                // (see LocationTracker.setupLocationManager() comment) does not
+                // apply here. Fast-follow candidate: read `authorizationStatus`
+                // from the long-lived LocationTracker manager instead of
+                // allocating temps.
                 "isLocationPermissionGranted": {
                     let mgr = CLLocationManager()
                     return mgr.authorizationStatus == .authorizedAlways || mgr.authorizationStatus == .authorizedWhenInUse

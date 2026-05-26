@@ -1,6 +1,7 @@
 import Foundation
 import CoreLocation
 import UserNotifications
+import os
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -130,6 +131,41 @@ public class LocationTracker: NSObject {
     // MARK: - Setup Methods
 
     private func setupLocationManager() {
+        // Apple delivers CLLocationManager's async delegate callbacks
+        // (didUpdateLocations, didChangeAuthorization, didFailWithError, etc.)
+        // via the run loop of the thread on which the manager was created.
+        // The bridge that constructs LocationTracker may not be on such a
+        // thread. React Native 0.76+ in Bridgeless / New Arch dispatches
+        // RCTEventEmitter method invocations on a runloop-less background
+        // dispatch queue by default; LocationTracker.init() runs there, the
+        // manager is created there, and CL has no runloop to post callbacks
+        // to. Symptom: iOS buffers and then discards updates with
+        // `Location callback block not executed in a timely manner` and
+        // `Discarding message for event because of too many unprocessed
+        // messages, count:N`. Flutter does not hit this because
+        // FlutterMethodChannel dispatches plugin calls on a thread that
+        // does have a runloop. Force construction onto the main thread
+        // (which always has a runloop) so callback delivery works
+        // regardless of which bridge instantiates us. .sync (not .async)
+        // because callers rely on `locationManager` being non-nil
+        // immediately after init() returns (e.g. startTracking() guards on
+        // it and bails out otherwise). No-op when already on main.
+        // Deadlock assumption: this `.sync` is safe because (a) the
+        // `Thread.isMainThread` gate above prevents calling `.sync` from main
+        // (the canonical self-deadlock), and (b) `LocationTracker.init()` is
+        // only invoked from bridge-init entry points (PolyfenceModule.initialize
+        // on RN; Flutter plugin registration). Those entry points run on a
+        // dispatch queue, not under any lock or semaphore that main is itself
+        // waiting on, so blocking the calling thread until main has executed
+        // this block cannot deadlock.
+        if !Thread.isMainThread {
+            DispatchQueue.main.sync { self.setupLocationManager() }
+            return
+        }
+        // os_log (not NSLog) with %{public} so the marker survives the
+        // release-build privacy redaction that would otherwise show as
+        // `<private>` in idevicesyslog / Console.app.
+        os_log("PF-THREAD setupLocationManager isMain=%{public}d", Thread.isMainThread ? 1 : 0)
         locationManager = CLLocationManager()
         locationManager?.delegate = self
         // Use smartConfig defaults for initial setup (BALANCED profile by default)
