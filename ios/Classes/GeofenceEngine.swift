@@ -259,10 +259,16 @@ class GeofenceEngine {
             let snapshot: [(String, ZoneData)] = syncQueue.sync { self.zones.map { ($0.key, $0.value) } }
             for (zoneId, zone) in snapshot {
                 let isInside = zone.contains(location)
+                // Read previous state BEFORE writing the new one so this branch is
+                // idempotent across multiple calls within the same fresh-install
+                // session (e.g. LocationTracker.addZone re-calls this after every
+                // zone add so newly-added zones get their cold-start ENTER too).
+                let wasInside = syncQueue.sync { self.zoneStates[zoneId] ?? false }
                 syncQueue.sync { self.zoneStates[zoneId] = isInside }
 
-                // Fire ENTER event for zones we're currently inside (fresh install behavior)
-                if isInside {
+                // Fire ENTER only on state transition (false -> true) so repeated
+                // calls don't emit duplicate ENTERs for zones already marked inside.
+                if isInside && !wasInside {
                     let detectionTimeMs = (CFAbsoluteTimeGetCurrent() - checkStartTime) * 1000.0
                     NSLog("[\(GeofenceEngine.TAG)] Initial state: inside zone \(zoneId) -> firing ENTER")
                     eventCallback?(zoneId, "ENTER", location, detectionTimeMs)
