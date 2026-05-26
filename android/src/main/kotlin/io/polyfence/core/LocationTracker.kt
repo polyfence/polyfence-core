@@ -704,6 +704,21 @@ class LocationTracker : Service() {
         if (gpsStartDeferred && isRunning && geofenceEngine.hasZones()) {
             Log.d(TAG, "First zone added - starting deferred GPS updates")
             startGpsUpdates()
+        } else if (isRunning) {
+            // Tracking already running. This zone was added AFTER startGpsUpdates'
+            // initial reconcile already ran, so without a re-reconcile the new
+            // zone never gets its cold-start ENTER even if the user is currently
+            // inside it (the engine's per-tick checkLocation goes through
+            // getZonesToCheck which may exclude this zone via clustering until
+            // it acquires INSIDE state, which would never happen).
+            // Re-reconciling now uses the last-known location to evaluate the
+            // newly-added zone against the user's current position.
+            // Safe to call repeatedly because reconcileZoneStates' fresh-install
+            // branch is now idempotent (fires ENTER only on the false -> true
+            // state transition).
+            lastKnownLocation?.let { cachedLocation ->
+                geofenceEngine.reconcileZoneStates(cachedLocation)
+            }
         }
     }
 

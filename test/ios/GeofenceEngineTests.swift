@@ -303,8 +303,16 @@ class GeofenceEngineTests: XCTestCase {
         }
     }
 
-    func testSelfIntersectingPolygonThrowsException() {
-        // Bowtie shape: vertices create self-intersecting edges
+    func testSelfIntersectingPolygonIsAcceptedWithWarning() {
+        // Bowtie shape: vertices create self-intersecting edges.
+        //
+        // Pre-1.0.6 behaviour: throw and refuse the zone.
+        // Post-1.0.6 behaviour: log a warning and accept. Real-world
+        // geocoded boundaries trip the self-intersection test for benign
+        // reasons (closure seams, duplicate vertices) far more often than
+        // for actually malformed input — and `isPointInPolygon` (even-
+        // odd-rule ray cast) is well-defined for self-intersecting
+        // polygons regardless. Refusing them hurts users for no gain.
         let bowTie: [[String: Any]] = [
             ["latitude": 0.0, "longitude": 0.0],
             ["latitude": 1.0, "longitude": 1.0],
@@ -316,12 +324,12 @@ class GeofenceEngineTests: XCTestCase {
             "polygon": bowTie
         ]
 
-        XCTAssertThrowsError(
-            try engine.addZone(zoneId: "self-intersect", zoneName: "Bad Polygon", zoneData: zoneData)
-        ) { error in
-            let nsError = error as NSError
-            XCTAssertEqual(nsError.domain, "GeofenceEngine")
-        }
+        XCTAssertNoThrow(
+            try engine.addZone(zoneId: "self-intersect", zoneName: "Bow Tie", zoneData: zoneData),
+            "Self-intersecting polygon must now be accepted (warning logged, zone registered)"
+        )
+        XCTAssertEqual(engine.getZoneCount(), 1)
+        XCTAssertEqual(engine.getZoneName("self-intersect"), "Bow Tie")
     }
 
     // MARK: - Dwell Time Tracking Tests
@@ -645,6 +653,97 @@ class GeofenceEngineTests: XCTestCase {
 
         let hasExitEvent = events.contains { $0.eventType == "EXIT" }
         XCTAssertTrue(hasExitEvent, "Exit event should fire immediately without confirmation")
+    }
+
+    // MARK: - Regression: closed polygon false-positive self-intersection (v1.0.6)
+
+    func testAddZoneAcceptsClosedPolygonWithExplicitClosingVertex() throws {
+        // Real-world geocoded boundaries (e.g. London Congestion Charge,
+        // ULEZ) ship with first == last. The original CCW segment-
+        // intersection test only skipped the literal `(0, n-1)` edge pair
+        // but on a closed polygon the geometric closure happens between
+        // edges 0 and n-2 (both touch points[0] == points[n-1]) and one
+        // cross product evaluates to 0 at the shared endpoint, producing
+        // a false self-intersection. Normalization (strip trailing
+        // duplicate vertex) fixes this.
+        let polygon: [[String: Any]] = [
+            ["latitude": 0.0, "longitude": 0.0],
+            ["latitude": 1.0, "longitude": 0.0],
+            ["latitude": 1.0, "longitude": 1.0],
+            ["latitude": 0.0, "longitude": 1.0],
+            ["latitude": 0.0, "longitude": 0.0]  // explicit closing vertex
+        ]
+        let zoneData: [String: Any] = ["type": "polygon", "polygon": polygon]
+
+        XCTAssertNoThrow(
+            try engine.addZone(zoneId: "closed-square", zoneName: "Closed", zoneData: zoneData),
+            "Closed polygon (first == last) must be accepted, not flagged as self-intersecting"
+        )
+        XCTAssertEqual(engine.getZoneCount(), 1)
+
+        // And the normalized polygon still passes inside/outside checks.
+        engine.setValidationConfig(requireConfirmation: false)
+        engine.checkLocation(createLocation(0.5, 0.5))
+        XCTAssertTrue(engine.getCurrentZoneStates()["closed-square"] ?? false,
+                      "Point inside closed polygon should resolve to inside")
+    }
+
+    func testAddZoneCollapsesConsecutiveDuplicateVertices() throws {
+        // Geocoded data often has consecutive duplicates (1098-point
+        // London CC zone had ~10). Without dedup they create zero-length
+        // edges that also trip the self-intersection test.
+        let polygon: [[String: Any]] = [
+            ["latitude": 0.0, "longitude": 0.0],
+            ["latitude": 0.0, "longitude": 0.0],  // duplicate
+            ["latitude": 1.0, "longitude": 0.0],
+            ["latitude": 1.0, "longitude": 1.0],
+            ["latitude": 1.0, "longitude": 1.0],  // duplicate
+            ["latitude": 0.0, "longitude": 1.0]
+        ]
+        let zoneData: [String: Any] = ["type": "polygon", "polygon": polygon]
+
+        XCTAssertNoThrow(
+            try engine.addZone(zoneId: "dup-square", zoneName: "Duped", zoneData: zoneData),
+            "Polygon with consecutive duplicates must be accepted"
+        )
+        XCTAssertEqual(engine.getZoneCount(), 1)
+    }
+
+    // MARK: - Regression: reconcile fires ENTER for inside zones on fresh install (v1.0.6)
+
+    func testReconcileFiresEnterForInsideZonesWhenNoPersistedState() throws {
+        // On a fresh install (no ZonePersistence), reconcileZoneStates
+        // must fire ENTER for every zone the user is currently inside —
+        // matches the "tap tracking while standing inside a zone" UX on
+        // Android RN / Android Flutter / iOS Flutter.
+        let zoneA: [String: Any] = [
+            "type": "circle",
+            "center": ["latitude": 40.7128, "longitude": -74.0060],
+            "radius": 1000.0
+        ]
+        let zoneB: [String: Any] = [
+            "type": "circle",
+            "center": ["latitude": 40.7128, "longitude": -74.0060],
+            "radius": 500.0
+        ]
+        let zoneC: [String: Any] = [
+            "type": "circle",
+            "center": ["latitude": 50.0, "longitude": 0.0],
+            "radius": 100.0
+        ]
+        try engine.addZone(zoneId: "a", zoneName: "A", zoneData: zoneA)
+        try engine.addZone(zoneId: "b", zoneName: "B", zoneData: zoneB)
+        try engine.addZone(zoneId: "c", zoneName: "C", zoneData: zoneC)
+
+        // No persisted state has been loaded — engine takes the "fresh
+        // install" branch in reconcileZoneStates.
+        let here = createLocation(40.7128, -74.0060)
+        engine.reconcileZoneStates(here)
+
+        let enterEvents = events.filter { $0.eventType == "ENTER" }
+        let enteredIds = Set(enterEvents.map { $0.zoneId })
+        XCTAssertEqual(enteredIds, ["a", "b"],
+                       "ENTER must fire for every zone we're inside on fresh-state reconcile, but not for outside zones")
     }
 
     // MARK: - Helper Functions

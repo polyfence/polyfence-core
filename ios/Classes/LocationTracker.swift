@@ -8,6 +8,12 @@ import UIKit
 
 // GeoMath is already available in the same module
 
+// Diagnostic forensics — Xcode > Window > Devices and Simulators > Open
+// Console, then search `subsystem:io.polyfence.core` to see real-time.
+// All at .error so they survive the default Console filter; remove once
+// background-event-delivery is stable.
+private let pfCoreLog = OSLog(subsystem: "io.polyfence.core", category: "tracker")
+
 /**
  * Background location tracking service for iOS
  * Single responsibility: GPS updates -> GeofenceEngine -> Notifications
@@ -70,9 +76,6 @@ public class LocationTracker: NSObject {
     private var notificationCenter: UNUserNotificationCenter?
     private var healthTimer: Timer?
     private var healthScoreTimer: Timer?
-
-    // Background Task Management
-    private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
 
     // Callbacks
     private var locationCallback: (([String: Any]) -> Void)?
@@ -219,7 +222,12 @@ public class LocationTracker: NSObject {
      * Start location tracking
      */
     public func startTracking() {
+        os_log("startTracking() zoneCount=%{public}d hasLocMgr=%{public}d",
+               log: pfCoreLog, type: .error,
+               geofenceEngine.getZoneCount(), locationManager != nil ? 1 : 0)
         guard locationManager != nil else {
+            os_log("startTracking ABORT: locationManager is nil",
+                   log: pfCoreLog, type: .error)
             return
         }
 
@@ -227,8 +235,17 @@ public class LocationTracker: NSObject {
         trackingEnabled = true
         firstLocationAfterRestart = true  // Reset for state reconciliation
 
-        // Begin background task
-        beginBackgroundTask()
+        // NOTE: We do NOT call `UIApplication.beginBackgroundTask` here.
+        // That API is for short, finite work (≤30s) that must complete
+        // after the app moves to background; iOS warns and may terminate
+        // the app for misuse when the task is held open for the whole
+        // session. For continuous background location, the combination
+        // of `UIBackgroundModes: location` (Info.plist) and
+        // `CLLocationManager.allowsBackgroundLocationUpdates = true`
+        // (set in setupLocationManager) is what iOS provides — and what
+        // it expects. See iOS log warning:
+        //   "Background Task X created over 30 seconds ago...
+        //    this creates a risk of termination."
         healthTimer?.invalidate()
         healthTimer = Timer.scheduledTimer(withTimeInterval: 12 * 60, repeats: true) { [weak self] _ in
             guard let self = self, self.isRunning else { return }
@@ -302,8 +319,8 @@ public class LocationTracker: NSObject {
             locationManager.stopMonitoringSignificantLocationChanges()
         }
 
-        // End background task
-        endBackgroundTask()
+        // No background-task counterpart to end — we no longer call
+        // beginBackgroundTask in startTracking (see note there).
 
         // Stop activity recognition
         activityRecognitionManager?.stop()
@@ -351,20 +368,12 @@ public class LocationTracker: NSObject {
         }
     }
 
-    // MARK: - Background Task Management
-
-    private func beginBackgroundTask() {
-        backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "PolyfenceLocationTracking") {
-            self.endBackgroundTask()
-        }
-    }
-
-    private func endBackgroundTask() {
-        if backgroundTaskId != .invalid {
-            UIApplication.shared.endBackgroundTask(backgroundTaskId)
-            backgroundTaskId = .invalid
-        }
-    }
+    // (Intentionally no UIApplication.beginBackgroundTask helpers. The
+    // `UIBackgroundModes: location` + `allowsBackgroundLocationUpdates`
+    // combination is what iOS provides for continuous background
+    // location; `beginBackgroundTask` is for finite ≤30s work and iOS
+    // terminates apps that hold one open longer than that. Removed in
+    // v1.0.8 after the iOS console flagged it as a termination risk.)
 
     /**
      * Add zone for monitoring
@@ -386,10 +395,26 @@ public class LocationTracker: NSObject {
                         NSLog("[LocationTracker] First zone added - starting deferred GPS")
                         self.gpsStartDeferred = false
                         self.startGpsUpdates()
+                    } else if self.isRunning, let cachedLocation = self.locationManager?.location {
+                        // Tracking is already running. This zone was added AFTER
+                        // startGpsUpdates' initial reconcile already ran, so without
+                        // a re-reconcile the new zone never gets its cold-start
+                        // ENTER even if the user is currently inside it (the engine's
+                        // per-tick checkLocation goes through getZonesToCheck which
+                        // may exclude this zone via clustering until it acquires
+                        // INSIDE state, which would never happen).
+                        // Re-reconciling now uses the cached location to evaluate the
+                        // newly-added zone against the user's current position.
+                        // Safe to call repeatedly because reconcileZoneStates' fresh-
+                        // install branch is now idempotent (fires ENTER only on the
+                        // false -> true state transition).
+                        self.geofenceQueue.async {
+                            self.geofenceEngine.reconcileZoneStates(cachedLocation)
+                        }
                     }
                 }
             } catch {
-                // Failed to add zone
+                NSLog("[LocationTracker] Failed to add zone %@: %@", zoneId, "\(error)")
             }
         }
     }
@@ -505,6 +530,23 @@ public class LocationTracker: NSObject {
         if let lastKnown = locationManager.location {
             self.lastLocationTime = Date().timeIntervalSince1970
             self.sendLocationToDelegate(location: lastKnown)
+
+            // Fire initial zone reconciliation against the cached location so
+            // ENTER events for zones the user is already inside arrive as soon
+            // as tracking starts — without waiting for CLLocationManager to
+            // deliver a fresh `didUpdateLocations` callback (which can be
+            // delayed indefinitely on a stationary device under
+            // `pausesLocationUpdatesAutomatically=true` + distance-filter
+            // gating). Subsequent `didUpdateLocations` will see
+            // `firstLocationAfterRestart=false` and skip the re-reconcile —
+            // they fall through to the normal `checkLocation` path.
+            if firstLocationAfterRestart {
+                firstLocationAfterRestart = false
+                NSLog("[LocationTracker] Reconciling against cached location on startGpsUpdates")
+                geofenceQueue.sync { [weak self] in
+                    self?.geofenceEngine.reconcileZoneStates(lastKnown)
+                }
+            }
         }
         if #available(iOS 9.0, *) {
             locationManager.startMonitoringSignificantLocationChanges()
@@ -554,9 +596,14 @@ public class LocationTracker: NSObject {
      * Handle geofence events safely on main thread
      */
     private func handleGeofenceEvent(zoneId: String, eventType: String, location: CLLocation, detectionTimeMs: Double) {
+        os_log("handleGeofenceEvent type=%{public}@ zone=%{public}@ trackingEnabled=%{public}d hasCoreDelegate=%{public}d",
+               log: pfCoreLog, type: .error,
+               eventType, zoneId, trackingEnabled ? 1 : 0, coreDelegate != nil ? 1 : 0)
 
         // CRITICAL: Only process geofence events if tracking is explicitly enabled
         guard trackingEnabled else {
+            os_log("handleGeofenceEvent BLOCKED — trackingEnabled=false",
+                   log: pfCoreLog, type: .error)
             return
         }
 
@@ -871,8 +918,13 @@ public class LocationTracker: NSObject {
 extension LocationTracker: CLLocationManagerDelegate {
 
     public func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        os_log("didUpdateLocations n=%{public}d trackingEnabled=%{public}d isRunning=%{public}d firstAfterRestart=%{public}d",
+               log: pfCoreLog, type: .error,
+               locations.count, trackingEnabled ? 1 : 0, isRunning ? 1 : 0, firstLocationAfterRestart ? 1 : 0)
         // CRITICAL: Only process locations if tracking is explicitly enabled
         guard trackingEnabled, let location = locations.last, isRunning else {
+            os_log("didUpdateLocations BLOCKED — trackingEnabled or isRunning false",
+                   log: pfCoreLog, type: .error)
             return
         }
 
