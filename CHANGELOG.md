@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-05-27
+
+### Fixed
+- **Android geofence event delegate map was missing `timestamp`.** `LocationTracker.handleGeofenceTransition` built the event dictionary forwarded to `coreDelegate.onGeofenceEvent(...)` without including a `"timestamp"` field, while iOS (`LocationTracker.swift:639`) already emits `Int64(Date().timeIntervalSince1970 * 1000)` for the same event surface. The polyfence-flutter bridge's `_handleGeofenceEvent` validates `eventData['timestamp']` as `int | double` and reports a "Invalid timestamp type: Null" error to consumers when the field is absent. Consumer apps that subscribe to the SDK's error stream saw a red banner per ENTER/EXIT/DWELL on Android, masking real diagnostics. polyfence-react-native parsed the same map but used `Date.now()` silently as a fallback, so the issue was Flutter-visible only — but the platform parity gap was real either way. **Fix:** Android event map now includes `"timestamp" to System.currentTimeMillis()`, matching iOS field name and units (ms since epoch at delegate emission time).
+
 ## [1.0.7] - 2026-05-26
 
 ### Changed

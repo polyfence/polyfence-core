@@ -796,11 +796,15 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         detectionTimeMs = detectionTimeMs
     )
 
-    // Send event to delegate with detection metrics, GPS coordinates, and ML context
+    // Send event to delegate with detection metrics, GPS coordinates, and ML context.
+    // `timestamp` mirrors the iOS event map (see ios/Classes/LocationTracker.swift:639);
+    // without it, polyfence-flutter's bridge can't parse the event and emits a noisy
+    // "Invalid timestamp type: Null" error for every geofence transition.
     coreDelegate?.onGeofenceEvent(mapOf(
         "zoneId" to zoneId,
         "zoneName" to zoneName,
         "eventType" to eventType,
+        "timestamp" to System.currentTimeMillis(),
         "latitude" to location.latitude,
         "longitude" to location.longitude,
         "detectionTimeMs" to detectionTimeMs,
