@@ -368,6 +368,23 @@ fun getZoneName(zoneId: String): String? {
      */
     fun reconcileZoneStates(location: Location) {
         if (!stateRecoveredFromPersistence) {
+            // Cold-start race guard: if no zones are registered yet, the engine
+            // got a GPS fix before the bridge's addZone() calls landed (most
+            // commonly: activity-recognition GPS start fires independently of
+            // LocationTracker's hasZones() defer-gate). Saving an empty
+            // baseline here locks in `0 zones, inside=0` to persistence and
+            // strands every subsequent addZone() — its re-reconcile evaluates
+            // against the same cached (often inaccurate) fix and silently no-ops.
+            //
+            // Skip the persist when zones is empty. stateRecoveredFromPersistence
+            // stays false, so the next reconcileZoneStates call — typically from
+            // LocationTracker.addZone() — re-enters this branch with zones
+            // populated and the idempotent ENTER-on-transition loop below fires
+            // normally.
+            if (zones.isEmpty()) {
+                Log.d(TAG, "No persisted state and no zones registered yet — deferring initial baseline (cold-start race guard)")
+                return
+            }
             // No persisted state - establish initial state and fire ENTER events for zones we're inside
             Log.d(TAG, "No persisted state - establishing initial state from current location")
             val checkStartTime = System.nanoTime()
