@@ -253,6 +253,25 @@ class GeofenceEngine {
      */
     func reconcileZoneStates(_ location: CLLocation) {
         if !stateRecoveredFromPersistence {
+            // Cold-start race guard: if no zones are registered yet, the engine
+            // got a location fix before the bridge's addZone() calls landed.
+            // Saving an empty baseline here locks in `0 zones, inside=0` to
+            // persistence and strands every subsequent addZone() — its
+            // re-reconcile evaluates against the same cached fix and silently
+            // no-ops. iOS doesn't currently reproduce this race in practice
+            // (CLLocationManager.requestLocation returns synchronously enough
+            // that zones are populated by first fix), but mirror Android's
+            // guard so both platforms have identical reconcile semantics.
+            //
+            // stateRecoveredFromPersistence stays false, so the next
+            // reconcileZoneStates call — typically from LocationTracker.addZone() —
+            // re-enters this branch with zones populated and the idempotent
+            // ENTER-on-transition loop below fires normally.
+            let zoneCount = syncQueue.sync { self.zones.count }
+            if zoneCount == 0 {
+                NSLog("[\(GeofenceEngine.TAG)] No persisted state and no zones registered yet — deferring initial baseline (cold-start race guard)")
+                return
+            }
             // No persisted state - establish initial state and fire ENTER events for zones we're inside
             NSLog("[\(GeofenceEngine.TAG)] No persisted state - establishing initial state from current location")
             let checkStartTime = CFAbsoluteTimeGetCurrent()

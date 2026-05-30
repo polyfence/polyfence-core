@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-05-30
+
+### Fixed
+- **Fresh-install cold-start race: empty zone baseline locked in, every ENTER suppressed for that session and the next launch.** On a fresh install with no persisted state, the engine could receive its first GPS fix before any bridge `addZone()` calls had landed. The most common trigger: activity-recognition kicked GPS independently of `LocationTracker.startTracking()`'s `hasZones()` defer-gate, so a `STILL` activity transition fired `startGpsUpdates()` ~10 s before the JS layer's API-fetch-and-loop-addZone burst completed. The first fix arrived, `reconcileZoneStates` ran the fresh-install branch with `zones.size == 0`, and `persistAllZoneStates()` wrote `0 zones, inside=0` to disk. Subsequent `addZone` re-reconcile calls evaluated against the same cached (often inaccurate) fix and silently no-op'd. Result: no ENTER fired for any zone in that session, and the bad baseline survived the next cold launch via persisted state — until the user force-stopped the app, which restored zones from storage with `stateRecoveredFromPersistence = true` and exercised the regular reconcile branch instead. iOS did not reproduce (CLLocationManager's synchronous `requestLocation` returns fast enough that zones are present by first fix), but the same guard is applied symmetrically for platform parity and defense-in-depth. **Fix:** `GeofenceEngine.reconcileZoneStates` now early-returns from the fresh-install branch when `zones.isEmpty()`, without persisting an empty baseline. `stateRecoveredFromPersistence` stays `false`, so the next reconcile call — typically driven by `LocationTracker.addZone()` once the bridge finishes its addZone burst — re-enters the branch with zones populated and the existing idempotent `false → true` transition loop fires ENTER for every zone the user is inside. Applied to both `GeofenceEngine.kt` (Android) and `GeofenceEngine.swift` (iOS).
+
 ## [1.0.8] - 2026-05-27
 
 ### Fixed
