@@ -18,7 +18,7 @@ checks:
     files:
       - README.md
     pattern: "(BRAND_POSITIONING\\.md|geofence layer)"
-    fix: Align README intro copy against polyfence-internal commercial/BRAND_POSITIONING.md canonical pitch.
+    fix: Align README intro copy against the canonical brand pitch (geofence layer framing).
 
   - id: gradle-build-clean
     description: optional full Gradle build when POLYFENCE_RUN_GRADLE=1
