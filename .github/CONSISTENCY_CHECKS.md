@@ -2,7 +2,7 @@
 
 ## Requires
 
-Ruby ≥ 2.6 for the runner. macOS ships this by default. The `scripts/consistency-check.sh` bash dispatcher exits with a clear message if `ruby` is not on `PATH`. Other polyfence repos use TypeScript (polyfence, polyfence-react-native) or Python (polyfence-intelligence) runners; the YAML schema is identical across runtime ports.
+Ruby ≥ 2.6 for the runner. macOS ships this by default. The `scripts/consistency-check.sh` bash dispatcher exits with a clear message if `ruby` is not on `PATH`. Other polyfence SDK repos use different runtime ports of the same YAML schema.
 
 ## Overview
 
