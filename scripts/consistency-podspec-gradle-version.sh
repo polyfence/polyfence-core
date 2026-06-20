@@ -13,3 +13,13 @@ if [ "$pod" != "$gradle" ]; then
   echo "Podspec version ${pod} != android/build.gradle.kts version ${gradle}"
   exit 1
 fi
+# The PolyfenceCoreVersion constants are stamped into telemetry as core_version —
+# keep them in sync with the release version or core_version drifts silently.
+grep -qF "VERSION = \"$pod\"" android/src/main/kotlin/io/polyfence/core/PolyfenceCoreVersion.kt || {
+  echo "PolyfenceCoreVersion.kt VERSION out of sync with ${pod} (stamped into core_version telemetry)"
+  exit 1
+}
+grep -qF "version = \"$pod\"" ios/Classes/PolyfenceCoreVersion.swift || {
+  echo "PolyfenceCoreVersion.swift version out of sync with ${pod} (stamped into core_version telemetry)"
+  exit 1
+}
