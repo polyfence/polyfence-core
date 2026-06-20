@@ -41,7 +41,7 @@ data class SessionTelemetry(
     var batteryLevelStart: Double? = null,
     var batteryLevelEnd: Double? = null,
 
-    // --- v2 Enhanced fields (D016 — accumulated in native layer) ---
+    // --- v2 Enhanced fields (accumulated in native layer) ---
 
     // Config context
     var accuracyProfile: String? = null,

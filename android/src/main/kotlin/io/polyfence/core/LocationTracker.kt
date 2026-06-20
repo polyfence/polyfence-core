@@ -158,7 +158,7 @@ class LocationTracker : Service() {
         fun getSessionTelemetry(): Map<String, Any?> {
             val instance = currentInstance ?: return emptyMap()
 
-            // Set device/config info before collecting (D016)
+            // Set device/config info before collecting
             instance.telemetryAggregator.setDeviceInfo(
                 category = TelemetryAggregator.getDeviceCategory(),
                 osVersion = android.os.Build.VERSION.SDK_INT
@@ -188,7 +188,7 @@ class LocationTracker : Service() {
     private lateinit var zonePersistence: ZonePersistence
     private lateinit var config: PolyfenceConfig
 
-    // Centralized telemetry aggregator (D016)
+    // Centralized telemetry aggregator
     internal val telemetryAggregator = TelemetryAggregator()
 
     // Core delegate for platform bridge communication
@@ -786,7 +786,7 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     val activityType = activityRecognitionManager?.getCurrentActivity()?.name?.lowercase() ?: "unknown"
     val distanceToBoundary = geofenceEngine.getDistanceToBoundary(zoneId, location)
 
-    // Record in centralized telemetry aggregator (D016)
+    // Record in centralized telemetry aggregator
     telemetryAggregator.recordGeofenceEvent(
         zoneId = zoneId,
         eventType = eventType,
@@ -1091,7 +1091,7 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 consecutiveGpsFailures = 0
                 currentGpsAccuracy = if (location.hasAccuracy()) location.accuracy else null
 
-                // Record in centralized telemetry aggregator (D016)
+                // Record in centralized telemetry aggregator
                 telemetryAggregator.recordGpsUpdate(
                     intervalMs = currentGpsInterval,
                     accuracyM = location.accuracy
@@ -1416,7 +1416,7 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             activityRecognitionManager?.start(newSettings) { activity, confidence ->
                 Log.i(TAG, "Activity changed: $activity (confidence: $confidence%)")
                 currentActivity = activity
-                // Record activity change in centralized telemetry (D016)
+                // Record activity change in centralized telemetry
                 telemetryAggregator.recordActivityChange(activity.name.lowercase())
                 // Update GPS interval when activity changes
                 if (isRunning) {

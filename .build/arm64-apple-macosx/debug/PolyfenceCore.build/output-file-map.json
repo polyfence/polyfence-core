@@ -1,0 +1,124 @@
+{
+  "": {
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/primary.swiftdeps"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ActivityRecognitionManager.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ActivityRecognitionManager.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ActivityRecognitionManager.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ActivityRecognitionManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ActivityRecognitionManager.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ActivityRecognitionManager.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/PolyfenceConfig.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceConfig.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceConfig.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceConfig~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceConfig.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceConfig.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/SmartGpsConfig.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SmartGpsConfig.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SmartGpsConfig.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SmartGpsConfig~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SmartGpsConfig.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SmartGpsConfig.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeoMath.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeoMath.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeoMath.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeoMath~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeoMath.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeoMath.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeofenceEngine.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeofenceEngine.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeofenceEngine.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeofenceEngine~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeofenceEngine.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeofenceEngine.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/HealthScoreCalculator.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/HealthScoreCalculator.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/HealthScoreCalculator.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/HealthScoreCalculator~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/HealthScoreCalculator.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/HealthScoreCalculator.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/LocationTracker.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/LocationTracker.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/LocationTracker.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/LocationTracker~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/LocationTracker.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/LocationTracker.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreDelegate.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreDelegate.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreDelegate.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreDelegate~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreDelegate.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreDelegate.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreVersion.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreVersion.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreVersion.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreVersion~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreVersion.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreVersion.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceDebugCollector.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceDebugCollector.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceDebugCollector.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceDebugCollector~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceDebugCollector.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceDebugCollector.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceErrorManager.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceErrorManager.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceErrorManager.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceErrorManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceErrorManager.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceErrorManager.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/SessionTelemetry.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SessionTelemetry.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SessionTelemetry.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SessionTelemetry~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SessionTelemetry.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SessionTelemetry.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TelemetryAggregator.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TelemetryAggregator.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TelemetryAggregator.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TelemetryAggregator~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TelemetryAggregator.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TelemetryAggregator.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TrackingScheduler.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TrackingScheduler.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TrackingScheduler.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TrackingScheduler~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TrackingScheduler.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TrackingScheduler.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Zone.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/Zone.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/Zone.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/Zone~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/Zone.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/Zone.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZoneConfig.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZoneConfig.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZoneConfig.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZoneConfig~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZoneConfig.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZoneConfig.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZonePersistence.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZonePersistence.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZonePersistence.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZonePersistence~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZonePersistence.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZonePersistence.dia"
+  }
+}

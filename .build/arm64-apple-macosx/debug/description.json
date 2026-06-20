@@ -1,0 +1,944 @@
+{
+  "builtTestProducts" : [
+    {
+      "binaryPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.xctest/Contents/MacOS/PolyfenceCorePackageTests",
+      "packagePath" : "/Users/Teslon/Documents/Sector7/polyfence-core",
+      "productName" : "PolyfenceCorePackageTests"
+    }
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.PolyfenceCore-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/sources",
+      "importPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ActivityRecognitionManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/PolyfenceConfig.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/SmartGpsConfig.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeoMath.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeofenceEngine.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/HealthScoreCalculator.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/LocationTracker.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreDelegate.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreVersion.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceDebugCollector.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceErrorManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/SessionTelemetry.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TelemetryAggregator.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TrackingScheduler.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Zone.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZoneConfig.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZonePersistence.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "PolyfenceCore",
+      "moduleOutputPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules/PolyfenceCore.swiftmodule",
+      "objects" : [
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ActivityRecognitionManager.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceConfig.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SmartGpsConfig.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeoMath.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeofenceEngine.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/HealthScoreCalculator.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/LocationTracker.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreDelegate.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreVersion.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceDebugCollector.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceErrorManager.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SessionTelemetry.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TelemetryAggregator.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TrackingScheduler.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/Zone.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZoneConfig.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZonePersistence.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx10.13",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/include/PolyfenceCore-Swift.h",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "polyfence_core"
+      ],
+      "outputFileMapPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ActivityRecognitionManager.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceConfig.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SmartGpsConfig.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeoMath.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeofenceEngine.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/HealthScoreCalculator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/LocationTracker.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreDelegate.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreVersion.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceDebugCollector.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceErrorManager.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SessionTelemetry.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TelemetryAggregator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TrackingScheduler.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/Zone.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZoneConfig.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZonePersistence.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules/PolyfenceCore.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ActivityRecognitionManager.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/PolyfenceConfig.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/SmartGpsConfig.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeoMath.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeofenceEngine.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/HealthScoreCalculator.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/LocationTracker.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreDelegate.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreVersion.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceDebugCollector.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceErrorManager.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/SessionTelemetry.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TelemetryAggregator.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TrackingScheduler.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Zone.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZoneConfig.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZonePersistence.swift"
+      ],
+      "tempsPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.PolyfenceCorePackageTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/sources",
+      "importPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.derived/runner.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules/PolyfenceCoreTests.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "PolyfenceCorePackageTests",
+      "moduleOutputPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules/PolyfenceCorePackageTests.swiftmodule",
+      "objects" : [
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/runner.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx10.13",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/include/PolyfenceCorePackageTests-Swift.h",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "polyfence_core"
+      ],
+      "outputFileMapPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules/PolyfenceCorePackageTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.derived/runner.swift"
+      ],
+      "tempsPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.PolyfenceCoreTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/sources",
+      "importPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/GeoMathTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/GeofenceEngineTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/TelemetryAggregatorTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules/PolyfenceCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "PolyfenceCoreTests",
+      "moduleOutputPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules/PolyfenceCoreTests.swiftmodule",
+      "objects" : [
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeoMathTests.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeofenceEngineTests.swift.o",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/TelemetryAggregatorTests.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j10",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "polyfence_core"
+      ],
+      "outputFileMapPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeoMathTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeofenceEngineTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/TelemetryAggregatorTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules/PolyfenceCoreTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/GeoMathTests.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/GeofenceEngineTests.swift",
+        "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/TelemetryAggregatorTests.swift"
+      ],
+      "tempsPath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "PolyfenceCore" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "PolyfenceCore",
+      "-package-name",
+      "polyfence_core",
+      "-c",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ActivityRecognitionManager.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/PolyfenceConfig.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/SmartGpsConfig.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeoMath.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeofenceEngine.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/HealthScoreCalculator.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/LocationTracker.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreDelegate.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreVersion.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceDebugCollector.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceErrorManager.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/SessionTelemetry.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TelemetryAggregator.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TrackingScheduler.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Zone.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZoneConfig.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZonePersistence.swift",
+      "-I",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx10.13",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/include/PolyfenceCore-Swift.h",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "polyfence_core",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "PolyfenceCorePackageTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "PolyfenceCorePackageTests",
+      "-package-name",
+      "polyfence_core",
+      "-c",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.derived/runner.swift",
+      "-I",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx10.13",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/include/PolyfenceCorePackageTests-Swift.h",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "polyfence_core",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "PolyfenceCoreTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "PolyfenceCoreTests",
+      "-package-name",
+      "polyfence_core",
+      "-c",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/GeoMathTests.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/GeofenceEngineTests.swift",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/TelemetryAggregatorTests.swift",
+      "-I",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j10",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "polyfence_core",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "PolyfenceCore" : [
+
+    ],
+    "PolyfenceCorePackageTests" : [
+      "PolyfenceCoreTests",
+      "PolyfenceCore"
+    ],
+    "PolyfenceCoreTests" : [
+      "PolyfenceCore"
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+    "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.derived/runner.swift" : {
+      "inputs" : [
+
+      ],
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.derived/runner.swift"
+        }
+      ]
+    }
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ActivityRecognitionManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/PolyfenceConfig.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/SmartGpsConfig.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeoMath.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeofenceEngine.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/HealthScoreCalculator.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/LocationTracker.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreDelegate.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreVersion.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceDebugCollector.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceErrorManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/SessionTelemetry.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TelemetryAggregator.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TrackingScheduler.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Zone.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZoneConfig.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZonePersistence.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/sources"
+    },
+    "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.derived/runner.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/sources"
+    },
+    "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ActivityRecognitionManager.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeoMath.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/GeofenceEngine.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/HealthScoreCalculator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/LocationTracker.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceConfig.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreDelegate.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceCoreVersion.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceDebugCollector.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/PolyfenceErrorManager.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SessionTelemetry.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/SmartGpsConfig.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TelemetryAggregator.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/TrackingScheduler.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/Zone.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZoneConfig.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCore.build/ZonePersistence.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeoMathTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeofenceEngineTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/TelemetryAggregatorTests.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.product/Objects.LinkFileList"
+    },
+    "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/GeoMathTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/GeofenceEngineTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/TelemetryAggregatorTests.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/sources"
+    },
+    "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}

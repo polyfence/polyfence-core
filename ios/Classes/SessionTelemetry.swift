@@ -33,7 +33,7 @@ struct SessionTelemetry {
     var batteryLevelStart: Double? = nil
     var batteryLevelEnd: Double? = nil
 
-    // --- v2 Enhanced fields (D016) ---
+    // --- v2 Enhanced fields ---
     var accuracyProfile: String? = nil
     var updateStrategy: String? = nil
 

@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.5] - 2026-04-03
 
 ### Added
-- **Core version self-reporting** — `PolyfenceCoreVersion.kt` and `PolyfenceCoreVersion.swift` stamp engine version into session telemetry via `TelemetryAggregator`. Bridges get `core_version` automatically through existing telemetry spread. (D043)
+- **Core version self-reporting** — `PolyfenceCoreVersion.kt` and `PolyfenceCoreVersion.swift` stamp engine version into session telemetry via `TelemetryAggregator`. Bridges get `core_version` automatically through existing telemetry spread.
 
 ## [1.0.4] - 2026-04-01
 

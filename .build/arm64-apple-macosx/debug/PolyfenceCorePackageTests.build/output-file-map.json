@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/primary.swiftdeps"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.derived/runner.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/runner.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCorePackageTests.build/runner.dia"
+  }
+}

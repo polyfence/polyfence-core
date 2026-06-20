@@ -33,7 +33,7 @@ public class LocationTracker: NSObject {
     private var zonePersistence: ZonePersistence?
     private var config: PolyfenceConfig?
 
-    /// Centralized telemetry aggregator (D016)
+    /// Centralized telemetry aggregator
     let telemetryAggregator = TelemetryAggregator()
 
     // Error Recovery Properties
@@ -621,7 +621,7 @@ public class LocationTracker: NSObject {
         let activityType = activityRecognitionManager?.getCurrentActivity().rawValue.lowercased() ?? "unknown"
         let distanceToBoundary = geofenceEngine.getDistanceToBoundary(zoneId: zoneId, location: location)
 
-        // Record in centralized telemetry aggregator (D016)
+        // Record in centralized telemetry aggregator
         telemetryAggregator.recordGeofenceEvent(
             zoneId: zoneId,
             eventType: eventType,
@@ -953,7 +953,7 @@ extension LocationTracker: CLLocationManagerDelegate {
         // Check for unreliable GPS (large accuracy swings, poor accuracy)
         checkGpsReliability(location)
 
-        // Record in centralized telemetry aggregator (D016)
+        // Record in centralized telemetry aggregator
         telemetryAggregator.recordGpsUpdate(
             intervalMs: Int64(currentGpsInterval * 1000),
             accuracyM: Float(location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : 999.0)
@@ -1188,7 +1188,7 @@ extension LocationTracker {
                 guard let self = self else { return }
                 NSLog("[\(Self.TAG)] Activity changed: \(activity) (confidence: \(confidence)%)")
                 self.currentActivity = activity
-                // Record activity change in centralized telemetry (D016)
+                // Record activity change in centralized telemetry
                 self.telemetryAggregator.recordActivityChange(activityType: activity.rawValue.lowercased())
                 // Update GPS settings when activity changes
                 if self.trackingEnabled {
@@ -1587,7 +1587,7 @@ extension LocationTracker {
      * Collect session telemetry from all native components.
      */
     public func getSessionTelemetryData() -> [String: Any] {
-        // Set device/config info before collecting (D016)
+        // Set device/config info before collecting
         telemetryAggregator.setDeviceInfo(
             category: TelemetryAggregator.getDeviceCategory(),
             osVersion: ProcessInfo.processInfo.operatingSystemVersion.majorVersion

@@ -4,7 +4,7 @@ import android.os.Build
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Aggregates all session telemetry in the native layer (D016).
+ * Aggregates all session telemetry in the native layer.
  * Each platform bridge (Flutter, RN, future) only calls getSessionTelemetry()
  * and POSTs the result — no per-bridge telemetry reimplementation needed.
  *
