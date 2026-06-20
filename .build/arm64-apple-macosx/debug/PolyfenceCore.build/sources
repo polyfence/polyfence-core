@@ -1,0 +1,17 @@
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ActivityRecognitionManager.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/PolyfenceConfig.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Configuration/SmartGpsConfig.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeoMath.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/GeofenceEngine.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/HealthScoreCalculator.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/LocationTracker.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreDelegate.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceCoreVersion.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceDebugCollector.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/PolyfenceErrorManager.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/SessionTelemetry.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TelemetryAggregator.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/TrackingScheduler.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/Zone.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZoneConfig.swift
+/Users/Teslon/Documents/Sector7/polyfence-core/ios/Classes/ZonePersistence.swift

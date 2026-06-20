@@ -1,0 +1,26 @@
+{
+  "": {
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/primary.swiftdeps"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/GeoMathTests.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeoMathTests.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeoMathTests.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeoMathTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeoMathTests.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeoMathTests.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/GeofenceEngineTests.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeofenceEngineTests.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeofenceEngineTests.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeofenceEngineTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeofenceEngineTests.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/GeofenceEngineTests.dia"
+  },
+  "/Users/Teslon/Documents/Sector7/polyfence-core/test/ios/TelemetryAggregatorTests.swift": {
+    "dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/TelemetryAggregatorTests.d",
+    "object": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/TelemetryAggregatorTests.swift.o",
+    "swiftmodule": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/TelemetryAggregatorTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/TelemetryAggregatorTests.swiftdeps",
+    "diagnostics": "/Users/Teslon/Documents/Sector7/polyfence-core/.build/arm64-apple-macosx/debug/PolyfenceCoreTests.build/TelemetryAggregatorTests.dia"
+  }
+}
