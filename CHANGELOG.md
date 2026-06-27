@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Android polygon self-intersection false positives at closure seam (BUG-005)** — `GeofenceEngine.ZoneData.fromMap` was rejecting closed polygons supplied with an explicit closing vertex (`first == last`, the GeoJSON convention) or with consecutive duplicate points. The CCW segment-intersection test only skipped the literal `(edge 0, edge n-1)` pair, but on a closed input the geometric closure happens between edges `0` and `n-2` (both touch `points[0] == points[n-1]`), so one cross product evaluated to `0` and the algorithm reported a false self-intersection. Real-world geocoded country boundaries with explicit closure (Qatar from `geo-boundaries-world-110m`, etc.) were silently `throw`-ing through the bridge's `addZone` path, leaving the engine with no record of those zones. **Fix:** normalize the polygon before the self-intersect check (strip the trailing duplicate vertex if `first == last`; collapse consecutive duplicates) and downgrade a residual self-intersection from a hard reject to a `Log.w` warning — point-in-polygon (ray casting / even-odd rule) is well-defined for self-intersecting polygons, so we don't gain anything by refusing them. Ports the fix shipped on iOS in 1.0.7 to the Android side and restores cross-platform parity.
+
+### Tests
+- Updated `self-intersecting polygon throws exception` → `self-intersecting polygon is accepted with warning` to reflect the warn-not-throw contract (matches iOS `testSelfIntersectingPolygonIsAcceptedWithWarning`).
+- Added `closed polygon with explicit closing vertex is accepted (BUG-005)` using Qatar's exact 9-point boundary from QA's RCA (mirrors iOS `testAddZoneAcceptsClosedPolygonWithExplicitClosingVertex`).
+
 ## [1.0.9] - 2026-05-30
 
 ### Fixed

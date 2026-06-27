@@ -310,8 +310,18 @@ class GeofenceEngineTest {
     }
 
     @Test
-    fun `self-intersecting polygon throws exception`() {
-        // Bowtie shape: vertices go 0->1->2->3 where edges 0-1 and 2-3 intersect
+    fun `self-intersecting polygon is accepted with warning`() {
+        // Bowtie shape: vertices create self-intersecting edges.
+        //
+        // Pre-1.0.6 behaviour (iOS) / pre-BUG-005 fix (Android): throw and
+        // refuse the zone. Post-fix: log a warning and accept. Real-world
+        // geocoded boundaries trip the self-intersection test for benign
+        // reasons (closure seams, duplicate vertices) far more often than
+        // for actually malformed input — and isPointInPolygon (even-odd-
+        // rule ray cast) is well-defined for self-intersecting polygons
+        // regardless. Refusing them hurts users for no gain.
+        // Mirrors testSelfIntersectingPolygonIsAcceptedWithWarning in
+        // test/ios/GeofenceEngineTests.swift.
         val bowTie = listOf(
             mapOf("latitude" to 0.0, "longitude" to 0.0),
             mapOf("latitude" to 1.0, "longitude" to 1.0),
@@ -323,9 +333,41 @@ class GeofenceEngineTest {
             "polygon" to bowTie
         )
 
-        assertThrows(IllegalArgumentException::class.java) {
-            engine.addZone("self-intersect", "Bad Polygon", zoneData)
-        }
+        engine.addZone("self-intersect", "Bow Tie", zoneData)
+        assertEquals(1, engine.getZoneCount())
+    }
+
+    @Test
+    fun `closed polygon with explicit closing vertex is accepted (BUG-005)`() {
+        // GeoJSON convention: the first coordinate is repeated at the end to
+        // close the ring. Real-world example from QA's BUG-005 RCA — Qatar
+        // boundary imported from the geo-boundaries-world-110m dataset. The
+        // polygon is geometrically valid (a convex country outline) but the
+        // pre-fix isPolygonSelfIntersecting() flagged it because edges 0 and
+        // n-2 shared the closure endpoint and one cross-product evaluated
+        // to 0 at the shared point.
+        //
+        // Normalization (strip trailing duplicate vertex) fixes this.
+        // Mirrors testAddZoneAcceptsClosedPolygonWithExplicitClosingVertex
+        // in test/ios/GeofenceEngineTests.swift.
+        val qatar = listOf(
+            mapOf("latitude" to 24.754742539971378, "longitude" to 50.81010827006958),
+            mapOf("latitude" to 25.482424221289396, "longitude" to 50.74391076030369),
+            mapOf("latitude" to 26.006991685484195, "longitude" to 51.013351678273494),
+            mapOf("latitude" to 26.11458201751587, "longitude" to 51.28646162293606),
+            mapOf("latitude" to 25.80111277923338, "longitude" to 51.58907881043726),
+            mapOf("latitude" to 25.21567047779874, "longitude" to 51.60670047384881),
+            mapOf("latitude" to 24.62738597258806, "longitude" to 51.38960778179063),
+            mapOf("latitude" to 24.556330878186724, "longitude" to 51.11241539897702),
+            mapOf("latitude" to 24.754742539971378, "longitude" to 50.81010827006958) // closing vertex (== point 0)
+        )
+        val zoneData = mapOf(
+            "type" to "polygon",
+            "polygon" to qatar
+        )
+
+        engine.addZone("qatar", "Qatar", zoneData)
+        assertEquals(1, engine.getZoneCount())
     }
 
     // ========================================================================

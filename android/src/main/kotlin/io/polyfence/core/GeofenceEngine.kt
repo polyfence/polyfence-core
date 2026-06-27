@@ -76,6 +76,36 @@ class GeofenceEngine {
             }
         }
 
+        /**
+         * Normalize polygon points for the self-intersection check:
+         *  - Strip the trailing point if it duplicates the first (closed-polygon
+         *    inputs supplied with explicit closing vertex — GeoJSON convention).
+         *  - Collapse consecutive duplicate vertices.
+         *
+         * Without normalization the CCW segment-intersection test trips false
+         * positives where two non-adjacent edges share an endpoint (the closure
+         * seam, or coincident-point duplicates seen in geocoded boundary data).
+         * Mirrors normalizeForSelfIntersectCheck in ios/Classes/GeofenceEngine.swift.
+         */
+        internal fun normalizeForSelfIntersectCheck(points: List<LatLng>): List<LatLng> {
+            val eps = 1e-9
+            fun same(a: LatLng, b: LatLng): Boolean =
+                abs(a.latitude - b.latitude) < eps && abs(a.longitude - b.longitude) < eps
+
+            val working = if (points.size > 1 && same(points.first(), points.last())) {
+                points.dropLast(1)
+            } else {
+                points
+            }
+            val deduped = ArrayList<LatLng>(working.size)
+            for (p in working) {
+                val prev = deduped.lastOrNull()
+                if (prev != null && same(prev, p)) continue
+                deduped.add(p)
+            }
+            return deduped
+        }
+
         internal fun checkPoleWarning(points: List<LatLng>) {
             val polesNear = points.any { abs(it.latitude) > 85.0 }
             if (polesNear) {
@@ -808,26 +838,41 @@ fun getZoneName(zoneId: String): String? {
                         val polygonData = data["polygon"] as? List<*>
                             ?: throw IllegalArgumentException("Polygon zone missing coordinates")
 
-                        val points = polygonData.mapNotNull { point ->
+                        val parsedPoints = polygonData.mapNotNull { point ->
                             val pointMap = point as? Map<*, *> ?: return@mapNotNull null
                             val lat = (pointMap["latitude"] as? Number)?.toDouble() ?: return@mapNotNull null
                             val lng = (pointMap["longitude"] as? Number)?.toDouble() ?: return@mapNotNull null
                             LatLng(lat, lng)
                         }
 
-                        if (points.size < 3) {
+                        // Normalize before validation:
+                        //  1. Strip the trailing point if it duplicates the first (GeoJSON-
+                        //     style closed rings). Without this, edges 0 and n-2 share the
+                        //     closure endpoint and one cross-product evaluates to 0,
+                        //     producing a false self-intersection on valid polygons
+                        //     (BUG-005, e.g. Qatar boundary from the geo-boundaries dataset).
+                        //  2. Drop consecutive duplicate vertices — they create zero-length
+                        //     edges that also trip the check (1098-point London CC zone had ~10).
+                        val normalized = GeofenceEngine.normalizeForSelfIntersectCheck(parsedPoints)
+
+                        if (normalized.size < 3) {
                             throw IllegalArgumentException("Polygon must have at least 3 points")
                         }
 
-                        // Check for self-intersecting polygon
-                        if (GeofenceEngine.isPolygonSelfIntersecting(points)) {
-                            throw IllegalArgumentException("Polygon is self-intersecting and cannot be used for geofencing")
+                        // Soft check: only WARN on residual self-intersections. Point-in-
+                        // polygon (ray casting) is well-defined even for self-intersecting
+                        // polygons (caller gets the even-odd-rule interior), so rejecting
+                        // the zone outright hurts real-world geocoded boundaries (e.g.
+                        // London CC, ULEZ, Qatar) that have minor topology quirks.
+                        // Matches the iOS behaviour shipped in polyfence-core 1.0.7.
+                        if (GeofenceEngine.isPolygonSelfIntersecting(normalized)) {
+                            Log.w(TAG, "Polygon has self-intersections after normalization — accepting with warning (even-odd-rule interior used)")
                         }
 
                         // Warn about poles (reduced accuracy near ±85°)
-                        GeofenceEngine.checkPoleWarning(points)
+                        GeofenceEngine.checkPoleWarning(normalized)
 
-                        ZoneData(id, name, type, null, null, points)
+                        ZoneData(id, name, type, null, null, normalized)
                     }
                 }
             }
