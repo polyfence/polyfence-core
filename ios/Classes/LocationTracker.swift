@@ -118,8 +118,34 @@ public class LocationTracker: NSObject {
     private var activitySettings: ActivitySettings = ActivitySettings()
     private var currentActivity: ActivityType = .unknown
 
+    // Battery snapshot for telemetry drain calculation. Captured at every
+    // session-start: init() (first session) and every resetTelemetry()
+    // (subsequent sessions, when TelemetryAggregator restarts
+    // sessionStartTime and nulls its own batteryLevelStart). Paired with a
+    // fresh read at every getSessionTelemetryData() call. Without this
+    // capture, batteryLevelStart stays nil on the aggregator → omitted from
+    // the telemetry payload → drain field comes back null on every session.
+    //
+    // Guarded by batteryLock for parity with Android's @Volatile on the
+    // corresponding fields — init/resetTelemetry/getSessionTelemetryData
+    // can be invoked from different queues (location callbacks vs bridge
+    // method dispatch), and an unsynchronized read of a stale start would
+    // produce one cycle of slightly-wrong drain.
+    private var batterySnapshotAtStart: Double? = nil
+    private var chargingAtStart: Bool = false
+    private let batteryLock = NSLock()
+
     public override init() {
         super.init()
+        // Enable battery monitoring before anything else in init so the
+        // OS has had as much time as possible to populate batteryLevel by
+        // the time captureBatterySessionStart() reads it below. iOS reports
+        // -1 immediately after enabling monitoring; getBatteryLevel coerces
+        // that to 100, so a too-fresh enable + read in the same tick can
+        // give a stale 100 on first session. Enabling here keeps the
+        // window before the read as wide as the rest of init takes.
+        UIDevice.current.isBatteryMonitoringEnabled = true
+
         // Initialize persistence first so it's available for geofence engine
         zonePersistence = ZonePersistence()
         setupLocationManager()
@@ -129,6 +155,31 @@ public class LocationTracker: NSObject {
         // Initialize tracking scheduler and load saved config
         TrackingScheduler.shared.setLocationTracker(self)
         TrackingScheduler.shared.loadConfig()
+
+        // Capture battery snapshot for telemetry drain calculation. Done here
+        // so it aligns with TelemetryAggregator's sessionStartTime. The
+        // matching end-snapshot + setBatteryInfo call lives in
+        // getSessionTelemetryData() below; subsequent sessions re-capture
+        // via resetTelemetry().
+        captureBatterySessionStart()
+    }
+
+    /**
+     * Refresh the battery start-snapshot for a new telemetry session.
+     * Called from init() for the first session and from resetTelemetry()
+     * for every subsequent session — without the resetTelemetry path, the
+     * start value goes stale after the first session while the aggregator's
+     * sessionStartTime restarts, producing a meaningless drain rate over
+     * sessions 2..N.
+     */
+    private func captureBatterySessionStart() {
+        let level = getBatteryLevel()
+        let charging = UIDevice.current.batteryState == .charging
+            || UIDevice.current.batteryState == .full
+        batteryLock.lock()
+        defer { batteryLock.unlock() }
+        batterySnapshotAtStart = level
+        chargingAtStart = charging
     }
 
     // MARK: - Setup Methods
@@ -1612,6 +1663,27 @@ extension LocationTracker {
             updateStrategy: smartConfig.updateStrategy.rawValue.lowercased()
         )
 
+        // Battery start was captured in init() (and re-captured in
+        // resetTelemetry() for sessions 2..N). Pair with a fresh end read
+        // here and the OR of start/end charging state so the SaaS can
+        // compute battery_drain_avg_pct_per_hr and tag whether the
+        // measurement was muddied by charging at either end.
+        // Caveat: UIDevice.batteryLevel returns -1 in the iOS Simulator;
+        // getBatteryLevel() coerces that to 100.0, so simulator sessions
+        // will show 0 drain. Test on a real, unplugged device.
+        let endLevel = getBatteryLevel()
+        let endCharging = UIDevice.current.batteryState == .charging
+            || UIDevice.current.batteryState == .full
+        batteryLock.lock()
+        let startSnapshot = batterySnapshotAtStart
+        let startCharging = chargingAtStart
+        batteryLock.unlock()
+        telemetryAggregator.setBatteryInfo(
+            startPercent: startSnapshot,
+            endPercent: endLevel,
+            chargingDuring: startCharging || endCharging
+        )
+
         // Return complete v2 enhanced payload from centralized aggregator
         return telemetryAggregator.getSessionTelemetry(geofenceEngine: geofenceEngine)
     }
@@ -1629,6 +1701,13 @@ extension LocationTracker {
         stationaryStartTime = nil
         trackingStartTime = Date().timeIntervalSince1970
         telemetryAggregator.resetTelemetry()
+        // Re-anchor the battery snapshot to the new session-start clock —
+        // telemetryAggregator.resetTelemetry() just restarted sessionStartTime
+        // and nulled batteryLevelStart on the aggregator. Without refreshing
+        // here, the next getSessionTelemetryData() call would pair a stale
+        // start (from init) with a fresh end over the new (typically shorter)
+        // session duration → meaningless drain.
+        captureBatterySessionStart()
     }
 
     private func updateMovementState(_ location: CLLocation) {
