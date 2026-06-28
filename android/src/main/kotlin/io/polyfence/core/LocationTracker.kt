@@ -1953,12 +1953,21 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     // ============================================================================
 
     /**
-     * Get current battery level percentage
+     * Get current battery level percentage, always in [0, 100].
+     *
+     * BatteryManager.BATTERY_PROPERTY_CAPACITY is documented to return
+     * Integer.MIN_VALUE when no battery is present / read fails / property
+     * unsupported. Without a range clamp those sentinel values flow into
+     * telemetry as massive negative drain (start=-2147483648 paired with
+     * end=42 over 30 minutes blows past the SaaS clamp). Coerce to the
+     * exception-path default (100) for any out-of-range value so the
+     * fallback shape matches.
      */
     private fun getBatteryLevel(): Int {
         return try {
             val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-            batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            val level = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            if (level in 0..100) level else 100
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get battery level: ${e.message}")
             100 // Default to full battery on error

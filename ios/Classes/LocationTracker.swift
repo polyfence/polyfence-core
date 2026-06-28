@@ -125,8 +125,15 @@ public class LocationTracker: NSObject {
     // fresh read at every getSessionTelemetryData() call. Without this
     // capture, batteryLevelStart stays nil on the aggregator → omitted from
     // the telemetry payload → drain field comes back null on every session.
+    //
+    // Guarded by batteryLock for parity with Android's @Volatile on the
+    // corresponding fields — init/resetTelemetry/getSessionTelemetryData
+    // can be invoked from different queues (location callbacks vs bridge
+    // method dispatch), and an unsynchronized read of a stale start would
+    // produce one cycle of slightly-wrong drain.
     private var batterySnapshotAtStart: Double? = nil
     private var chargingAtStart: Bool = false
+    private let batteryLock = NSLock()
 
     public override init() {
         super.init()
@@ -166,9 +173,13 @@ public class LocationTracker: NSObject {
      * sessions 2..N.
      */
     private func captureBatterySessionStart() {
-        batterySnapshotAtStart = getBatteryLevel()
-        chargingAtStart = UIDevice.current.batteryState == .charging
+        let level = getBatteryLevel()
+        let charging = UIDevice.current.batteryState == .charging
             || UIDevice.current.batteryState == .full
+        batteryLock.lock()
+        defer { batteryLock.unlock() }
+        batterySnapshotAtStart = level
+        chargingAtStart = charging
     }
 
     // MARK: - Setup Methods
@@ -1648,10 +1659,14 @@ extension LocationTracker {
         let endLevel = getBatteryLevel()
         let endCharging = UIDevice.current.batteryState == .charging
             || UIDevice.current.batteryState == .full
+        batteryLock.lock()
+        let startSnapshot = batterySnapshotAtStart
+        let startCharging = chargingAtStart
+        batteryLock.unlock()
         telemetryAggregator.setBatteryInfo(
-            startPercent: batterySnapshotAtStart,
+            startPercent: startSnapshot,
             endPercent: endLevel,
-            chargingDuring: chargingAtStart || endCharging
+            chargingDuring: startCharging || endCharging
         )
 
         // Return complete v2 enhanced payload from centralized aggregator
