@@ -689,11 +689,26 @@ class LocationTracker : Service() {
             intent.getSerializableExtra("zoneData") as? Map<String, Any>
         } ?: return
 
-        // Add to engine (skip invalid zones instead of crashing)
+        // Add to engine (skip invalid zones instead of crashing). Previously
+        // this caught the exception with a Log.w only — the bridge's addZone()
+        // Promise resolved successfully even though the zone was dropped, and
+        // no onError event fired (BUG-006). Route the rejection through
+        // PolyfenceErrorManager so the bridge surfaces it via the onError
+        // channel and consumers can react.
         try {
             geofenceEngine.addZone(zoneId, zoneName, zoneData)
         } catch (e: Exception) {
             Log.w(TAG, "Skipping invalid zone $zoneId: ${e.message}")
+            PolyfenceErrorManager.reportError(
+                "zone_validation_failed",
+                "Zone $zoneId was rejected: ${e.message ?: "unknown validation error"}",
+                mapOf(
+                    "platform" to "android",
+                    "zoneId" to zoneId,
+                    "zoneName" to zoneName,
+                    "timestamp" to System.currentTimeMillis()
+                )
+            )
             return
         }
 

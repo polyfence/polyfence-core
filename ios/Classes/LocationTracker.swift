@@ -414,7 +414,22 @@ public class LocationTracker: NSObject {
                     }
                 }
             } catch {
+                // Previously this only NSLog'd — the bridge's addZone() Promise
+                // resolved successfully even though the zone was dropped, and
+                // no onError event fired (BUG-006). Route the rejection through
+                // PolyfenceErrorManager so the bridge surfaces it via the
+                // onError channel and consumers can react.
                 NSLog("[LocationTracker] Failed to add zone %@: %@", zoneId, "\(error)")
+                PolyfenceErrorManager.shared.reportError(
+                    type: "zone_validation_failed",
+                    message: "Zone \(zoneId) was rejected: \(error.localizedDescription)",
+                    context: [
+                        "platform": "ios",
+                        "zoneId": zoneId,
+                        "zoneName": zoneName,
+                        "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
+                    ]
+                )
             }
         }
     }
