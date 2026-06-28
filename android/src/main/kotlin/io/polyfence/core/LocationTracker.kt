@@ -168,6 +168,18 @@ class LocationTracker : Service() {
                 updateStrategy = instance.smartConfig.updateStrategy.name.lowercase()
             )
 
+            // Battery start was captured in onCreate. Pair with a fresh end
+            // read here and the OR of start/end charging state so the SaaS
+            // can compute battery_drain_avg_pct_per_hr and tag whether the
+            // measurement was muddied by charging at either end.
+            val endLevel = instance.getBatteryLevel().toDouble()
+            val chargingDuring = instance.chargingAtStart || instance.isCurrentlyCharging()
+            instance.telemetryAggregator.setBatteryInfo(
+                startPercent = instance.batterySnapshotAtStart,
+                endPercent = endLevel,
+                chargingDuring = chargingDuring
+            )
+
             // Return complete v2 enhanced payload from centralized aggregator
             return instance.telemetryAggregator.getSessionTelemetry(
                 geofenceEngine = instance.geofenceEngine
@@ -208,6 +220,17 @@ class LocationTracker : Service() {
     private var pendingSmartConfigReapplyRunnable: Runnable? = null
     private var lastLocationTime: Long = 0L
     private var consecutiveGpsFailures: Int = 0
+
+    // Battery snapshot for telemetry drain calculation.
+    // Captured at every session-start: onCreate() (first session) and every
+    // resetTelemetry() (subsequent sessions, when TelemetryAggregator restarts
+    // sessionStartTime). Paired with a fresh read at every getSessionTelemetry()
+    // call to give the SaaS the (start, end, chargingDuring) tuple it needs to
+    // compute battery_drain_avg_pct_per_hr. Without this capture,
+    // batteryLevelStart stays null on the aggregator → omitted from the
+    // telemetry payload → drain field comes back null on every session.
+    @Volatile private var batterySnapshotAtStart: Double? = null
+    @Volatile private var chargingAtStart: Boolean = false
 
     // GPS Health Tracking
     private var currentGpsAccuracy: Float? = null
@@ -283,6 +306,14 @@ class LocationTracker : Service() {
 
         // Set current instance for static access to zone states
         currentInstance = this
+
+        // Capture battery snapshot for telemetry drain calculation. Done here
+        // so it aligns with TelemetryAggregator's sessionStartTime (set when
+        // this LocationTracker was constructed moments earlier). The matching
+        // end-snapshot + setBatteryInfo call lives in the companion
+        // getSessionTelemetry() below; subsequent sessions re-capture via
+        // resetTelemetry().
+        captureBatterySessionStart()
 
         // Apply pending bridge platform set before service existed
         pendingBridgePlatform?.let { platform ->
@@ -1814,6 +1845,13 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         stationaryStartTime = null
         trackingStartTime = System.currentTimeMillis()
         telemetryAggregator.resetTelemetry()
+        // Re-anchor the battery snapshot to the new session-start clock —
+        // telemetryAggregator.resetTelemetry() just restarted sessionStartTime
+        // and nulled batteryLevelStart on the aggregator. Without refreshing
+        // here, the next getSessionTelemetry() call would pair a stale start
+        // (from onCreate) with a fresh end over the new (typically shorter)
+        // session duration → meaningless drain.
+        captureBatterySessionStart()
     }
 
     /**
@@ -1925,6 +1963,35 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             Log.e(TAG, "Failed to get battery level: ${e.message}")
             100 // Default to full battery on error
         }
+    }
+
+    /**
+     * Whether the device is currently charging (USB, AC, wireless, or full).
+     * Used for the chargingDuringSession telemetry flag — when true at either
+     * session-start or session-end, the SaaS knows the measured drain isn't
+     * a useful proxy for battery cost.
+     */
+    private fun isCurrentlyCharging(): Boolean {
+        return try {
+            val batteryManager = getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+            batteryManager.isCharging
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read charging state: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Refresh the battery start-snapshot for a new telemetry session.
+     * Called from onCreate() for the first session and from resetTelemetry()
+     * for every subsequent session — without the resetTelemetry path, the
+     * start value goes stale after the first session while the aggregator's
+     * sessionStartTime restarts, producing a meaningless drain rate over
+     * sessions 2..N.
+     */
+    private fun captureBatterySessionStart() {
+        batterySnapshotAtStart = getBatteryLevel().toDouble()
+        chargingAtStart = isCurrentlyCharging()
     }
 
     /**
