@@ -81,6 +81,14 @@ The same geofencing algorithms (haversine, ray-casting, point-to-segment distanc
    - All geofence events, location updates, and errors flow through this interface
    - Validate delegate callbacks if your app forwards them to untrusted contexts
 
+## iOS Deployment Notes
+
+### Time-Critical Alerts (Optional, Downstream)
+
+If your app needs zone events to break through Do Not Disturb / Silent mode / Focus — for example perimeter security, anti-theft, child safety, fall detection, or medication adherence — you'll want Apple's [Critical Alerts entitlement](https://developer.apple.com/contact/request/notifications-critical-alerts-entitlement/). PolyfenceCore fires events to your code via `PolyfenceCoreDelegate`; surfacing them with `.criticalAlert` is your app's responsibility and requires this entitlement, applied for via the form linked above.
+
+This is **not** required for normal use cases — standard "you arrived at the office" notifications work fine without it. The entitlement is specifically for time-critical safety / security scenarios where breaking through DND is essential.
+
 ## Security Updates
 
 Security updates are released as patch versions (e.g., 1.0.1) and announced via:
