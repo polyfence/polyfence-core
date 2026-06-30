@@ -99,6 +99,18 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Most recent GPS accuracy in metres from the running tracker
+         * instance, or `null` if no fix has landed yet (or the tracker
+         * isn't running). Exposed so bridge `status`-event payloads can
+         * include the latest known accuracy instead of hardcoding
+         * `null`. BUG-013a (bridges) — paired with BUG-013b above which
+         * stabilises the same field's emission shape in runtime_status.
+         */
+        fun getLastKnownAccuracy(): Float? {
+            return currentInstance?.currentGpsAccuracy
+        }
+
+        /**
          * Update smart GPS configuration.
          * Stores the config and delegates to the running instance if available.
          */

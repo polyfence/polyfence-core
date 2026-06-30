@@ -1293,6 +1293,15 @@ extension LocationTracker {
         return smartConfig
     }
 
+    /// Most recent GPS accuracy in metres, or `nil` if no fix has
+    /// landed yet. Exposed so bridge `status`-event payloads can
+    /// include the latest known accuracy instead of hardcoding nil.
+    /// BUG-013a (bridges) — paired with BUG-013b which stabilises the
+    /// same field's emission shape in runtime_status.
+    public func getLastKnownAccuracy() -> Double? {
+        return currentGpsAccuracy
+    }
+
     /**
      * Get current zone states from GeofenceEngine
      * Returns which zones the plugin believes the device is currently inside
