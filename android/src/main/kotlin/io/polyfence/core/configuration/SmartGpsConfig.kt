@@ -342,17 +342,20 @@ object SmartGpsConfigFactory {
     }
 
     fun toMap(config: SmartGpsConfig): Map<String, Any> {
-        val map = mutableMapOf<String, Any>(
+        // Always emit every field so getConfiguration() returns the full
+        // current shape. Pre-fix, nested settings only landed in the map
+        // when non-null — consumers calling getConfiguration() saw a
+        // 3-key payload regardless of what was actually configured.
+        // Defaults are surfaced as concrete instances rather than null
+        // so the round-trip shape is honest. BUG-014b.
+        return mapOf(
             "accuracyProfile" to config.accuracyProfile.name,
             "updateStrategy" to config.updateStrategy.name,
-            "enableDebugLogging" to config.enableDebugLogging
+            "enableDebugLogging" to config.enableDebugLogging,
+            "proximitySettings" to (config.proximitySettings ?: ProximitySettings()).toMap(),
+            "movementSettings" to (config.movementSettings ?: MovementSettings()).toMap(),
+            "batterySettings" to (config.batterySettings ?: BatterySettings()).toMap()
         )
-
-        config.proximitySettings?.let { map["proximitySettings"] = it.toMap() }
-        config.movementSettings?.let { map["movementSettings"] = it.toMap() }
-        config.batterySettings?.let { map["batterySettings"] = it.toMap() }
-
-        return map
     }
 
     private fun <T : Enum<T>> parseEnum(
