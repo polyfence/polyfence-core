@@ -1420,7 +1420,25 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             val accuracyProfileRaw = configMap["accuracyProfile"] as? String
             val updateStrategyRaw = configMap["updateStrategy"] as? String
 
-            val newConfig = SmartGpsConfigFactory.fromMap(configMap)
+            // Deep-merge the incoming partial map with the current
+            // SmartGpsConfig so any field the caller omitted keeps its
+            // current value instead of resetting to the data-class
+            // default. Pre-fix, fromMap supplied BALANCED / CONTINUOUS /
+            // null for absent keys, so updateConfiguration({ clusteringEnabled: true })
+            // silently wiped an earlier updateStrategy: 'intelligent'.
+            // BUG-015.
+            //
+            // Only the SmartGpsConfig portion is merged here. The "extras"
+            // handled below (gpsAccuracyThreshold / dwellSettings /
+            // clusterSettings / scheduleSettings) still apply only when
+            // present in the incoming map — same replace-not-merge
+            // semantics as before for those, since they're stored on
+            // GeofenceEngine, not on smartConfig.
+            val mergedSmartConfigMap = deepMergeMaps(
+                base = SmartGpsConfigFactory.toMap(this.smartConfig),
+                overrides = configMap
+            )
+            val newConfig = SmartGpsConfigFactory.fromMap(mergedSmartConfigMap)
             updateSmartConfiguration(newConfig)
             Log.d(TAG, "Configuration updated: profile=${newConfig.accuracyProfile}, strategy=${newConfig.updateStrategy}")
 
@@ -2107,4 +2125,32 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             Log.d(TAG, "Runtime status emitted: $status")
         }
     }
+}
+
+/**
+ * Deep-merge two configuration maps. Keys present in [overrides] win.
+ * When both sides have a Map value for the same key, that nested map
+ * is merged recursively (one level is enough for the SmartGpsConfig
+ * shape — proximitySettings / movementSettings / batterySettings are
+ * the only nested objects and they're flat scalars inside).
+ *
+ * Used by [LocationTracker.updateConfigurationFromMap] to preserve
+ * unspecified fields across partial updateConfiguration() calls.
+ * BUG-015.
+ */
+private fun deepMergeMaps(
+    base: Map<String, Any>,
+    overrides: Map<String, Any>
+): Map<String, Any> {
+    val result = base.toMutableMap()
+    for ((key, value) in overrides) {
+        val existing = result[key]
+        @Suppress("UNCHECKED_CAST")
+        result[key] = if (existing is Map<*, *> && value is Map<*, *>) {
+            deepMergeMaps(existing as Map<String, Any>, value as Map<String, Any>)
+        } else {
+            value
+        }
+    }
+    return result
 }
