@@ -1883,9 +1883,14 @@ extension LocationTracker {
             "gpsAvailabilityDrops5Min": getGpsAvailabilityDrops5Min()
         ]
 
-        // Add currentGpsAccuracy if available
+        // Always present so every emission carries the same key set —
+        // consumers can rely on a stable shape rather than checking for
+        // absent vs present keys across emissions. NSNull bridges to
+        // null on the Dart / JavaScript side. BUG-013b.
         if let accuracy = currentGpsAccuracy, accuracy >= 0 {
             status["currentGpsAccuracy"] = accuracy
+        } else {
+            status["currentGpsAccuracy"] = NSNull()
         }
 
         // Only emit if status changed or 30 seconds elapsed
