@@ -846,7 +846,14 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     // `timestamp` mirrors the iOS event map (see ios/Classes/LocationTracker.swift:639);
     // without it, polyfence-flutter's bridge can't parse the event and emits a noisy
     // "Invalid timestamp type: Null" error for every geofence transition.
-    coreDelegate?.onGeofenceEvent(mapOf(
+    //
+    // `dwellDurationMs` is populated only for DWELL events (BUG-009).
+    // For ENTER/EXIT/RECOVERY_* events the key is absent from the map —
+    // bridges surface it as undefined/null which matches the "only
+    // meaningful for dwell" semantic. Read against the same zoneEntryTimes
+    // map that the dwell-check writes into, so the value is exactly the
+    // time-in-zone the DWELL threshold just crossed.
+    val eventMap = mutableMapOf<String, Any>(
         "zoneId" to zoneId,
         "zoneName" to zoneName,
         "eventType" to eventType,
@@ -858,7 +865,13 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         "speedMps" to speedMps,
         "activityAtEvent" to activityType,
         "distanceToBoundaryM" to distanceToBoundary
-    ))
+    )
+    if (eventType == GeofenceEngine.EVENT_DWELL) {
+        geofenceEngine.getDwellDurationMs(zoneId)?.let { dwellMs ->
+            eventMap["dwellDurationMs"] = dwellMs
+        }
+    }
+    coreDelegate?.onGeofenceEvent(eventMap)
 
     // Terse geofence event log
     val displayName = if (zoneName.isNotEmpty()) zoneName else zoneId

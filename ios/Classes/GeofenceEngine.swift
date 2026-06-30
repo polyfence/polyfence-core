@@ -442,6 +442,26 @@ class GeofenceEngine {
     }
 
     /**
+     * Milliseconds the device has been inside the given zone, or nil if
+     * the zone isn't currently in INSIDE state. Used by LocationTracker
+     * to populate `dwellDurationMs` on the DWELL event payload (BUG-009).
+     *
+     * Read against the same `zoneEntryTimes` map the dwell-check writes
+     * into. Returns nil after the zone has fired EXIT (entry time is
+     * cleared on exit), which is the correct behaviour for the event-map
+     * caller — non-DWELL events shouldn't carry a dwell duration anyway.
+     */
+    func getDwellDurationMs(_ zoneId: String) -> Double? {
+        return syncQueue.sync {
+            guard let entryTime = self.zoneEntryTimes[zoneId] else { return nil }
+            // zoneEntryTimes stores seconds-since-epoch (TimeInterval).
+            // Subtract now and convert to milliseconds for cross-platform
+            // parity with the Kotlin getter, which returns Long ms.
+            return (Date().timeIntervalSince1970 - entryTime) * 1000.0
+        }
+    }
+
+    /**
      * Enhanced check location (ported from Android)
      */
     func checkLocation(_ location: CLLocation) {
