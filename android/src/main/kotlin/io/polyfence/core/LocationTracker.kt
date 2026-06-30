@@ -691,6 +691,12 @@ class LocationTracker : Service() {
      * Reads from PolyfenceDebugCollector and TelemetryAggregator.
      */
     private fun emitHealthScore() {
+        // Parity with iOS LocationTracker.emitHealthScore which bails early
+        // on `guard isRunning`. A background thread spawned in the previous
+        // tick can race past a concurrent stopTracking() call and emit a
+        // stale health score after the tracker is meant to be quiet. Cheap
+        // guard, no behavioural cost when running.
+        if (!isRunning) return
         try {
             val debugInfo = PolyfenceDebugCollector.collectDebugInfo(applicationContext)
             val perfMetrics = debugInfo["performance"] as? Map<*, *>
