@@ -645,7 +645,25 @@ class LocationTracker : Service() {
                 healthScoreTickCount++
                 if (healthScoreTickCount >= healthScoreEmitEveryNTicks) {
                     healthScoreTickCount = 0
-                    emitHealthScore()
+                    // BUG-010: emitHealthScore -> collectDebugInfo ->
+                    // getCpuUsage reads /proc/stat with a 360ms sleep and
+                    // require()s it isn't running on the main looper. This
+                    // runnable IS scheduled on Looper.getMainLooper() (see
+                    // combinedHealthCheckHandler init below), so calling
+                    // emitHealthScore inline throws IllegalArgumentException
+                    // which the outer try/catch in emitHealthScore swallows
+                    // — onHealthScore consumers never receive an event.
+                    // Spawn a background thread so the CPU read can block
+                    // without violating the main-looper guard. Once per 5
+                    // minutes; lifecycle is trivial — no shared executor
+                    // needed.
+                    Thread {
+                        try {
+                            emitHealthScore()
+                        } catch (e: Throwable) {
+                            Log.e(TAG, "Health score background emission failed: ${e.message}")
+                        }
+                    }.start()
                 }
 
                 // Schedule next combined check
