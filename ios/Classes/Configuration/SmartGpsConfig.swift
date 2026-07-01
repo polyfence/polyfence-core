@@ -389,25 +389,20 @@ public struct SmartGpsConfigFactory {
     }
 
     public static func toMap(_ config: SmartGpsConfig) -> [String: Any] {
-        var map: [String: Any] = [
+        // Always emit every field so getConfiguration() returns the full
+        // current shape. Pre-fix, nested settings only landed in the map
+        // when non-null — consumers calling getConfiguration() saw a
+        // 3-key payload regardless of what was actually configured.
+        // Defaults are surfaced as concrete instances rather than null
+        // so the round-trip shape is honest. BUG-014b.
+        return [
             "accuracyProfile": config.accuracyProfile.rawValue,
             "updateStrategy": config.updateStrategy.rawValue,
-            "enableDebugLogging": config.enableDebugLogging
+            "enableDebugLogging": config.enableDebugLogging,
+            "proximitySettings": (config.proximitySettings ?? ProximitySettings()).toMap(),
+            "movementSettings": (config.movementSettings ?? MovementSettings()).toMap(),
+            "batterySettings": (config.batterySettings ?? BatterySettings()).toMap()
         ]
-
-        if let proximity = config.proximitySettings {
-            map["proximitySettings"] = proximity.toMap()
-        }
-
-        if let movement = config.movementSettings {
-            map["movementSettings"] = movement.toMap()
-        }
-
-        if let battery = config.batterySettings {
-            map["batterySettings"] = battery.toMap()
-        }
-
-        return map
     }
 
     private static func parseEnum<T: CaseIterable & RawRepresentable>(_ value: String?, allCases: T.AllCases, fallback: T) -> T where T.RawValue == String {
