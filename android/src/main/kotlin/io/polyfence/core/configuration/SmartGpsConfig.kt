@@ -341,13 +341,15 @@ object SmartGpsConfigFactory {
         )
     }
 
+    /**
+     * Full 6-key display shape for `getConfiguration()`. Null nested
+     * settings on the instance are serialized as default-constructed
+     * values for shape stability — this is the READ / display shape
+     * only. Runtime null semantics are unchanged until a config is
+     * re-applied via [fromMap]. Use [toMergeBaseMap] for the sparse
+     * variant needed by BUG-015 merge. BUG-014b.
+     */
     fun toMap(config: SmartGpsConfig): Map<String, Any> {
-        // Always emit every field so getConfiguration() returns the full
-        // current shape. Pre-fix, nested settings only landed in the map
-        // when non-null — consumers calling getConfiguration() saw a
-        // 3-key payload regardless of what was actually configured.
-        // Defaults are surfaced as concrete instances rather than null
-        // so the round-trip shape is honest. BUG-014b.
         return mapOf(
             "accuracyProfile" to config.accuracyProfile.name,
             "updateStrategy" to config.updateStrategy.name,
@@ -356,6 +358,27 @@ object SmartGpsConfigFactory {
             "movementSettings" to (config.movementSettings ?: MovementSettings()).toMap(),
             "batterySettings" to (config.batterySettings ?: BatterySettings()).toMap()
         )
+    }
+
+    /**
+     * Sparse base shape used by [LocationTracker.updateConfigurationFromMap]
+     * for BUG-015 merge. Nested settings that are null on the instance
+     * are omitted — matches pre-BUG-014b [toMap] semantics. Merging a
+     * partial update against this base won't materialise a
+     * default-constructed nested block the caller never asked for
+     * (which the runtime treats as "feature inactive"). Do NOT use
+     * this for getConfiguration display — that stays on [toMap].
+     */
+    fun toMergeBaseMap(config: SmartGpsConfig): Map<String, Any> {
+        val map = mutableMapOf<String, Any>(
+            "accuracyProfile" to config.accuracyProfile.name,
+            "updateStrategy" to config.updateStrategy.name,
+            "enableDebugLogging" to config.enableDebugLogging
+        )
+        config.proximitySettings?.let { map["proximitySettings"] = it.toMap() }
+        config.movementSettings?.let { map["movementSettings"] = it.toMap() }
+        config.batterySettings?.let { map["batterySettings"] = it.toMap() }
+        return map
     }
 
     private fun <T : Enum<T>> parseEnum(

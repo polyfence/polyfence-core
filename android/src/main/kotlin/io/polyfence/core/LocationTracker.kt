@@ -1410,7 +1410,12 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             // semantics as before for those, since they're stored on
             // GeofenceEngine, not on smartConfig.
             val mergedSmartConfigMap = deepMergeMaps(
-                base = SmartGpsConfigFactory.toMap(this.smartConfig),
+                // Sparse merge base — omits null nested settings so a
+                // partial update doesn't materialise a
+                // default-constructed nested block the runtime treats
+                // as "feature inactive". Not the same as toMap (which
+                // stays full-shape for getConfiguration display).
+                base = SmartGpsConfigFactory.toMergeBaseMap(this.smartConfig),
                 overrides = configMap
             )
             val newConfig = SmartGpsConfigFactory.fromMap(mergedSmartConfigMap)
