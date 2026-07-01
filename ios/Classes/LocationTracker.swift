@@ -1308,9 +1308,14 @@ extension LocationTracker {
     /// Android's path goes through the foreground-service map handler
     /// which already does the merge internally. BUG-015.
     public func updateSmartConfigurationFromMap(_ partial: [String: Any]) {
-        let currentMap = SmartGpsConfig.toMap(self.smartConfig)
+        // Sparse merge base — omits null nested settings so a partial
+        // update doesn't materialise a default-constructed nested
+        // block the runtime treats as "feature inactive". Not the
+        // same as SmartGpsConfigFactory.toMap (which stays full-shape
+        // for getConfiguration display).
+        let currentMap = SmartGpsConfigFactory.toMergeBaseMap(self.smartConfig)
         let merged = deepMergeMaps(base: currentMap, overrides: partial)
-        let mergedConfig = SmartGpsConfig.fromMap(merged)
+        let mergedConfig = SmartGpsConfigFactory.fromMap(merged)
         updateSmartConfiguration(mergedConfig)
     }
 
