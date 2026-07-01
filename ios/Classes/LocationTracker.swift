@@ -1293,6 +1293,15 @@ extension LocationTracker {
         return smartConfig
     }
 
+    /// Most recent GPS accuracy in metres, or `nil` if no fix has
+    /// landed yet. Exposed so bridge `status`-event payloads can
+    /// include the latest known accuracy instead of hardcoding nil.
+    /// BUG-013a (bridges) — paired with BUG-013b which stabilises the
+    /// same field's emission shape in runtime_status.
+    public func getLastKnownAccuracy() -> Double? {
+        return currentGpsAccuracy
+    }
+
     /**
      * Get current zone states from GeofenceEngine
      * Returns which zones the plugin believes the device is currently inside
@@ -1883,9 +1892,14 @@ extension LocationTracker {
             "gpsAvailabilityDrops5Min": getGpsAvailabilityDrops5Min()
         ]
 
-        // Add currentGpsAccuracy if available
+        // Always present so every emission carries the same key set —
+        // consumers can rely on a stable shape rather than checking for
+        // absent vs present keys across emissions. NSNull bridges to
+        // null on the Dart / JavaScript side. BUG-013b.
         if let accuracy = currentGpsAccuracy, accuracy >= 0 {
             status["currentGpsAccuracy"] = accuracy
+        } else {
+            status["currentGpsAccuracy"] = NSNull()
         }
 
         // Only emit if status changed or 30 seconds elapsed

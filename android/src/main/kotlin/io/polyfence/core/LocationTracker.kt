@@ -99,6 +99,18 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Most recent GPS accuracy in metres from the running tracker
+         * instance, or `null` if no fix has landed yet (or the tracker
+         * isn't running). Exposed so bridge `status`-event payloads can
+         * include the latest known accuracy instead of hardcoding
+         * `null`. BUG-013a (bridges) — paired with BUG-013b above which
+         * stabilises the same field's emission shape in runtime_status.
+         */
+        fun getLastKnownAccuracy(): Float? {
+            return currentInstance?.currentGpsAccuracy
+        }
+
+        /**
          * Update smart GPS configuration.
          * Stores the config and delegates to the running instance if available.
          */
@@ -282,7 +294,7 @@ class LocationTracker : Service() {
     private var lastKnownLocation: android.location.Location? = null
 
     // Runtime Status Emission
-    private var lastEmittedStatus = mapOf<String, Any>()
+    private var lastEmittedStatus = mapOf<String, Any?>()
     private var lastStatusEmitTime = 0L
 
     // Consolidated health monitoring (replaces separate permission/GPS checks)
@@ -2050,7 +2062,10 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             0
         }
 
-        val status = mutableMapOf<String, Any>(
+        // Map allows null values so every emission carries the same key
+        // set — consumers can rely on a stable shape rather than checking
+        // for absent vs present keys across emissions. BUG-013b.
+        val status = mutableMapOf<String, Any?>(
             "strategy" to smartConfig.updateStrategy.name,
             "intervalMs" to currentGpsInterval,
             "accuracyProfile" to smartConfig.accuracyProfile.name,
@@ -2061,13 +2076,10 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             "timestamp" to currentTime,
             // New GPS health fields
             "secondsSinceLastGpsFix" to secondsSinceLastFix,
-            "gpsAvailabilityDrops5Min" to getGpsAvailabilityDrops5Min()
+            "gpsAvailabilityDrops5Min" to getGpsAvailabilityDrops5Min(),
+            // Always present — null until the first GPS fix.
+            "currentGpsAccuracy" to currentGpsAccuracy?.toDouble()
         )
-
-        // Add currentGpsAccuracy if available
-        currentGpsAccuracy?.let {
-            status["currentGpsAccuracy"] = it.toDouble()
-        }
 
         // Only emit if status changed or 30 seconds elapsed
         val timeSinceLastEmit = currentTime - lastStatusEmitTime
