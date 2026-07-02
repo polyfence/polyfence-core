@@ -234,6 +234,24 @@ fun getZoneName(zoneId: String): String? {
 }
 
     /**
+     * Milliseconds the device has been inside the given zone, or null
+     * if the zone has no recorded entry time (`zoneEntryTimes` is
+     * cleared on EXIT). Used by LocationTracker to populate
+     * `dwellDurationMs` on the DWELL event payload (BUG-009).
+     *
+     * Reads against the same `zoneEntryTimes` map the dwell-check
+     * writes into, so the value returned alongside a DWELL event is
+     * exactly the time-in-zone the dwell threshold just crossed.
+     * Returns null for zones not currently tracked as inside, which
+     * is the correct behaviour for the event-map caller — non-DWELL
+     * events shouldn't carry a dwell duration anyway.
+     */
+    fun getDwellDurationMs(zoneId: String): Long? {
+        val entryTime = zoneEntryTimes[zoneId] ?: return null
+        return System.currentTimeMillis() - entryTime
+    }
+
+    /**
      * Enhanced configuration method
      */
     fun setValidationConfig(requireConfirmation: Boolean, confirmationPoints: Int = 2, timeoutMs: Long = 10000L) {

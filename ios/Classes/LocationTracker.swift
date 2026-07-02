@@ -697,8 +697,16 @@ public class LocationTracker: NSObject {
             detectionTimeMs: detectionTimeMs
         )
 
-        // Build enriched event dictionary
-        let eventData: [String: Any] = [
+        // Build enriched event dictionary.
+        //
+        // `dwellDurationMs` is populated only for DWELL events (BUG-009).
+        // For ENTER/EXIT/RECOVERY_* events the key is absent from the
+        // dictionary — bridges surface it as undefined/null which matches
+        // the "only meaningful for dwell" semantic. Read against the same
+        // zoneEntryTimes map that the dwell-check writes into, so the
+        // value is exactly the time-in-zone the DWELL threshold just
+        // crossed.
+        var eventData: [String: Any] = [
             "zoneId": zoneId,
             "zoneName": zoneName,
             "eventType": eventType,
@@ -712,11 +720,16 @@ public class LocationTracker: NSObject {
             "activityAtEvent": activityType,
             "distanceToBoundaryM": distanceToBoundary
         ]
+        if eventType == GeofenceEngine.EVENT_DWELL,
+           let dwellMs = geofenceEngine.getDwellDurationMs(zoneId) {
+            eventData["dwellDurationMs"] = dwellMs
+        }
+        let finalEventData = eventData
 
         // Send event to delegate on main thread
         DispatchQueue.main.async {
-            self.geofenceCallback?(eventData)
-            self.coreDelegate?.onGeofenceEvent(eventData)
+            self.geofenceCallback?(finalEventData)
+            self.coreDelegate?.onGeofenceEvent(finalEventData)
         }
 
         // Show notification with proper zone name
