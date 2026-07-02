@@ -657,7 +657,25 @@ class LocationTracker : Service() {
                 healthScoreTickCount++
                 if (healthScoreTickCount >= healthScoreEmitEveryNTicks) {
                     healthScoreTickCount = 0
-                    emitHealthScore()
+                    // BUG-010: emitHealthScore -> collectDebugInfo ->
+                    // getCpuUsage reads /proc/stat with a 360ms sleep and
+                    // require()s it isn't running on the main looper. This
+                    // runnable IS scheduled on Looper.getMainLooper() (see
+                    // combinedHealthCheckHandler init below), so calling
+                    // emitHealthScore inline throws IllegalArgumentException
+                    // which the outer try/catch in emitHealthScore swallows
+                    // — onHealthScore consumers never receive an event.
+                    // Spawn a background thread so the CPU read can block
+                    // without violating the main-looper guard. Once per 5
+                    // minutes; lifecycle is trivial — no shared executor
+                    // needed.
+                    Thread {
+                        try {
+                            emitHealthScore()
+                        } catch (e: Throwable) {
+                            Log.e(TAG, "Health score background emission failed: ${e.message}")
+                        }
+                    }.start()
                 }
 
                 // Schedule next combined check
@@ -685,6 +703,12 @@ class LocationTracker : Service() {
      * Reads from PolyfenceDebugCollector and TelemetryAggregator.
      */
     private fun emitHealthScore() {
+        // Parity with iOS LocationTracker.emitHealthScore which bails early
+        // on `guard isRunning`. A background thread spawned in the previous
+        // tick can race past a concurrent stopTracking() call and emit a
+        // stale health score after the tracker is meant to be quiet. Cheap
+        // guard, no behavioural cost when running.
+        if (!isRunning) return
         try {
             val debugInfo = PolyfenceDebugCollector.collectDebugInfo(applicationContext)
             val perfMetrics = debugInfo["performance"] as? Map<*, *>
