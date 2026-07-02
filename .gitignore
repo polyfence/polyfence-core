@@ -12,6 +12,9 @@ ios/DerivedData/
 *.xcworkspace
 *.xcuserdata
 
+# Swift Package Manager (root build dir — contains machine-local absolute paths)
+.build/
+
 # IDE
 .idea/
 .vscode/
