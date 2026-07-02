@@ -87,6 +87,38 @@ class PolyfenceErrorManagerHistoryTest {
     }
 
     @Test
+    fun `history is persisted even when the onError callback throws`() {
+        // Tannu's nit on PR #46: if a consumer's callback throws, the
+        // history-write must still land. Regression lock for the
+        // ordering guarantee — record-then-invoke.
+        val marker = "bug016_callback_throws_${System.nanoTime()}"
+        PolyfenceErrorManager.initialize { _ ->
+            throw RuntimeException("consumer onError blew up")
+        }
+
+        try {
+            PolyfenceErrorManager.reportError(
+                type = marker,
+                message = "test",
+                context = emptyMap()
+            )
+            // reportError doesn't try/catch the callback, so the
+            // exception propagates. That's the current contract —
+            // fine as long as the history was written first.
+            fail("expected the throwing callback to propagate")
+        } catch (e: RuntimeException) {
+            assertEquals("consumer onError blew up", e.message)
+        }
+
+        val history = PolyfenceDebugCollector.getErrorHistory(null, listOf(marker))
+        assertEquals(
+            "history must capture the reported error even when the callback throws",
+            1,
+            history.size
+        )
+    }
+
+    @Test
     fun `errorHistory returns errors filtered by type`() {
         val gpsMarker = "bug016_gps_${System.nanoTime()}"
         val batteryMarker = "bug016_battery_${System.nanoTime()}"

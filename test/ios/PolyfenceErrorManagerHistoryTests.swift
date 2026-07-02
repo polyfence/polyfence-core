@@ -84,6 +84,38 @@ class PolyfenceErrorManagerHistoryTests: XCTestCase {
         XCTAssertEqual(history[0]["correlationId"] as? String, callbackCorrelationId)
     }
 
+    func testHistoryIsPersistedBeforeTheCallbackRuns() {
+        // Tannu's nit on PR #46 — Android version tests "callback
+        // throws". Swift closures with a `Void` return type can't
+        // `throw`, but the underlying concern (a subscriber crashing
+        // mid-callback losing the history-write) still applies:
+        // any trap / precondition-failure would kill the process
+        // between the callback and the history-write in the OLD
+        // ordering. The fix is the same: record BEFORE invoke.
+        //
+        // Since XCTest can't easily assert on a process-crash, we
+        // assert the observable order instead: by the time the
+        // callback fires, the history entry must already be present.
+        let marker = "bug016_order_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
+        var historyEntriesAtCallbackTime = 0
+        PolyfenceErrorManager.shared.initialize { _ in
+            historyEntriesAtCallbackTime = PolyfenceDebugCollector.shared
+                .getErrorHistory(timeRangeMs: nil, errorTypes: [marker]).count
+        }
+
+        PolyfenceErrorManager.shared.reportError(
+            type: marker,
+            message: "ordering probe",
+            context: [:]
+        )
+
+        XCTAssertEqual(
+            historyEntriesAtCallbackTime,
+            1,
+            "history entry must be written BEFORE the callback fires so a crashing callback doesn't lose it"
+        )
+    }
+
     func testErrorHistoryFiltersByType() {
         let gpsMarker = "bug016_gps_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
         let batteryMarker = "bug016_battery_\(Int(Date().timeIntervalSince1970 * 1_000_000))"

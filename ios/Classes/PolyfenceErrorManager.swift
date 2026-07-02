@@ -34,15 +34,20 @@ public class PolyfenceErrorManager {
             "correlationId": correlationId ?? UUID().uuidString
         ]
 
-        errorCallback?(errorData)
-
-        // Also persist to the debug-collector history so errorHistory()
-        // returns something. The two systems (real-time onError channel
-        // and the persistent debug history) were never wired together —
-        // reportError only invoked the callback, so
-        // PolyfenceDebugCollector.errorHistory stayed empty forever.
-        // BUG-016.
+        // Persist to the debug-collector history BEFORE invoking the
+        // consumer callback. If the developer's onError handler
+        // throws / traps an uncaught exception, we'd otherwise lose
+        // the history-write entirely. Recording is deterministic and
+        // side-effect-free, so ordering it first costs nothing and
+        // makes the retrospective history a reliable diagnostic even
+        // when a subscriber crashes on the same event.
+        //
+        // Same errorData is passed to both paths so correlationId +
+        // timestamp match between the live onError delivery and the
+        // persisted entry. BUG-016.
         PolyfenceDebugCollector.shared.addErrorToHistory(errorData)
+
+        errorCallback?(errorData)
 
         NSLog("PolyfenceErrorManager: Error reported: %@ - %@", type, message)
     }
