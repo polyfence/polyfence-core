@@ -64,6 +64,29 @@ class PolyfenceErrorManagerHistoryTest {
     }
 
     @Test
+    fun `history preserves correlationId across the callback and the history entry`() {
+        // Parity nit from the peer review: history entry must carry
+        // the same correlationId the callback sees, so consumers can
+        // correlate a persisted row with a live onError event.
+        val marker = "bug016_correlation_${System.nanoTime()}"
+        var callbackCorrelationId: String? = null
+        PolyfenceErrorManager.initialize { errorMap ->
+            callbackCorrelationId = errorMap["correlationId"] as? String
+        }
+
+        PolyfenceErrorManager.reportError(
+            type = marker,
+            message = "test",
+            context = emptyMap()
+        )
+
+        val history = PolyfenceDebugCollector.getErrorHistory(null, listOf(marker))
+        assertEquals(1, history.size)
+        assertNotNull("callback must have received a correlationId", callbackCorrelationId)
+        assertEquals(callbackCorrelationId, history[0]["correlationId"])
+    }
+
+    @Test
     fun `errorHistory returns errors filtered by type`() {
         val gpsMarker = "bug016_gps_${System.nanoTime()}"
         val batteryMarker = "bug016_battery_${System.nanoTime()}"
