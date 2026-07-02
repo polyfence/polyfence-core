@@ -40,6 +40,15 @@ class PolyfenceErrorManager {
 
             // Send to developer error stream
             errorSink?.invoke(errorMap)
+
+            // Also persist to the debug-collector history so errorHistory()
+            // returns something. The two systems (real-time onError channel
+            // and the persistent debug history) were never wired together —
+            // reportError only delivered to the callback, so
+            // PolyfenceDebugCollector.errorHistory stayed empty forever.
+            // BUG-016.
+            PolyfenceDebugCollector.recordError(type, message, context)
+
             Log.d(TAG, "Error reported: $type - $message")
         }
 

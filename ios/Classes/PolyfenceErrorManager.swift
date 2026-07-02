@@ -35,6 +35,15 @@ public class PolyfenceErrorManager {
         ]
 
         errorCallback?(errorData)
+
+        // Also persist to the debug-collector history so errorHistory()
+        // returns something. The two systems (real-time onError channel
+        // and the persistent debug history) were never wired together —
+        // reportError only invoked the callback, so
+        // PolyfenceDebugCollector.errorHistory stayed empty forever.
+        // BUG-016.
+        PolyfenceDebugCollector.shared.addErrorToHistory(errorData)
+
         NSLog("PolyfenceErrorManager: Error reported: %@ - %@", type, message)
     }
 
