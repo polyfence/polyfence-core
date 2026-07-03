@@ -135,12 +135,22 @@ class PolyfenceDebugCollector {
         }
 
         fun recordError(errorType: String, message: String, context: Map<String, Any> = emptyMap()) {
-            val errorEntry = mapOf(
+            recordError(mapOf(
                 "type" to errorType,
                 "message" to message,
                 "timestamp" to System.currentTimeMillis(),
                 "context" to context
-            )
+            ))
+        }
+
+        /**
+         * Overload that stores the caller-supplied map verbatim.
+         * PolyfenceErrorManager uses this to preserve correlationId and
+         * share the exact timestamp between the real-time callback and
+         * the persisted entry — matching iOS's addErrorToHistory
+         * semantics. BUG-016 parity nit.
+         */
+        fun recordError(errorEntry: Map<String, Any>) {
             errorHistory.addLast(errorEntry)
 
             // Keep only last 100 errors

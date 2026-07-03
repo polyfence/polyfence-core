@@ -38,8 +38,22 @@ class PolyfenceErrorManager {
                 "correlationId" to (correlationId ?: UUID.randomUUID().toString())
             )
 
+            // Persist to the debug-collector history BEFORE invoking the
+            // consumer callback. If the developer's onError handler
+            // throws an uncaught exception, we'd otherwise lose the
+            // history-write entirely. Recording is deterministic and
+            // side-effect-free, so ordering it first costs nothing and
+            // makes the retrospective history a reliable diagnostic
+            // even when a subscriber crashes on the same event.
+            //
+            // Same errorMap is passed to both paths so correlationId +
+            // timestamp match between the live onError delivery and
+            // the persisted entry. BUG-016.
+            PolyfenceDebugCollector.recordError(errorMap)
+
             // Send to developer error stream
             errorSink?.invoke(errorMap)
+
             Log.d(TAG, "Error reported: $type - $message")
         }
 
