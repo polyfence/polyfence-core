@@ -388,13 +388,13 @@ public struct SmartGpsConfigFactory {
         )
     }
 
+    /// Full 6-key display shape for `getConfiguration()`. Null nested
+    /// settings on the instance are serialised as default-constructed
+    /// values for shape stability — this is the READ / display shape
+    /// only. Runtime null semantics are unchanged until a config is
+    /// re-applied via `fromMap`. Use `toMergeBaseMap` for the sparse
+    /// variant needed by BUG-015 merge. BUG-014b.
     public static func toMap(_ config: SmartGpsConfig) -> [String: Any] {
-        // Always emit every field so getConfiguration() returns the full
-        // current shape. Pre-fix, nested settings only landed in the map
-        // when non-null — consumers calling getConfiguration() saw a
-        // 3-key payload regardless of what was actually configured.
-        // Defaults are surfaced as concrete instances rather than null
-        // so the round-trip shape is honest. BUG-014b.
         return [
             "accuracyProfile": config.accuracyProfile.rawValue,
             "updateStrategy": config.updateStrategy.rawValue,
@@ -403,6 +403,31 @@ public struct SmartGpsConfigFactory {
             "movementSettings": (config.movementSettings ?? MovementSettings()).toMap(),
             "batterySettings": (config.batterySettings ?? BatterySettings()).toMap()
         ]
+    }
+
+    /// Sparse base shape used by `LocationTracker.updateSmartConfigurationFromMap`
+    /// for BUG-015 merge. Nested settings that are null on the
+    /// instance are omitted — matches pre-BUG-014b `toMap` semantics.
+    /// Merging a partial update against this base won't materialise a
+    /// default-constructed nested block the caller never asked for.
+    /// Do NOT use this for `getConfiguration` display — that stays on
+    /// `toMap`.
+    public static func toMergeBaseMap(_ config: SmartGpsConfig) -> [String: Any] {
+        var map: [String: Any] = [
+            "accuracyProfile": config.accuracyProfile.rawValue,
+            "updateStrategy": config.updateStrategy.rawValue,
+            "enableDebugLogging": config.enableDebugLogging
+        ]
+        if let proximity = config.proximitySettings {
+            map["proximitySettings"] = proximity.toMap()
+        }
+        if let movement = config.movementSettings {
+            map["movementSettings"] = movement.toMap()
+        }
+        if let battery = config.batterySettings {
+            map["batterySettings"] = battery.toMap()
+        }
+        return map
     }
 
     private static func parseEnum<T: CaseIterable & RawRepresentable>(_ value: String?, allCases: T.AllCases, fallback: T) -> T where T.RawValue == String {

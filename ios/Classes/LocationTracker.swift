@@ -1294,6 +1294,31 @@ extension LocationTracker {
         config.logConfiguration(tag: Self.TAG)
     }
 
+    /// Apply a partial configuration update without resetting the
+    /// fields the caller omitted.
+    ///
+    /// Deep-merges [partial] into the current [smartConfig]'s map shape
+    /// before re-parsing, so a call like
+    /// `updateSmartConfigurationFromMap(["clusteringEnabled": true])`
+    /// preserves the existing `updateStrategy` / nested settings
+    /// instead of silently reverting them to data-class defaults.
+    ///
+    /// Bridges (RN, Flutter) on iOS should call this rather than
+    /// constructing a SmartGpsConfig from the raw map themselves.
+    /// Android's path goes through the foreground-service map handler
+    /// which already does the merge internally. BUG-015.
+    public func updateSmartConfigurationFromMap(_ partial: [String: Any]) {
+        // Sparse merge base — omits null nested settings so a partial
+        // update doesn't materialise a default-constructed nested
+        // block the runtime treats as "feature inactive". Not the
+        // same as SmartGpsConfigFactory.toMap (which stays full-shape
+        // for getConfiguration display).
+        let currentMap = SmartGpsConfigFactory.toMergeBaseMap(self.smartConfig)
+        let merged = deepMergeMaps(base: currentMap, overrides: partial)
+        let mergedConfig = SmartGpsConfigFactory.fromMap(merged)
+        updateSmartConfiguration(mergedConfig)
+    }
+
     /// Reset smart GPS configuration to defaults
     public func resetSmartConfiguration() {
         updateSmartConfiguration(SmartGpsConfig())
@@ -1934,4 +1959,30 @@ extension LocationTracker {
         }
     }
 
+}
+
+/// Deep-merge two configuration maps. Keys present in `overrides` win.
+/// When both sides have a `[String: Any]` value for the same key, that
+/// nested map is merged recursively (one level is enough for the
+/// SmartGpsConfig shape — proximitySettings / movementSettings /
+/// batterySettings are the only nested objects and they're flat
+/// scalars inside).
+///
+/// Used by `LocationTracker.updateSmartConfigurationFromMap` to
+/// preserve unspecified fields across partial updateConfiguration
+/// calls from iOS bridges. BUG-015.
+private func deepMergeMaps(
+    base: [String: Any],
+    overrides: [String: Any]
+) -> [String: Any] {
+    var result = base
+    for (key, value) in overrides {
+        if let existingDict = result[key] as? [String: Any],
+           let overrideDict = value as? [String: Any] {
+            result[key] = deepMergeMaps(base: existingDict, overrides: overrideDict)
+        } else {
+            result[key] = value
+        }
+    }
+    return result
 }
