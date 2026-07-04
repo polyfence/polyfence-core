@@ -200,6 +200,22 @@ protocol PolyfenceCoreDelegate: AnyObject {
 }
 ```
 
+### Events
+
+`onGeofenceEvent` fires with an `eventType` string. The full set:
+
+| Event | When it fires |
+|---|---|
+| `ENTER` | The user crossed **into** a zone during active tracking. |
+| `EXIT` | The user crossed **out of** a zone during active tracking. |
+| `DWELL` | The user has been continuously inside a zone for the configured dwell duration. |
+| `RECOVERY_ENTER` | The tracking process was killed and restarted (Doze kill, OOM, force-stop, phone reboot). On the first GPS fix after restart, the user is **inside** a zone that persisted state records as **outside**. |
+| `RECOVERY_EXIT` | Same restart trigger as `RECOVERY_ENTER`, but the reverse: on the first fix after restart the user is **outside** a zone persisted state records as **inside**. |
+
+`RECOVERY_ENTER` / `RECOVERY_EXIT` reconcile the persisted `ZonePersistence` state with the actual current location when the tracking process re-inits with empty in-memory state. They exist so the app can tell "the user crossed a boundary while we were dead" apart from "the user just crossed a boundary now."
+
+**These events do NOT fire on GPS signal loss and recovery during an active tracking session.** During a live session, in-memory zone state stays authoritative through GPS blackouts. When GPS returns, the next fix flows through the normal detection path and fires a regular `ENTER` / `EXIT` for any boundary the user actually crossed during the outage. No recovery events are involved.
+
 ## Algorithms
 
 These algorithms are implemented identically in Kotlin and Swift for cross-platform parity:
