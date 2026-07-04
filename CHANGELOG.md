@@ -7,12 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-07-04
+
+### Added
+- **Battery telemetry capture on both platforms** — `TelemetryAggregator` now stamps session-start and session-end battery percentage and computes drain rate, wired symmetrically from Android's `LocationTracker` and iOS's `LocationTracker`. Available to bridges via the normal telemetry surface.
+- **`getLastKnownAccuracy()` accessor on both platforms (BUG-013b core-side)** — bridges can now read the accuracy of the last GPS fix without subscribing to the location stream. Fills a gap where the status payload needed the field but the engine surfaced no read path for it.
+- **`dwellDurationMs` in the `DWELL` event map (BUG-009 core)** — dwell time since the initial `ENTER` is now populated on every `DWELL` emit on both platforms, so bridges no longer have to compute it downstream (which required tracking their own per-zone timers).
+
 ### Fixed
 - **Android polygon self-intersection false positives at closure seam (BUG-005)** — `GeofenceEngine.ZoneData.fromMap` was rejecting closed polygons supplied with an explicit closing vertex (`first == last`, the GeoJSON convention) or with consecutive duplicate points. The CCW segment-intersection test only skipped the literal `(edge 0, edge n-1)` pair, but on a closed input the geometric closure happens between edges `0` and `n-2` (both touch `points[0] == points[n-1]`), so one cross product evaluated to `0` and the algorithm reported a false self-intersection. Real-world geocoded country boundaries with explicit closure (Qatar from `geo-boundaries-world-110m`, etc.) were silently `throw`-ing through the bridge's `addZone` path, leaving the engine with no record of those zones. **Fix:** normalize the polygon before the self-intersect check (strip the trailing duplicate vertex if `first == last`; collapse consecutive duplicates) and downgrade a residual self-intersection from a hard reject to a `Log.w` warning — point-in-polygon (ray casting / even-odd rule) is well-defined for self-intersecting polygons, so we don't gain anything by refusing them. Ports the fix shipped on iOS in 1.0.7 to the Android side and restores cross-platform parity.
+- **Silent `addZone` failures now surface via `onError` (BUG-006)** — an `addZone` throw from `GeofenceEngine` (polygon validation, missing center, malformed circle, etc.) previously reached an empty `catch {}` on Android and a bare `NSLog` on iOS, then the bridge's promise resolved as if the zone had been added. The engine now dispatches a structured error through `PolyfenceErrorManager` before the bridge sees the throw, so consumers subscribed to the error stream get a diagnosable event instead of a phantom-successful zone that never fires ENTER/EXIT.
+- **Android `emitHealthScore` was running on the main looper (BUG-010)** — the callback path from `HealthScoreCalculator` back into consumer code was dispatched on the main thread, holding the UI while the delegate did whatever it did. Moved to a background `Handler` (companion-scoped, cleaned up on `stopTracking`). Regression coverage in `HealthScoreCalculatorThreadingTest`.
+- **`runtime_status` map returned an unstable shape across tracking states (BUG-013b)** — fields like `lastAccuracy`, `profile`, and `isTracking` were omitted from the map while tracking was paused, forcing bridges to null-check every read. `runtime_status` now returns the same key set regardless of state, with fields nulled where genuinely unknown. Paired with the new `getLastKnownAccuracy()` accessor.
+- **`SmartGpsConfigFactory.toMap` emitted a partial config shape (BUG-014b)** — several fields (`clusterActiveRadius`, `stationaryDetectionSeconds`, dwell / cluster / schedule / activity blocks) were omitted from the serialized map so `getConfiguration()` returned an incomplete snapshot that bridges then couldn't round-trip through `updateConfiguration`. `toMap` now emits the full shape symmetrically on both platforms.
+- **`updateConfiguration` was replacing the full config instead of merging (BUG-015)** — a partial call like `updateConfiguration({ "gpsIntervalMs": 5000 })` silently reset every unspecified field back to the profile defaults, killing user overrides that had been set earlier in the session. Both platforms now merge the incoming map over the current `SmartGpsConfig`, so unspecified keys retain their current value.
+- **`errorHistory()` returned empty because `reportError` never persisted to `PolyfenceDebugCollector` (BUG-016)** — the developer's error stream fired correctly, but the history buffer was never written, so `getDebugInfo()` reported zero errors even after an obvious failure. `reportError` now records to the debug collector **before** invoking the consumer callback, so a throwing `onError` handler cannot lose the history-write.
+
+### Documented
+- **`RECOVERY_ENTER` / `RECOVERY_EXIT` event semantics (BUG-019)** — README's Bridge Interface section now includes an Events reference table that lists every `eventType` the delegate can receive, and explicitly calls out the load-bearing distinction: recovery events fire on tracking-process restart with a persisted-state mismatch (Doze kill / OOM / force-stop / phone reboot), NOT on GPS signal loss and recovery during an active session. The names were misleading readers into expecting the latter; behavior is intentional, gap was documentation.
+- iOS Critical Alerts entitlement note added to `SECURITY.md`.
 
 ### Tests
 - Updated `self-intersecting polygon throws exception` → `self-intersecting polygon is accepted with warning` to reflect the warn-not-throw contract (matches iOS `testSelfIntersectingPolygonIsAcceptedWithWarning`).
 - Added `closed polygon with explicit closing vertex is accepted (BUG-005)` using Qatar's exact 9-point boundary from QA's RCA (mirrors iOS `testAddZoneAcceptsClosedPolygonWithExplicitClosingVertex`).
+- `HealthScoreCalculatorThreadingTest` — regression guard for BUG-010 confirming `emitHealthScore` runs off the main looper.
+- Android + iOS regression tests for BUG-016: `errorHistory` still contains the entry when the developer's `onError` callback throws.
 
 ## [1.0.9] - 2026-05-30
 
