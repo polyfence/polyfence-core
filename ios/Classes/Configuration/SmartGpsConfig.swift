@@ -321,15 +321,22 @@ struct ActivitySettings {
     }
 
     func toMap() -> [String: Any?] {
+        // Interval fields are coerced to Int at the map boundary so
+        // consumers see the same integer millisecond count on both
+        // platforms. Kotlin emits Long (an integer type); Swift's
+        // TimeInterval is a Double so a naive multiplication yields
+        // Double, and cross-platform equality assertions (Vitest /
+        // Jest strict comparisons, downstream ETL treating these as
+        // int-only) would diverge.
         return [
             "enabled": enabled,
             "confidenceThreshold": confidenceThreshold,
             "debounceSeconds": debounceSeconds,
-            "stillIntervalMs": stillIntervalMs.map { $0 * 1000.0 },
-            "walkingIntervalMs": walkingIntervalMs.map { $0 * 1000.0 },
-            "runningIntervalMs": runningIntervalMs.map { $0 * 1000.0 },
-            "cyclingIntervalMs": cyclingIntervalMs.map { $0 * 1000.0 },
-            "drivingIntervalMs": drivingIntervalMs.map { $0 * 1000.0 }
+            "stillIntervalMs": stillIntervalMs.map { Int($0 * 1000) },
+            "walkingIntervalMs": walkingIntervalMs.map { Int($0 * 1000) },
+            "runningIntervalMs": runningIntervalMs.map { Int($0 * 1000) },
+            "cyclingIntervalMs": cyclingIntervalMs.map { Int($0 * 1000) },
+            "drivingIntervalMs": drivingIntervalMs.map { Int($0 * 1000) }
         ]
     }
 
@@ -393,7 +400,7 @@ public struct SmartGpsConfigFactory {
     /// values for shape stability — this is the READ / display shape
     /// only. Runtime null semantics are unchanged until a config is
     /// re-applied via `fromMap`. Use `toMergeBaseMap` for the sparse
-    /// variant needed by BUG-015 merge. BUG-014b.
+    /// variant that partial-update merging requires.
     public static func toMap(_ config: SmartGpsConfig) -> [String: Any] {
         return [
             "accuracyProfile": config.accuracyProfile.rawValue,
@@ -406,9 +413,9 @@ public struct SmartGpsConfigFactory {
     }
 
     /// Sparse base shape used by `LocationTracker.updateSmartConfigurationFromMap`
-    /// for BUG-015 merge. Nested settings that are null on the
-    /// instance are omitted — matches pre-BUG-014b `toMap` semantics.
-    /// Merging a partial update against this base won't materialise a
+    /// when deep-merging a caller-supplied partial update. Nested
+    /// settings that are null on the instance are omitted, so merging
+    /// a partial update against this base won't materialise a
     /// default-constructed nested block the caller never asked for.
     /// Do NOT use this for `getConfiguration` display — that stays on
     /// `toMap`.

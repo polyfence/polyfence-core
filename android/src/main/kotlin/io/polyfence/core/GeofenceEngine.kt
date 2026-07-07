@@ -25,6 +25,16 @@ class GeofenceEngine {
         // Default dwell threshold (5 minutes)
         const val DEFAULT_DWELL_THRESHOLD_MS = 300000L
 
+        // Default GPS accuracy threshold in metres (matches iOS for parity).
+        // Locations with reported accuracy worse than this are rejected.
+        const val DEFAULT_GPS_ACCURACY_THRESHOLD = 100.0f
+
+        // Cluster defaults — mirrored by setClusterConfig's argument
+        // defaults. Kept as constants so the getConfiguration-composed
+        // map can return the same values before the service is running.
+        const val DEFAULT_CLUSTER_ACTIVE_RADIUS_METERS = 5000.0
+        const val DEFAULT_CLUSTER_REFRESH_DISTANCE_METERS = 1000.0
+
         /**
          * Check if polygon is self-intersecting using O(n²) edge intersection test.
          * Used from [ZoneData.fromMap]; must live in companion so nested class can call it.
@@ -236,8 +246,8 @@ fun getZoneName(zoneId: String): String? {
     /**
      * Milliseconds the device has been inside the given zone, or null
      * if the zone has no recorded entry time (`zoneEntryTimes` is
-     * cleared on EXIT). Used by LocationTracker to populate
-     * `dwellDurationMs` on the DWELL event payload (BUG-009).
+     * cleared on EXIT). Populates `dwellDurationMs` on the DWELL event
+     * payload.
      *
      * Reads against the same `zoneEntryTimes` map the dwell-check
      * writes into, so the value returned alongside a DWELL event is
@@ -296,6 +306,33 @@ fun getZoneName(zoneId: String): String? {
         this.activeZoneIds.clear()
         Log.d(TAG, "Cluster config: enabled=$enabled, activeRadius=${activeRadiusMeters}m, refreshDistance=${refreshDistanceMeters}m")
     }
+
+    /**
+     * Read the currently-applied GPS accuracy threshold in metres.
+     * Bridges expose this via `getConfiguration()`.
+     */
+    fun getGpsAccuracyThreshold(): Float = gpsAccuracyThreshold
+
+    /**
+     * Read the currently-applied dwell configuration as the same map
+     * shape the bridge accepts on `updateConfiguration`. Bridges expose
+     * this via `getConfiguration()`.
+     */
+    fun getDwellConfigMap(): Map<String, Any> = mapOf(
+        "enabled" to dwellEnabled,
+        "dwellThresholdMs" to dwellThresholdMs
+    )
+
+    /**
+     * Read the currently-applied cluster configuration as the same map
+     * shape the bridge accepts on `updateConfiguration`. Bridges expose
+     * this via `getConfiguration()`.
+     */
+    fun getClusterConfigMap(): Map<String, Any> = mapOf(
+        "enabled" to clusteringEnabled,
+        "activeRadiusMeters" to clusterActiveRadiusMeters,
+        "refreshDistanceMeters" to clusterRefreshDistanceMeters
+    )
 
     /**
      * Check if cluster needs to be refreshed based on movement from cluster center
@@ -868,23 +905,38 @@ fun getZoneName(zoneId: String): String? {
                         //     style closed rings). Without this, edges 0 and n-2 share the
                         //     closure endpoint and one cross-product evaluates to 0,
                         //     producing a false self-intersection on valid polygons
-                        //     (BUG-005, e.g. Qatar boundary from the geo-boundaries dataset).
+                        //     (e.g. closed-ring national boundaries from public datasets).
                         //  2. Drop consecutive duplicate vertices — they create zero-length
-                        //     edges that also trip the check (1098-point London CC zone had ~10).
+                        //     edges that also trip the check.
                         val normalized = GeofenceEngine.normalizeForSelfIntersectCheck(parsedPoints)
 
                         if (normalized.size < 3) {
                             throw IllegalArgumentException("Polygon must have at least 3 points")
                         }
 
-                        // Soft check: only WARN on residual self-intersections. Point-in-
-                        // polygon (ray casting) is well-defined even for self-intersecting
-                        // polygons (caller gets the even-odd-rule interior), so rejecting
-                        // the zone outright hurts real-world geocoded boundaries (e.g.
-                        // London CC, ULEZ, Qatar) that have minor topology quirks.
-                        // Matches the iOS behaviour shipped in polyfence-core 1.0.7.
+                        // Soft check: only WARN on self-intersections that survive
+                        // normalization. Point-in-polygon (ray casting) is well-defined
+                        // even for self-intersecting polygons (caller gets the even-odd-
+                        // rule interior), so rejecting the zone outright hurts real-world
+                        // geocoded boundaries that have minor topology quirks. Matches
+                        // the iOS behaviour.
                         if (GeofenceEngine.isPolygonSelfIntersecting(normalized)) {
                             Log.w(TAG, "Polygon has self-intersections after normalization — accepting with warning (even-odd-rule interior used)")
+                            // Also surface via PolyfenceErrorManager so consumers observe
+                            // the warning through onError / errorHistory instead of only
+                            // in logcat. Non-fatal — the zone is still added, ray-casting
+                            // handles the even-odd interior correctly. `severity=warning`
+                            // lets consumers filter it from real errors.
+                            PolyfenceErrorManager.reportError(
+                                "polygon_self_intersecting",
+                                "Polygon '$id' has self-intersections. Zone accepted; ray-casting resolves via the even-odd rule.",
+                                mapOf(
+                                    "zoneId" to id,
+                                    "severity" to "warning",
+                                    "platform" to "android",
+                                    "timestamp" to System.currentTimeMillis()
+                                )
+                            )
                         }
 
                         // Warn about poles (reduced accuracy near ±85°)

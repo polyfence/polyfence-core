@@ -44,6 +44,10 @@ android {
         unitTests {
             // Stubs unmocked android.jar APIs (e.g. Log); pair with mocked Location in unit tests
             isReturnDefaultValues = true
+            // Robolectric needs the Android resources on the unit-test classpath —
+            // enables tests annotated with @RunWith(RobolectricTestRunner::class)
+            // to instantiate Services / Contexts without a device.
+            isIncludeAndroidResources = true
         }
     }
 }
@@ -60,6 +64,12 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.5.0")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.1.0")
+    // Robolectric unlocks Service / Context / SharedPreferences in unit
+    // tests, letting us cover `LocationTracker.updateConfigurationFromMap`
+    // end-to-end (write path → getCurrentConfigurationMap round-trip)
+    // without an instrumented device.
+    testImplementation("org.robolectric:robolectric:4.11.1")
+    testImplementation("androidx.test:core:1.5.0")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test:core-ktx:1.5.0")
     androidTestImplementation("androidx.test:runner:1.5.2")

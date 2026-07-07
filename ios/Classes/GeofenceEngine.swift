@@ -22,6 +22,16 @@ class GeofenceEngine {
     // Default dwell threshold (5 minutes)
     static let DEFAULT_DWELL_THRESHOLD_SECONDS: TimeInterval = 300.0 // 300 seconds = 5 minutes
 
+    // Default GPS accuracy threshold in metres (matches Android for parity).
+    // Locations with reported accuracy worse than this are rejected.
+    static let DEFAULT_GPS_ACCURACY_THRESHOLD: Double = 100.0
+
+    // Cluster defaults — mirrored by setClusterConfig's argument
+    // defaults. Kept as constants so the getConfiguration-composed
+    // map can return the same values before the tracker is running.
+    static let DEFAULT_CLUSTER_ACTIVE_RADIUS_METERS: Double = 5000.0
+    static let DEFAULT_CLUSTER_REFRESH_DISTANCE_METERS: Double = 1000.0
+
     // MARK: - Properties
     // Synchronization for thread-safe access to zone data/state
     private let syncQueue = DispatchQueue(label: "io.polyfence.GeofenceEngine.sync")
@@ -140,6 +150,43 @@ class GeofenceEngine {
         self.clusterCenterLng = nil
         self.activeZoneIds.removeAll()
         NSLog("[\(GeofenceEngine.TAG)] Cluster config: enabled=\(enabled), activeRadius=\(activeRadiusMeters)m, refreshDistance=\(refreshDistanceMeters)m")
+    }
+
+    /**
+     * Read the currently-applied GPS accuracy threshold in metres.
+     * Bridges expose this via `getConfiguration()`.
+     */
+    public func getGpsAccuracyThreshold() -> Double {
+        return gpsAccuracyThreshold
+    }
+
+    /**
+     * Read the currently-applied dwell configuration as the same map
+     * shape the bridge accepts on `updateConfiguration`. Bridges expose
+     * this via `getConfiguration()`.
+     *
+     * `dwellThresholdMs` is emitted in milliseconds to match the
+     * cross-platform bridge contract; internally the engine keeps
+     * seconds because CoreLocation timers are second-based.
+     */
+    public func getDwellConfigMap() -> [String: Any] {
+        return [
+            "enabled": dwellEnabled,
+            "dwellThresholdMs": Int(dwellThresholdSeconds * 1000)
+        ]
+    }
+
+    /**
+     * Read the currently-applied cluster configuration as the same map
+     * shape the bridge accepts on `updateConfiguration`. Bridges expose
+     * this via `getConfiguration()`.
+     */
+    public func getClusterConfigMap() -> [String: Any] {
+        return [
+            "enabled": clusteringEnabled,
+            "activeRadiusMeters": clusterActiveRadiusMeters,
+            "refreshDistanceMeters": clusterRefreshDistanceMeters
+        ]
     }
 
     /**
@@ -444,8 +491,8 @@ class GeofenceEngine {
     /**
      * Milliseconds the device has been inside the given zone, or nil
      * if the zone has no recorded entry time (`zoneEntryTimes` is
-     * cleared on EXIT). Used by LocationTracker to populate
-     * `dwellDurationMs` on the DWELL event payload (BUG-009).
+     * cleared on EXIT). Populates `dwellDurationMs` on the DWELL
+     * event payload.
      *
      * Reads against the same `zoneEntryTimes` map the dwell-check
      * writes into, so the value returned alongside a DWELL event is
@@ -1045,13 +1092,28 @@ class ZoneData {
                 throw NSError(domain: "GeofenceEngine", code: 4, userInfo: [NSLocalizedDescriptionKey: "Polygon must have at least 3 points"])
             }
 
-            // Soft check: only WARN on residual self-intersections. Point-in-
-            // polygon (ray casting) is well-defined even for self-intersecting
-            // polygons (caller gets the even-odd-rule interior), so rejecting
-            // the zone outright hurts real-world geocoded boundaries (e.g.
-            // London CC, ULEZ) that have minor topology quirks.
+            // Soft check: only WARN on self-intersections that survive
+            // normalization. Point-in-polygon (ray casting) is well-defined
+            // even for self-intersecting polygons (caller gets the even-odd-
+            // rule interior), so rejecting the zone outright hurts real-world
+            // geocoded boundaries that have minor topology quirks.
             if isPolygonSelfIntersecting(points: normalized) {
                 NSLog("[GeofenceEngine] Polygon has self-intersections after normalization — accepting with warning (even-odd-rule interior used)")
+                // Also surface via PolyfenceErrorManager so consumers observe
+                // the warning through onError / errorHistory instead of only
+                // in NSLog. Non-fatal — the zone is still added, ray-casting
+                // handles the even-odd interior correctly. `severity=warning`
+                // lets consumers filter it from real errors.
+                PolyfenceErrorManager.shared.reportError(
+                    type: "polygon_self_intersecting",
+                    message: "Polygon '\(zoneId)' has self-intersections. Zone accepted; ray-casting resolves via the even-odd rule.",
+                    context: [
+                        "zoneId": zoneId,
+                        "severity": "warning",
+                        "platform": "ios",
+                        "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
+                    ]
+                )
             }
 
             // Warn about poles (reduced accuracy near ±85°)

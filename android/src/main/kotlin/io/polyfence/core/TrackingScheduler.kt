@@ -91,14 +91,66 @@ class TrackingScheduler(private val context: Context) {
         }
     }
 
+    @Volatile
     private var config = ScheduleConfig()
+
+    /**
+     * Serialises reads and writes of [config] so the composed
+     * [LocationTracker.getCurrentConfigurationMap] reader can't
+     * observe a torn view of [ScheduleConfig.timeWindows] while
+     * [updateConfig] mutates it on another thread. Matches the
+     * iOS-side `configQueue` — schedule reads and writes cross
+     * threads on both platforms.
+     */
+    private val configLock = Any()
+
+    /**
+     * Read the currently-applied schedule configuration as the same map
+     * shape [updateConfig] accepts. Bridges expose this via
+     * `getConfiguration()`.
+     *
+     * TimeWindow values are serialised recursively so consumers can
+     * round-trip a snapshot back through [updateConfig] without loss.
+     */
+    fun getConfigMap(): Map<String, Any> {
+        // Snapshot inside the lock so timeWindows can't be swapped
+        // mid-iteration on another thread. `config` is a data class
+        // (value type by convention); reassigning [this.config] to a
+        // fresh instance doesn't tear a captured local reference.
+        val snapshot = synchronized(configLock) { config }
+        return mapOf(
+            "enabled" to snapshot.enabled,
+            "startImmediatelyIfInWindow" to snapshot.startImmediatelyIfInWindow,
+            "timeWindows" to snapshot.timeWindows.map { window ->
+                mapOf(
+                    "startTime" to mapOf(
+                        "hour" to window.startTime.hour,
+                        "minute" to window.startTime.minute
+                    ),
+                    "endTime" to mapOf(
+                        "hour" to window.endTime.hour,
+                        "minute" to window.endTime.minute
+                    ),
+                    "daysOfWeek" to window.daysOfWeek
+                )
+            }
+        )
+    }
 
     /**
      * Update schedule configuration
      * @param configMap Configuration map
      */
     fun updateConfig(configMap: Map<String, Any>?) {
-        config = ScheduleConfig.fromMap(configMap)
+        // Peer-review blocker #2: serialise the write against
+        // concurrent [getConfigMap] readers on other threads.
+        // Internal reads below (isCurrentlyInScheduledWindow,
+        // saveConfig) run on this same thread post-assignment and
+        // observe the write via `@Volatile`, so they don't need to
+        // re-enter the lock.
+        synchronized(configLock) {
+            config = ScheduleConfig.fromMap(configMap)
+        }
         saveConfig()
 
         if (config.enabled) {
@@ -396,7 +448,12 @@ class TrackingScheduler(private val context: Context) {
             }
         } else emptyList()
 
-        config = ScheduleConfig(enabled, timeWindows, startImmediately)
+        // Same serial-write pattern as [updateConfig] — protects a
+        // concurrent [getConfigMap] reader from a torn state during
+        // loadConfig's rehydration.
+        synchronized(configLock) {
+            config = ScheduleConfig(enabled, timeWindows, startImmediately)
+        }
 
         if (config.enabled) {
             Log.d(TAG, "Loaded schedule config with ${config.timeWindows.size} windows")
