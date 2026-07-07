@@ -99,12 +99,155 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Full 12-key configuration snapshot for the bridge
+         * `getConfiguration()` surface. Composes state from the four
+         * places it actually lives:
+         *   1. [currentSmartConfig] — top-level scalars +
+         *      proximity / movement / battery blocks.
+         *   2. Running [currentInstance]'s geofenceEngine — GPS
+         *      accuracy threshold, dwell settings, cluster settings
+         *      (fall back to engine defaults when the service isn't
+         *      running).
+         *   3. [TrackingScheduler.getInstance] singleton — schedule
+         *      settings (always available since the singleton persists
+         *      across service lifecycle).
+         *   4. Running instance's activitySettings, or
+         *      [pendingActivitySettings], or default when neither is
+         *      set — same three-tier fallback the service already uses
+         *      internally on first-run.
+         *
+         * The shape matches the JS `PolyfenceConfiguration` type and
+         * round-trips cleanly through `updateConfiguration` — all eleven
+         * top-level keys are emitted (never `null`) so bridges can cache
+         * and re-apply the full configuration surface.
+         *
+         * ## Contract for bridge authors
+         * **Pass `context` whenever possible.** When the service isn't
+         * running and `context` is non-null, this method lazily
+         * instantiates the companion [trackingScheduler] and rehydrates
+         * its persisted config from SharedPreferences — a read that
+         * mutates process-wide state. This is intentional (returns the
+         * user's last-applied schedule rather than an empty-defaults
+         * placeholder), but it means concurrent callers should provide
+         * the same context. Passing `null` context ALWAYS returns an
+         * empty schedule fallback even when a persisted config exists
+         * on disk — asymmetric behaviour worth avoiding.
+         */
+        fun getCurrentConfigurationMap(context: android.content.Context?): Map<String, Any> {
+            val base = SmartGpsConfigFactory.toMap(currentSmartConfig).toMutableMap()
+
+            val instance = currentInstance
+            val engine = instance?.geofenceEngine
+            if (engine != null) {
+                // Widen Float → Double at the map boundary so the
+                // React Native / Flutter bridges receive the same
+                // numeric type Swift emits (which is Double). Float
+                // precision is enough for accuracy metres, but a
+                // cross-platform `.toBe(100)` assertion would
+                // otherwise diverge between Android (100.0f
+                // marshalled as Double 100.0 by React Native, but as
+                // literal Float across Flutter's MethodChannel) and
+                // iOS (already Double 100.0).
+                base["gpsAccuracyThreshold"] = engine.getGpsAccuracyThreshold().toDouble()
+                base["dwellSettings"] = engine.getDwellConfigMap()
+                base["clusterSettings"] = engine.getClusterConfigMap()
+            } else {
+                // Service not running — return the engine's compile-time
+                // defaults so the caller sees a stable shape rather than
+                // missing keys. Any user-set value that never reached the
+                // engine (because the service was killed before it
+                // landed) is invisible here; that matches how the write
+                // path also drops those updates.
+                base["gpsAccuracyThreshold"] = GeofenceEngine.DEFAULT_GPS_ACCURACY_THRESHOLD.toDouble()
+                base["dwellSettings"] = mapOf(
+                    "enabled" to true,
+                    "dwellThresholdMs" to GeofenceEngine.DEFAULT_DWELL_THRESHOLD_MS
+                )
+                base["clusterSettings"] = mapOf(
+                    "enabled" to false,
+                    "activeRadiusMeters" to GeofenceEngine.DEFAULT_CLUSTER_ACTIVE_RADIUS_METERS,
+                    "refreshDistanceMeters" to GeofenceEngine.DEFAULT_CLUSTER_REFRESH_DISTANCE_METERS
+                )
+            }
+
+            // TrackingScheduler is a companion field lazily initialised
+            // on first setScheduleConfig / onStartCommand. Instantiate
+            // against the caller's context when a schedule config was
+            // never pushed (so we return the on-disk snapshot the
+            // scheduler recovers, not a bare in-memory default) and
+            // fall back to an empty shape only when no context is
+            // available at all. Synchronised on the companion so a
+            // concurrent [setScheduleConfig] can't race and orphan
+            // one caller's newly-instantiated scheduler behind
+            // another's — both call sites contend for the same lock.
+            val schedulerSnapshot = synchronized(this) {
+                trackingScheduler?.let { it }
+                    ?: context?.let { ctx ->
+                        val recovered = TrackingScheduler(ctx)
+                        recovered.loadConfig()
+                        trackingScheduler = recovered
+                        recovered
+                    }
+            }
+            base["scheduleSettings"] = schedulerSnapshot?.getConfigMap()
+                ?: mapOf(
+                    "enabled" to false,
+                    "startImmediatelyIfInWindow" to true,
+                    "timeWindows" to emptyList<Any>()
+                )
+
+            val effectiveActivitySettings =
+                instance?.activitySettings
+                    ?: pendingActivitySettings
+                    ?: ActivitySettings()
+            // ActivitySettings stores per-activity interval overrides
+            // as nullable so `getIntervalForActivity` can lazily fall
+            // back to the compile-time default. Emitting those nulls
+            // straight through would leave the composed map with a
+            // sparse `activitySettings` block whose interval keys
+            // silently drop — a shape-stability regression the
+            // docstring above claims we avoid. Materialise the
+            // effective values (user override OR DEFAULT_* constant)
+            // so `getConfiguration()` always returns the full 8-key
+            // block and consumers can round-trip via
+            // `updateConfiguration(cfg.activitySettings)` without
+            // losing the interval defaults.
+            val activityMap: Map<String, Any> = mapOf(
+                "enabled" to effectiveActivitySettings.enabled,
+                "confidenceThreshold" to effectiveActivitySettings.confidenceThreshold,
+                "debounceSeconds" to effectiveActivitySettings.debounceSeconds,
+                "stillIntervalMs" to (effectiveActivitySettings.stillIntervalMs
+                    ?: ActivitySettings.DEFAULT_STILL_INTERVAL_MS),
+                "walkingIntervalMs" to (effectiveActivitySettings.walkingIntervalMs
+                    ?: ActivitySettings.DEFAULT_WALKING_INTERVAL_MS),
+                "runningIntervalMs" to (effectiveActivitySettings.runningIntervalMs
+                    ?: ActivitySettings.DEFAULT_RUNNING_INTERVAL_MS),
+                "cyclingIntervalMs" to (effectiveActivitySettings.cyclingIntervalMs
+                    ?: ActivitySettings.DEFAULT_CYCLING_INTERVAL_MS),
+                "drivingIntervalMs" to (effectiveActivitySettings.drivingIntervalMs
+                    ?: ActivitySettings.DEFAULT_DRIVING_INTERVAL_MS)
+            )
+            base["activitySettings"] = activityMap
+
+            // Alert-notifications flag also lives outside SmartGpsConfig
+            // (companion static, applied on both bridge init and via
+            // setAlertNotificationsEnabled). Emit it as
+            // `disableAlertNotifications` — the shape the bridges'
+            // TypeScript / Dart configuration types expose — so a
+            // round-trip `getConfiguration()` → cache → user code doesn't
+            // silently reset the caller's original init preference.
+            base["disableAlertNotifications"] = !alertNotificationsEnabled
+
+            return base
+        }
+
+        /**
          * Most recent GPS accuracy in metres from the running tracker
          * instance, or `null` if no fix has landed yet (or the tracker
          * isn't running). Exposed so bridge `status`-event payloads can
          * include the latest known accuracy instead of hardcoding
-         * `null`. BUG-013a (bridges) — paired with BUG-013b above which
-         * stabilises the same field's emission shape in runtime_status.
+         * `null` — paired with the runtime_status emission which uses
+         * the same value to stabilise the field across emissions.
          */
         fun getLastKnownAccuracy(): Float? {
             return currentInstance?.currentGpsAccuracy
@@ -128,13 +271,66 @@ class LocationTracker : Service() {
         }
 
         /**
-         * Update schedule configuration for time-based tracking
+         * Build the same 12-key configuration map that
+         * [getCurrentConfigurationMap] emits, but populated entirely
+         * with the SDK's compile-time defaults. Bridges use this as
+         * the payload for `resetConfiguration()` so the reset walks
+         * through the merge-aware `updateConfigurationFromMap` path
+         * and every subsystem (SmartGpsConfig + engine dwell / cluster
+         * / gpsAccuracyThreshold + scheduler + activity + alert flag)
+         * lands back at its default value in one shot. Sending only
+         * the 6-key SmartGpsConfig map on reset would leave dwell,
+         * cluster, schedule, and activity settings untouched.
+         */
+        fun buildDefaultConfigurationMap(): Map<String, Any> {
+            val defaultConfig = SmartGpsConfig()
+            val base = SmartGpsConfigFactory.toMap(defaultConfig).toMutableMap()
+            base["gpsAccuracyThreshold"] = GeofenceEngine.DEFAULT_GPS_ACCURACY_THRESHOLD.toDouble()
+            base["dwellSettings"] = mapOf(
+                "enabled" to true,
+                "dwellThresholdMs" to GeofenceEngine.DEFAULT_DWELL_THRESHOLD_MS
+            )
+            base["clusterSettings"] = mapOf(
+                "enabled" to false,
+                "activeRadiusMeters" to GeofenceEngine.DEFAULT_CLUSTER_ACTIVE_RADIUS_METERS,
+                "refreshDistanceMeters" to GeofenceEngine.DEFAULT_CLUSTER_REFRESH_DISTANCE_METERS
+            )
+            base["scheduleSettings"] = mapOf(
+                "enabled" to false,
+                "startImmediatelyIfInWindow" to true,
+                "timeWindows" to emptyList<Any>()
+            )
+            val defaults = ActivitySettings()
+            base["activitySettings"] = mapOf(
+                "enabled" to defaults.enabled,
+                "confidenceThreshold" to defaults.confidenceThreshold,
+                "debounceSeconds" to defaults.debounceSeconds,
+                "stillIntervalMs" to ActivitySettings.DEFAULT_STILL_INTERVAL_MS,
+                "walkingIntervalMs" to ActivitySettings.DEFAULT_WALKING_INTERVAL_MS,
+                "runningIntervalMs" to ActivitySettings.DEFAULT_RUNNING_INTERVAL_MS,
+                "cyclingIntervalMs" to ActivitySettings.DEFAULT_CYCLING_INTERVAL_MS,
+                "drivingIntervalMs" to ActivitySettings.DEFAULT_DRIVING_INTERVAL_MS
+            )
+            base["disableAlertNotifications"] = false
+            return base
+        }
+
+        /**
+         * Update schedule configuration for time-based tracking.
+         *
+         * Synchronised on the companion so a concurrent
+         * [getCurrentConfigurationMap] read can't race with this
+         * lazy-init and orphan the reader's scheduler behind ours
+         * (or vice-versa). Both call sites contend for the same
+         * monitor.
          */
         fun setScheduleConfig(context: Context, scheduleSettings: Map<String, Any>?) {
-            if (trackingScheduler == null) {
-                trackingScheduler = TrackingScheduler(context)
+            val scheduler = synchronized(this) {
+                trackingScheduler ?: TrackingScheduler(context).also {
+                    trackingScheduler = it
+                }
             }
-            trackingScheduler?.updateConfig(scheduleSettings)
+            scheduler.updateConfig(scheduleSettings)
             Log.d(TAG, "Schedule config updated")
         }
 
@@ -379,11 +575,18 @@ class LocationTracker : Service() {
 
         createNotificationChannels()
 
-        // Initialize tracking scheduler and restore saved config
-        if (trackingScheduler == null) {
-            trackingScheduler = TrackingScheduler(this)
+        // Initialize tracking scheduler and restore saved config.
+        // Synchronised on the companion monitor so a concurrent
+        // [getCurrentConfigurationMap] or [setScheduleConfig] on
+        // another thread doesn't race with this lazy-init and
+        // orphan one instance behind the other — all three
+        // instantiation sites contend for the same lock.
+        val scheduler = synchronized(Companion) {
+            trackingScheduler ?: TrackingScheduler(this).also {
+                trackingScheduler = it
+            }
         }
-        trackingScheduler?.loadConfig()
+        scheduler.loadConfig()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -657,14 +860,13 @@ class LocationTracker : Service() {
                 healthScoreTickCount++
                 if (healthScoreTickCount >= healthScoreEmitEveryNTicks) {
                     healthScoreTickCount = 0
-                    // BUG-010: emitHealthScore -> collectDebugInfo ->
-                    // getCpuUsage reads /proc/stat with a 360ms sleep and
-                    // require()s it isn't running on the main looper. This
-                    // runnable IS scheduled on Looper.getMainLooper() (see
-                    // combinedHealthCheckHandler init below), so calling
-                    // emitHealthScore inline throws IllegalArgumentException
-                    // which the outer try/catch in emitHealthScore swallows
-                    // — onHealthScore consumers never receive an event.
+                    // emitHealthScore -> collectDebugInfo -> getCpuUsage reads
+                    // /proc/stat with a 360ms sleep and require()s it isn't
+                    // running on the main looper. This runnable IS scheduled
+                    // on Looper.getMainLooper() (see combinedHealthCheckHandler
+                    // init below), so calling emitHealthScore inline throws
+                    // IllegalArgumentException — the outer try/catch swallows
+                    // it and onHealthScore consumers never receive an event.
                     // Spawn a background thread so the CPU read can block
                     // without violating the main-looper guard. Once per 5
                     // minutes; lifecycle is trivial — no shared executor
@@ -756,12 +958,11 @@ class LocationTracker : Service() {
             intent.getSerializableExtra("zoneData") as? Map<String, Any>
         } ?: return
 
-        // Add to engine (skip invalid zones instead of crashing). Previously
-        // this caught the exception with a Log.w only — the bridge's addZone()
-        // Promise resolved successfully even though the zone was dropped, and
-        // no onError event fired (BUG-006). Route the rejection through
-        // PolyfenceErrorManager so the bridge surfaces it via the onError
-        // channel and consumers can react.
+        // Add to engine (skip invalid zones instead of crashing). Route the
+        // rejection through PolyfenceErrorManager so the bridge surfaces the
+        // failure via the onError channel — a plain Log.w would leave the
+        // bridge's addZone() Promise resolving as success even though the
+        // zone was dropped, and consumers would have no signal to react.
         try {
             geofenceEngine.addZone(zoneId, zoneName, zoneData)
         } catch (e: Exception) {
@@ -883,8 +1084,8 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     // without it, polyfence-flutter's bridge can't parse the event and emits a noisy
     // "Invalid timestamp type: Null" error for every geofence transition.
     //
-    // `dwellDurationMs` is populated only for DWELL events (BUG-009).
-    // For ENTER/EXIT/RECOVERY_* events the key is absent from the map —
+    // `dwellDurationMs` is populated only for DWELL events. For
+    // ENTER/EXIT/RECOVERY_* events the key is absent from the map —
     // bridges surface it as undefined/null which matches the "only
     // meaningful for dwell" semantic. Read against the same zoneEntryTimes
     // map that the dwell-check writes into, so the value is exactly the
@@ -1447,10 +1648,10 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             // Deep-merge the incoming partial map with the current
             // SmartGpsConfig so any field the caller omitted keeps its
             // current value instead of resetting to the data-class
-            // default. Pre-fix, fromMap supplied BALANCED / CONTINUOUS /
-            // null for absent keys, so updateConfiguration({ clusteringEnabled: true })
-            // silently wiped an earlier updateStrategy: 'intelligent'.
-            // BUG-015.
+            // default. `fromMap` on a bare partial map supplies BALANCED
+            // / CONTINUOUS / null for absent keys — enough to wipe an
+            // earlier updateStrategy: 'intelligent' when the caller only
+            // meant to flip clusteringEnabled.
             //
             // Only the SmartGpsConfig portion is merged here. The "extras"
             // handled below (gpsAccuracyThreshold / dwellSettings /
@@ -1489,12 +1690,20 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 Log.d(TAG, "Dwell config updated: enabled=$dwellEnabled, threshold=${dwellThresholdMs}ms")
             }
 
-            // Update cluster configuration if provided
+            // Update cluster configuration if provided. Use
+            // GeofenceEngine.DEFAULT_CLUSTER_* constants for the
+            // omitted-field fallbacks so the write-side defaults
+            // match [buildDefaultConfigurationMap] and
+            // [getClusterConfigMap] on the read side — single source
+            // of truth. Hardcoded literals here would silently drift
+            // from the constants over time.
             val clusterSettings = configMap["clusterSettings"] as? Map<String, Any>
             if (clusterSettings != null) {
                 val clusterEnabled = clusterSettings["enabled"] as? Boolean ?: false
-                val activeRadiusMeters = (clusterSettings["activeRadiusMeters"] as? Number)?.toDouble() ?: 5000.0
-                val refreshDistanceMeters = (clusterSettings["refreshDistanceMeters"] as? Number)?.toDouble() ?: 1000.0
+                val activeRadiusMeters = (clusterSettings["activeRadiusMeters"] as? Number)?.toDouble()
+                    ?: GeofenceEngine.DEFAULT_CLUSTER_ACTIVE_RADIUS_METERS
+                val refreshDistanceMeters = (clusterSettings["refreshDistanceMeters"] as? Number)?.toDouble()
+                    ?: GeofenceEngine.DEFAULT_CLUSTER_REFRESH_DISTANCE_METERS
                 geofenceEngine.setClusterConfig(clusterEnabled, activeRadiusMeters, refreshDistanceMeters)
                 Log.d(TAG, "Cluster config updated: enabled=$clusterEnabled, activeRadius=${activeRadiusMeters}m, refreshDistance=${refreshDistanceMeters}m")
             }
@@ -1513,8 +1722,37 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 updateActivityRecognition(newActivitySettings)
                 Log.d(TAG, "Activity config updated: enabled=${newActivitySettings.enabled}")
             }
+
+            // Apply `disableAlertNotifications` symmetrically with the
+            // read side: the composed getConfiguration map emits it and
+            // buildDefaultConfigurationMap includes it, so the write
+            // side must honour it too — otherwise
+            // updateConfiguration({disableAlertNotifications: true})
+            // silently does nothing and resetConfiguration() can't
+            // restore alerts. Routes through the same companion setter
+            // Polyfence.initialize wires up.
+            val disableAlertNotifications = configMap["disableAlertNotifications"] as? Boolean
+            if (disableAlertNotifications != null) {
+                setAlertNotificationsEnabled(!disableAlertNotifications)
+                Log.d(TAG, "Alert notifications flag applied via updateConfiguration: enabled=${!disableAlertNotifications}")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update configuration: ${e.message}")
+            // Surface via PolyfenceErrorManager so consumers observe the
+            // failure through onError and errorHistory records it for
+            // post-hoc inspection. The Intent path is async and can't
+            // reject the caller's promise directly, but the diagnostic
+            // still reaches the consumer. End-to-end promise-rejection
+            // consistency would require moving off the Intent pattern.
+            PolyfenceErrorManager.reportError(
+                "configuration_error",
+                "Failed to apply updateConfiguration: ${e.message ?: e.javaClass.simpleName}",
+                mapOf(
+                    "severity" to "error",
+                    "platform" to "android",
+                    "timestamp" to System.currentTimeMillis()
+                )
+            )
         }
     }
 
@@ -2124,7 +2362,7 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
 
         // Map allows null values so every emission carries the same key
         // set — consumers can rely on a stable shape rather than checking
-        // for absent vs present keys across emissions. BUG-013b.
+        // for absent vs present keys across emissions.
         val status = mutableMapOf<String, Any?>(
             "strategy" to smartConfig.updateStrategy.name,
             "intervalMs" to currentGpsInterval,
@@ -2165,7 +2403,6 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
  *
  * Used by [LocationTracker.updateConfigurationFromMap] to preserve
  * unspecified fields across partial updateConfiguration() calls.
- * BUG-015.
  */
 private fun deepMergeMaps(
     base: Map<String, Any>,

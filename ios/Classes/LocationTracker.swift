@@ -229,17 +229,35 @@ public class LocationTracker: NSObject {
         locationManager?.activityType = .otherNavigation
 
         if #available(iOS 9.0, *) {
-            locationManager?.allowsBackgroundLocationUpdates = true
+            // `allowsBackgroundLocationUpdates = true` requires the host
+            // app to declare the `location` background mode in its
+            // Info.plist and hold a valid CLClient background-mode
+            // entitlement. SPM test targets are Info.plist-less, so a
+            // unit test that instantiates LocationTracker crashes here
+            // with NSInternalInconsistencyException (`!stayUp ||
+            // CLClientIsBackgroundable`). Skip the flag when running
+            // under XCTest so the class becomes unit-testable without
+            // leaking test concerns further into production. The runtime
+            // behaviour for shipping apps is unchanged.
+            let inXCTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            if !inXCTest {
+                locationManager?.allowsBackgroundLocationUpdates = true
+            }
         }
     }
 
     private func setupNotificationCenter() {
+        // `UNUserNotificationCenter.current()` requires a valid
+        // `Bundle.main.bundleIdentifier`, and `requestAuthorization` opens
+        // a system permission dialog. SPM test targets are Info.plist-less
+        // and headless, so both crash / hang under XCTest. Skip the whole
+        // block when running under XCTest so the class becomes
+        // unit-testable; runtime behaviour for shipping apps is unchanged.
+        let inXCTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        if inXCTest { return }
+
         notificationCenter = UNUserNotificationCenter.current()
-
-        // Set delegate to enable foreground notification delivery
         notificationCenter?.delegate = self
-
-        // Request standard notification permissions (no critical alerts)
         notificationCenter?.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
 
         createNotificationCategories()
@@ -465,11 +483,11 @@ public class LocationTracker: NSObject {
                     }
                 }
             } catch {
-                // Previously this only NSLog'd — the bridge's addZone() Promise
-                // resolved successfully even though the zone was dropped, and
-                // no onError event fired (BUG-006). Route the rejection through
-                // PolyfenceErrorManager so the bridge surfaces it via the
-                // onError channel and consumers can react.
+                // Route the rejection through PolyfenceErrorManager so the
+                // bridge surfaces the failure via the onError channel — a
+                // plain NSLog would leave the bridge's addZone() Promise
+                // resolving as success even though the zone was dropped,
+                // and consumers would have no signal to react.
                 NSLog("[LocationTracker] Failed to add zone %@: %@", zoneId, "\(error)")
                 PolyfenceErrorManager.shared.reportError(
                     type: "zone_validation_failed",
@@ -699,8 +717,8 @@ public class LocationTracker: NSObject {
 
         // Build enriched event dictionary.
         //
-        // `dwellDurationMs` is populated only for DWELL events (BUG-009).
-        // For ENTER/EXIT/RECOVERY_* events the key is absent from the
+        // `dwellDurationMs` is populated only for DWELL events. For
+        // ENTER/EXIT/RECOVERY_* events the key is absent from the
         // dictionary — bridges surface it as undefined/null which matches
         // the "only meaningful for dwell" semantic. Read against the same
         // zoneEntryTimes map that the dwell-check writes into, so the
@@ -1306,7 +1324,74 @@ extension LocationTracker {
     /// Bridges (RN, Flutter) on iOS should call this rather than
     /// constructing a SmartGpsConfig from the raw map themselves.
     /// Android's path goes through the foreground-service map handler
-    /// which already does the merge internally. BUG-015.
+    /// which already does the merge internally.
+    /**
+     * Full 12-key configuration update, mirroring Kotlin's
+     * `LocationTracker.updateConfigurationFromMap`. Applies a partial
+     * or complete configuration map to every subsystem the composed
+     * `getCurrentConfigurationMap` exposes:
+     *   1. SmartGpsConfig (accuracyProfile, updateStrategy,
+     *      enableDebugLogging, proximitySettings, movementSettings,
+     *      batterySettings) — merged via updateSmartConfigurationFromMap
+     *      so unspecified fields survive.
+     *   2. GeofenceEngine: gpsAccuracyThreshold, dwellSettings,
+     *      clusterSettings.
+     *   3. TrackingScheduler.shared: scheduleSettings.
+     *   4. activitySettings (via setActivityConfig).
+     *   5. disableAlertNotifications (handled inside
+     *      updateSmartConfigurationFromMap).
+     *
+     * Bridges should call this rather than hand-rolling the six extras
+     * extractors — it's the single source of truth that round-trips
+     * cleanly against getCurrentConfigurationMap and matches the
+     * Kotlin implementation's field-for-field coverage.
+     */
+    public func updateConfigurationFromMap(_ configMap: [String: Any]) {
+        updateSmartConfigurationFromMap(configMap)
+
+        // Delegate to the same public setters the bridges have been
+        // calling directly. Route via LocationTracker's wrappers
+        // rather than geofenceEngine directly so the ms→seconds
+        // conversion for dwellThresholdMs stays consistent with the
+        // bridge-side path, and so a future audit only has one
+        // place per subsystem to worry about.
+        if let gpsAccuracyThreshold = configMap["gpsAccuracyThreshold"] as? Double {
+            setGpsAccuracyThreshold(gpsAccuracyThreshold)
+        } else if let gpsAccuracyThresholdInt = configMap["gpsAccuracyThreshold"] as? Int {
+            // MethodChannel / NSNumber bridging may deliver an Int
+            // even when the Kotlin side emits Double; accept both.
+            setGpsAccuracyThreshold(Double(gpsAccuracyThresholdInt))
+        }
+
+        if let dwellSettings = configMap["dwellSettings"] as? [String: Any] {
+            let dwellEnabled = dwellSettings["enabled"] as? Bool ?? true
+            let dwellThresholdMs = dwellSettings["dwellThresholdMs"] as? Int
+                ?? Int(GeofenceEngine.DEFAULT_DWELL_THRESHOLD_SECONDS * 1000)
+            setDwellConfig(enabled: dwellEnabled, thresholdMs: dwellThresholdMs)
+        }
+
+        if let clusterSettings = configMap["clusterSettings"] as? [String: Any] {
+            let clusterEnabled = clusterSettings["enabled"] as? Bool ?? false
+            let activeRadiusMeters = clusterSettings["activeRadiusMeters"] as? Double
+                ?? GeofenceEngine.DEFAULT_CLUSTER_ACTIVE_RADIUS_METERS
+            let refreshDistanceMeters = clusterSettings["refreshDistanceMeters"] as? Double
+                ?? GeofenceEngine.DEFAULT_CLUSTER_REFRESH_DISTANCE_METERS
+            setClusterConfig(
+                enabled: clusterEnabled,
+                activeRadiusMeters: activeRadiusMeters,
+                refreshDistanceMeters: refreshDistanceMeters
+            )
+        }
+
+        if let scheduleSettings = configMap["scheduleSettings"] as? [String: Any] {
+            setScheduleConfig(scheduleSettings)
+        }
+
+        if let activitySettings = configMap["activitySettings"] as? [String: Any] {
+            setActivityConfig(activitySettings)
+        }
+    }
+
     public func updateSmartConfigurationFromMap(_ partial: [String: Any]) {
         // Sparse merge base — omits null nested settings so a partial
         // update doesn't materialise a default-constructed nested
@@ -1317,11 +1402,42 @@ extension LocationTracker {
         let merged = deepMergeMaps(base: currentMap, overrides: partial)
         let mergedConfig = SmartGpsConfigFactory.fromMap(merged)
         updateSmartConfiguration(mergedConfig)
+
+        // Apply `disableAlertNotifications` symmetrically with the read
+        // side: the composed getCurrentConfigurationMap emits it and
+        // resetSmartConfiguration includes it, so the write side must
+        // honour it too — otherwise
+        // `updateConfiguration({disableAlertNotifications: true})`
+        // silently does nothing. Handling it here means both iOS
+        // bridges pick it up without per-bridge wiring.
+        if let disableAlertNotifications = partial["disableAlertNotifications"] as? Bool {
+            self.alertNotificationsEnabled = !disableAlertNotifications
+        }
     }
 
     /// Reset smart GPS configuration to defaults
     public func resetSmartConfiguration() {
+        // Reset the full 12-field configuration surface, not just
+        // SmartGpsConfig. Bridges rely on `resetConfiguration()`
+        // clearing every subsystem the composed
+        // `getCurrentConfigurationMap` exposes — dwell, cluster,
+        // schedule, activity, gpsAccuracyThreshold, and the alert
+        // flag included — so a caller can't invoke reset and still
+        // observe a previously-set override.
         updateSmartConfiguration(SmartGpsConfig())
+        geofenceEngine.setGpsAccuracyThreshold(GeofenceEngine.DEFAULT_GPS_ACCURACY_THRESHOLD)
+        geofenceEngine.setDwellConfig(
+            enabled: true,
+            thresholdSeconds: GeofenceEngine.DEFAULT_DWELL_THRESHOLD_SECONDS
+        )
+        geofenceEngine.setClusterConfig(
+            enabled: false,
+            activeRadiusMeters: GeofenceEngine.DEFAULT_CLUSTER_ACTIVE_RADIUS_METERS,
+            refreshDistanceMeters: GeofenceEngine.DEFAULT_CLUSTER_REFRESH_DISTANCE_METERS
+        )
+        TrackingScheduler.shared.updateConfig(nil)
+        updateActivityRecognition(ActivitySettings())
+        alertNotificationsEnabled = true
     }
 
     /**
@@ -1331,11 +1447,68 @@ extension LocationTracker {
         return smartConfig
     }
 
+    /**
+     * Full 12-key configuration snapshot for the bridge
+     * `getConfiguration()` surface. Composes state from the four
+     * places it actually lives:
+     *   1. `smartConfig` — top-level scalars + proximity / movement /
+     *      battery blocks (via `SmartGpsConfigFactory.toMap`).
+     *   2. `geofenceEngine` — GPS accuracy threshold, dwell settings,
+     *      cluster settings.
+     *   3. `TrackingScheduler.shared` — schedule settings (the shared
+     *      singleton stays populated regardless of the tracker's
+     *      lifecycle).
+     *   4. `activitySettings` on this instance.
+     *
+     * The shape matches the JS `PolyfenceConfiguration` type and
+     * round-trips cleanly through `updateConfigurationFromMap` — all
+     * eleven top-level keys are emitted (never `nil`) so bridges can
+     * cache and re-apply the full configuration surface.
+     */
+    public func getCurrentConfigurationMap() -> [String: Any] {
+        var base = SmartGpsConfigFactory.toMap(smartConfig)
+
+        base["gpsAccuracyThreshold"] = geofenceEngine.getGpsAccuracyThreshold()
+        base["dwellSettings"] = geofenceEngine.getDwellConfigMap()
+        base["clusterSettings"] = geofenceEngine.getClusterConfigMap()
+        base["scheduleSettings"] = TrackingScheduler.shared.getConfigMap()
+
+        // Materialise activity interval overrides (or their compile-
+        // time defaults) instead of stripping nils, so the composed
+        // map always includes the full 8-key activitySettings block.
+        // Same shape-stability contract as the Kotlin composed
+        // accessor; without this, `getConfiguration()` returns a
+        // sparse `activitySettings` whose interval fields silently
+        // drop when the user hasn't overridden them, and TypeScript /
+        // Dart consumers see `undefined` for documented defaults.
+        let activityMap: [String: Any] = [
+            "enabled": activitySettings.enabled,
+            "confidenceThreshold": activitySettings.confidenceThreshold,
+            "debounceSeconds": activitySettings.debounceSeconds,
+            "stillIntervalMs": Int((activitySettings.stillIntervalMs ?? ActivitySettings.DEFAULT_STILL_INTERVAL) * 1000),
+            "walkingIntervalMs": Int((activitySettings.walkingIntervalMs ?? ActivitySettings.DEFAULT_WALKING_INTERVAL) * 1000),
+            "runningIntervalMs": Int((activitySettings.runningIntervalMs ?? ActivitySettings.DEFAULT_RUNNING_INTERVAL) * 1000),
+            "cyclingIntervalMs": Int((activitySettings.cyclingIntervalMs ?? ActivitySettings.DEFAULT_CYCLING_INTERVAL) * 1000),
+            "drivingIntervalMs": Int((activitySettings.drivingIntervalMs ?? ActivitySettings.DEFAULT_DRIVING_INTERVAL) * 1000)
+        ]
+        base["activitySettings"] = activityMap
+
+        // Alert-notifications flag also lives outside SmartGpsConfig
+        // (instance property, mutated via setAlertNotificationsEnabled).
+        // Emit it as `disableAlertNotifications` — the shape the
+        // bridges' TypeScript / Dart configuration types expose — so a
+        // round-trip `getConfiguration()` → cache → user code doesn't
+        // silently reset the caller's original init preference.
+        base["disableAlertNotifications"] = !alertNotificationsEnabled
+
+        return base
+    }
+
     /// Most recent GPS accuracy in metres, or `nil` if no fix has
     /// landed yet. Exposed so bridge `status`-event payloads can
-    /// include the latest known accuracy instead of hardcoding nil.
-    /// BUG-013a (bridges) — paired with BUG-013b which stabilises the
-    /// same field's emission shape in runtime_status.
+    /// include the latest known accuracy instead of hardcoding nil —
+    /// paired with the runtime_status emission which uses the same
+    /// value to stabilise the field across emissions.
     public func getLastKnownAccuracy() -> Double? {
         return currentGpsAccuracy
     }
@@ -1933,7 +2106,7 @@ extension LocationTracker {
         // Always present so every emission carries the same key set —
         // consumers can rely on a stable shape rather than checking for
         // absent vs present keys across emissions. NSNull bridges to
-        // null on the Dart / JavaScript side. BUG-013b.
+        // null on the Dart / JavaScript side.
         if let accuracy = currentGpsAccuracy, accuracy >= 0 {
             status["currentGpsAccuracy"] = accuracy
         } else {
@@ -1970,7 +2143,7 @@ extension LocationTracker {
 ///
 /// Used by `LocationTracker.updateSmartConfigurationFromMap` to
 /// preserve unspecified fields across partial updateConfiguration
-/// calls from iOS bridges. BUG-015.
+/// calls from iOS bridges.
 private func deepMergeMaps(
     base: [String: Any],
     overrides: [String: Any]

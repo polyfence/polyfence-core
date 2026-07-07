@@ -76,6 +76,15 @@ class TrackingScheduler {
     private var checkTimer: Timer?
     private weak var locationTracker: LocationTracker?
 
+    /// Serialises reads/writes of [config] so the composed
+    /// `LocationTracker.getCurrentConfigurationMap()` reader can't
+    /// race a concurrent [updateConfig] and observe a torn state.
+    /// Swift Array is copy-on-write but not atomic; concurrent
+    /// iteration + replacement without a lock can crash on any
+    /// thread — a real hazard once the composed accessor exposes
+    /// `config.timeWindows` to callers on other threads.
+    private let configQueue = DispatchQueue(label: "io.polyfence.TrackingScheduler.config")
+
     // MARK: - Initialization
     private init() {}
 
@@ -89,11 +98,53 @@ class TrackingScheduler {
     }
 
     /**
+     * Read the currently-applied schedule configuration as the same map
+     * shape [updateConfig] accepts. Bridges expose this via
+     * `getConfiguration()`.
+     *
+     * TimeWindow values are serialised recursively so consumers can
+     * round-trip a snapshot back through [updateConfig] without loss.
+     */
+    public func getConfigMap() -> [String: Any] {
+        return configQueue.sync {
+            let windows: [[String: Any]] = config.timeWindows.map { window in
+                return [
+                    "startTime": [
+                        "hour": window.startTime.hour,
+                        "minute": window.startTime.minute
+                    ],
+                    "endTime": [
+                        "hour": window.endTime.hour,
+                        "minute": window.endTime.minute
+                    ],
+                    "daysOfWeek": window.daysOfWeek
+                ]
+            }
+            return [
+                "enabled": config.enabled,
+                "startImmediatelyIfInWindow": config.startImmediatelyIfInWindow,
+                "timeWindows": windows
+            ]
+        }
+    }
+
+    /**
      * Update schedule configuration
      */
     func updateConfig(_ configMap: [String: Any]?) {
-        config = ScheduleConfig.fromMap(configMap)
-        saveConfig()
+        // Wrap the config write AND capture a stable snapshot to
+        // pass to saveConfig, so a concurrent updateConfig on another
+        // thread can't have its assignment win between our write and
+        // our persistence. `saveConfig` must never read `config`
+        // outside the queue — interleaved updateConfig calls would
+        // otherwise persist the wrong config. `isCurrentlyInScheduledWindow`
+        // uses the same snapshot pattern (see the private `snapshot()`
+        // helper) so its reads are equally consistent under contention.
+        let newConfig: ScheduleConfig = configQueue.sync {
+            config = ScheduleConfig.fromMap(configMap)
+            return config
+        }
+        saveConfig(newConfig)
 
         if config.enabled {
             NSLog("[\(Self.TAG)] Schedule enabled with \(config.timeWindows.count) time windows")
@@ -116,10 +167,29 @@ class TrackingScheduler {
     }
 
     /**
+     * Take a serialised snapshot of the current [config]. All public
+     * cross-thread readers should route through this and work against
+     * the returned value type, so an updateConfig() mid-swap on
+     * another thread can't tear the read.
+     *
+     * ScheduleConfig is a value type; each `snapshot()` call returns
+     * an independent copy that's safe to iterate outside the queue.
+     */
+    private func snapshot() -> ScheduleConfig {
+        return configQueue.sync { config }
+    }
+
+    /**
      * Check if current time is within any scheduled window
      */
     func isCurrentlyInScheduledWindow() -> Bool {
-        if !config.enabled || config.timeWindows.isEmpty {
+        // Snapshot once at entry so a concurrent updateConfig() on
+        // another thread can't swap `config.timeWindows` mid-loop
+        // and produce a torn read. The main-run-loop check timer
+        // (line 76: `Timer.scheduledTimer`) is a real cross-thread
+        // reader here.
+        let snapshot = self.snapshot()
+        if !snapshot.enabled || snapshot.timeWindows.isEmpty {
             return true // No schedule = always active
         }
 
@@ -128,7 +198,7 @@ class TrackingScheduler {
         let currentMinutes = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
         let currentDayOfWeek = getDayOfWeekIso(now) // 1=Monday, 7=Sunday
 
-        for window in config.timeWindows {
+        for window in snapshot.timeWindows {
             // Check if today is an allowed day
             if !window.daysOfWeek.isEmpty && !window.daysOfWeek.contains(currentDayOfWeek) {
                 continue
@@ -159,7 +229,7 @@ class TrackingScheduler {
      * Check if scheduling is enabled
      */
     func isEnabled() -> Bool {
-        return config.enabled
+        return snapshot().enabled
     }
 
     /**
@@ -201,7 +271,11 @@ class TrackingScheduler {
             }
         }
 
-        config = ScheduleConfig(enabled: enabled, timeWindows: timeWindows, startImmediatelyIfInWindow: startImmediately)
+        // Same serial-queue write pattern as [updateConfig] — protects
+        // a concurrent [getConfigMap] reader from a torn state during
+        // loadConfig's rehydration.
+        let loadedConfig = ScheduleConfig(enabled: enabled, timeWindows: timeWindows, startImmediatelyIfInWindow: startImmediately)
+        configQueue.sync { config = loadedConfig }
 
         if config.enabled {
             NSLog("[\(Self.TAG)] Loaded schedule config with \(config.timeWindows.count) windows")
@@ -289,16 +363,23 @@ class TrackingScheduler {
     }
 
     /**
-     * Save configuration to UserDefaults
+     * Save configuration to UserDefaults.
+     *
+     * Takes an explicit `ScheduleConfig` snapshot rather than reading
+     * the mutable `config` property, so a concurrent updateConfig on
+     * another thread can't have its assignment persist under this
+     * caller's identity. Peer-review blocker #1. Callers that already
+     * hold a fresh snapshot (updateConfig, loadConfig) pass it in;
+     * older internal sites can pass `snapshot()`.
      */
-    private func saveConfig() {
+    private func saveConfig(_ snapshot: ScheduleConfig) {
         let defaults = UserDefaults.standard
 
-        defaults.set(config.enabled, forKey: Self.PREFS_KEY_SCHEDULE_ENABLED)
-        defaults.set(config.startImmediatelyIfInWindow, forKey: Self.PREFS_KEY_START_IMMEDIATELY)
+        defaults.set(snapshot.enabled, forKey: Self.PREFS_KEY_SCHEDULE_ENABLED)
+        defaults.set(snapshot.startImmediatelyIfInWindow, forKey: Self.PREFS_KEY_START_IMMEDIATELY)
 
         // Serialize time windows
-        let windowsJson = config.timeWindows.map { window in
+        let windowsJson = snapshot.timeWindows.map { window in
             let days = window.daysOfWeek.map { String($0) }.joined(separator: ",")
             return "\(window.startTime.hour),\(window.startTime.minute)|\(window.endTime.hour),\(window.endTime.minute)|\(days)"
         }.joined(separator: ";")
