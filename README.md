@@ -35,7 +35,7 @@ polyfence-core is the mobile surface of the Polyfence geofence layer — the nat
 ### iOS (CocoaPods)
 
 ```ruby
-pod 'PolyfenceCore', '~> 1.0.0'
+pod 'PolyfenceCore', '~> 1.0.10'
 ```
 
 ### iOS (Swift Package Manager)
@@ -43,7 +43,7 @@ pod 'PolyfenceCore', '~> 1.0.0'
 Add to your `Package.swift` dependencies:
 
 ```swift
-.package(url: "https://github.com/polyfence/polyfence-core.git", from: "1.0.0")
+.package(url: "https://github.com/polyfence/polyfence-core.git", from: "1.0.10")
 ```
 
 Or in Xcode: File → Add Package Dependencies → paste the repository URL.
@@ -51,7 +51,7 @@ Or in Xcode: File → Add Package Dependencies → paste the repository URL.
 ### Android (Maven)
 
 ```kotlin
-implementation("io.polyfence:polyfence-core:1.0.0")
+implementation("io.polyfence:polyfence-core:1.0.10")
 ```
 
 ### Who this is for

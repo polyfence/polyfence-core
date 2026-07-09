@@ -1,6 +1,6 @@
 # Contributing to PolyfenceCore
 
-PolyfenceCore is the shared native geofencing engine powering [polyfence-flutter](https://github.com/polyfence/polyfence-flutter) and future platform bridges. Contributions are welcome.
+PolyfenceCore is the shared native geofencing engine powering [polyfence-flutter](https://github.com/polyfence/polyfence-flutter) and [polyfence-react-native](https://github.com/polyfence/polyfence-react-native). Contributions are welcome.
 
 ## Code of Conduct
 
