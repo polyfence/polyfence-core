@@ -316,6 +316,34 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Apply a partial configuration map directly on the running
+         * Service instance. Returns after the apply completes, so an
+         * immediately-following [getCurrentConfigurationMap] observes
+         * the new state — the difference from routing through
+         * [ACTION_UPDATE_CONFIG], which is fire-and-forget and can
+         * race against a read on the same thread.
+         *
+         * When no Service instance is running, falls back to sending
+         * the [ACTION_UPDATE_CONFIG] Intent so [context] can boot the
+         * Service — preserving the start-if-needed contract callers
+         * relied on before this helper existed. In that path apply is
+         * still asynchronous; callers that need read-after-write to be
+         * observable must ensure the Service is running first.
+         */
+        fun applyConfigurationDirect(context: Context, configMap: Map<String, Any>) {
+            val instance = currentInstance
+            if (instance != null) {
+                instance.updateConfigurationFromMap(configMap)
+                return
+            }
+            val intent = Intent(context, LocationTracker::class.java).apply {
+                action = ACTION_UPDATE_CONFIG
+                putExtra("config", HashMap(configMap))
+            }
+            context.startService(intent)
+        }
+
+        /**
          * Update schedule configuration for time-based tracking.
          *
          * Synchronised on the companion so a concurrent

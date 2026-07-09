@@ -12,6 +12,12 @@ checks:
     runs: bash scripts/consistency-podspec-gradle-version.sh
     fix: Bump s.version and the Gradle library version together before tagging dual-platform releases.
 
+  - id: readme-install-snippet-version-match
+    description: README installation snippets (CocoaPods, Swift Package Manager, Maven) match the current library version
+    type: subprocess
+    runs: bash scripts/consistency-readme-install-snippet-version.sh
+    fix: Bump the three install snippets in README.md so the referenced version matches android/build.gradle.kts (the source of truth). Runs as part of every release when the library version changes.
+
   - id: readme-cites-brand-positioning
     description: README carries canonical positioning anchor (brand doc path or geofence-layer phrase)
     type: regex-presence
