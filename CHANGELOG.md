@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.11] - 2026-07-08
+
 ### Added
 - **`LocationTracker.applyConfigurationDirect(context, configMap)` on Android** — bridges should call this instead of dispatching `ACTION_UPDATE_CONFIG` via `startService` when they want the caller's promise to resolve after the mutation lands. Synchronous on the running Service instance so `updateConfiguration({...})` → `getConfiguration()` on the same thread observes the applied state. Falls back to the Intent transport when the Service isn't running; read-after-write is only guaranteed on the direct path.
 
