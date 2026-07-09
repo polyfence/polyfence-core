@@ -137,4 +137,25 @@ class LocationTrackerUpdateConfigTest {
 
         assertEquals(false, LocationTracker.getCurrentConfigurationMap(null)["disableAlertNotifications"])
     }
+
+    // -------- applyConfigurationDirect: read-after-write observable --------
+
+    /**
+     * Applies the update through the public companion helper the RN
+     * and Flutter bridges call. The direct path bypasses the async
+     * ACTION_UPDATE_CONFIG Intent transport that used to make an
+     * immediately-following [LocationTracker.getCurrentConfigurationMap]
+     * return the pre-write value on the caller's thread.
+     */
+    @Test
+    fun `applyConfigurationDirect makes disableAlertNotifications observable on immediate read`() {
+        assertEquals(false, LocationTracker.getCurrentConfigurationMap(null)["disableAlertNotifications"])
+
+        LocationTracker.applyConfigurationDirect(
+            context = tracker,
+            configMap = mapOf("disableAlertNotifications" to true)
+        )
+
+        assertEquals(true, LocationTracker.getCurrentConfigurationMap(null)["disableAlertNotifications"])
+    }
 }
