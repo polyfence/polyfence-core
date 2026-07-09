@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`LocationTracker.applyConfigurationDirect(context, configMap)` on Android** — bridges should call this instead of dispatching `ACTION_UPDATE_CONFIG` via `startService` when they want the caller's promise to resolve after the mutation lands. Synchronous on the running Service instance so `updateConfiguration({...})` → `getConfiguration()` on the same thread observes the applied state. Falls back to the Intent transport when the Service isn't running; read-after-write is only guaranteed on the direct path.
+
 ## [1.0.10] - 2026-07-04
 
 > **Version-label note:** This release was cut as a patch (1.0.10) but contains three behavior contract changes (see **Changed (BREAKING)** below) that would warrant a major bump under strict semver. The patch label reflects the fact that Polyfence is pre-open-source Early Access with no external SDK consumers at cut time. This section was amended after cut to accurately document those breaking behaviors — the 1.0.10 artifact itself is immutable on Maven Central and CocoaPods trunk.
