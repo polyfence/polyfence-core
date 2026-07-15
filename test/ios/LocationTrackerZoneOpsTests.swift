@@ -73,6 +73,23 @@ class LocationTrackerZoneOpsTests: XCTestCase {
         XCTAssertTrue(states.keys.contains("home"))
     }
 
+    func testAddZoneRejectsInvalidZoneDataAndDoesNotPersist() {
+        // Malformed circle: unrecognised type. ZoneData.fromMap throws,
+        // the catch branch dispatches through PolyfenceErrorManager, and
+        // the zone must NOT land in getCurrentZoneStates().
+        let invalidZone: [String: Any] = [
+            "type": "trapezoid",
+            "center": ["latitude": 40.0, "longitude": -74.0],
+            "radius": 100.0
+        ]
+
+        tracker.addZone(zoneId: "bad-zone", zoneName: "Bad", zoneData: invalidZone)
+
+        let states = tracker.getCurrentZoneStates()
+        XCTAssertFalse(states.keys.contains("bad-zone"), "bad-zone must not be in \(states)")
+        XCTAssertEqual(0, states.count)
+    }
+
     // MARK: - removeZone: read-after-write
 
     func testRemoveZoneMakesTheRemovalObservableOnImmediateRead() {

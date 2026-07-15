@@ -1,5 +1,6 @@
 package io.polyfence.core
 
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -19,6 +20,14 @@ import org.robolectric.RobolectricTestRunner
  * state and persistence updated synchronously before return. These
  * tests verify that contract with zero sleep.
  *
+ * `isRunning` is flipped to `true` via reflection in `@Before` to
+ * simulate an active tracking session — the `addZoneById` guard
+ * mirrors the `ACTION_ADD_ZONE` Intent handler and drops zone-add
+ * calls when tracking is stopped. Robolectric cannot cleanly call
+ * `tracker.startTracking()` because that path requires runtime
+ * permissions and `startForeground` ceremony not available in a
+ * pure-JVM Robolectric context.
+ *
  * Fallback-when-no-service behaviour is not covered here: Robolectric
  * builds a Service instance for the whole test, so [currentInstance]
  * is always populated and the direct path is exercised. Fallback is a
@@ -33,10 +42,30 @@ class LocationTrackerZoneOpsTest {
     @Before
     fun setUp() {
         tracker = Robolectric.buildService(LocationTracker::class.java).create().get()
-        // Reset the tracker's engine to a known-empty baseline between
-        // tests — the companion `currentInstance` is process-wide so
-        // any zones left by a previous test would poison the read.
+        setIsRunning(true)
+        // Reset the engine to a known-empty baseline between tests — the
+        // companion `currentInstance` is process-wide so any zones left
+        // by a previous test would poison the read.
         LocationTracker.applyClearZonesDirect(tracker)
+    }
+
+    @After
+    fun tearDown() {
+        LocationTracker.applyClearZonesDirect(tracker)
+        setIsRunning(false)
+        // Release the Service instance's process-wide references
+        // (currentInstance, telemetryAggregator, health handlers) so a
+        // subsequent test method starts from a clean slate.
+        tracker.onDestroy()
+    }
+
+    private fun setIsRunning(value: Boolean) {
+        // Kotlin compiles a companion `var isRunning` with private set
+        // to a static field on the enclosing class (not the Companion
+        // inner class). Grab the backing field, force accessible, set.
+        val field = LocationTracker::class.java.getDeclaredField("isRunning")
+        field.isAccessible = true
+        field.setBoolean(null, value)
     }
 
     private fun circleZone(
@@ -76,6 +105,40 @@ class LocationTrackerZoneOpsTest {
         assertTrue(states.containsKey("office"))
         assertTrue(states.containsKey("gym"))
         assertTrue(states.containsKey("home"))
+    }
+
+    @Test
+    fun `applyAddZoneDirect rejects invalid zone data and does not persist`() {
+        // Malformed circle: unrecognised type. ZoneData.fromMap must throw,
+        // addZoneById's catch branch fires, reportError is dispatched,
+        // and the zone must NOT land in getCurrentZoneStates() or the
+        // engine's persisted set.
+        val invalidZone = mapOf(
+            "type" to "trapezoid",
+            "center" to mapOf("latitude" to 40.0, "longitude" to -74.0),
+            "radius" to 100.0
+        )
+
+        LocationTracker.applyAddZoneDirect(tracker, "bad-zone", "Bad", invalidZone)
+
+        val states = LocationTracker.getCurrentZoneStates()
+        assertFalse("bad-zone must not be in $states", states.containsKey("bad-zone"))
+        assertEquals(0, states.size)
+    }
+
+    @Test
+    fun `applyAddZoneDirect is a no-op when tracking is not active`() {
+        // Guard mirrors the ACTION_ADD_ZONE Intent handler: add-zone is
+        // meaningful only while the Service is actively tracking. Bridges
+        // handle the pre-tracking case with their own local persistence
+        // and never call applyAddZoneDirect in that state — the guard
+        // exists to defend the direct path against the race window between
+        // stopTracking() firing and the Service's onDestroy running.
+        setIsRunning(false)
+
+        LocationTracker.applyAddZoneDirect(tracker, "office", "Office", circleZone())
+
+        assertEquals(0, LocationTracker.getCurrentZoneStates().size)
     }
 
     // -------- applyRemoveZoneDirect: read-after-write --------

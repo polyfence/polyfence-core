@@ -1072,6 +1072,17 @@ class LocationTracker : Service() {
      * tracking is already active.
      */
     private fun addZoneById(zoneId: String, zoneName: String, zoneData: Map<String, Any>) {
+        // Mirror the Intent handler's guard: ADD_ZONE is only meaningful
+        // while tracking is active. Without this, the direct-apply path
+        // would add the zone to the running Service instance when the
+        // Intent path would have dropped it — same call, opposite
+        // outcome, decided by a race window between stopTracking() and
+        // the Service's onDestroy. Bridge callers who add zones outside
+        // of an active tracking session use their own persistence
+        // pre-tracking (see the RN / Flutter bridges' addZone helpers),
+        // so this guard preserves that split.
+        if (!isRunning) return
+
         // Add to engine (skip invalid zones instead of crashing). Route the
         // rejection through PolyfenceErrorManager so the bridge surfaces the
         // failure via the onError channel — a plain Log.w would leave the
