@@ -344,6 +344,77 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Add a zone directly on the running Service instance. Returns
+         * after the engine and persistence are both updated, so an
+         * immediately-following [getCurrentZoneStates] or bridge
+         * `getZoneStates()` observes the addition. Falls back to
+         * [ACTION_ADD_ZONE] Intent dispatch when no Service is running —
+         * preserving the boot-service-then-process contract callers
+         * relied on before this helper existed. Read-after-write is only
+         * guaranteed on the direct path.
+         */
+        fun applyAddZoneDirect(
+            context: Context,
+            zoneId: String,
+            zoneName: String,
+            zoneData: Map<String, Any>
+        ) {
+            val instance = currentInstance
+            if (instance != null) {
+                instance.addZoneById(zoneId, zoneName, zoneData)
+                return
+            }
+            val intent = Intent(context, LocationTracker::class.java).apply {
+                action = ACTION_ADD_ZONE
+                putExtra("zoneId", zoneId)
+                putExtra("zoneName", zoneName)
+                putExtra("zoneData", HashMap(zoneData))
+            }
+            context.startService(intent)
+        }
+
+        /**
+         * Remove a zone directly on the running Service instance.
+         * Returns after the engine's zoneStates map and persistence are
+         * both updated, so an immediately-following [getCurrentZoneStates]
+         * or bridge `getZoneStates()` no longer sees the zone. Falls back
+         * to [ACTION_REMOVE_ZONE] Intent dispatch when no Service is
+         * running. Read-after-write is only guaranteed on the direct path.
+         */
+        fun applyRemoveZoneDirect(context: Context, zoneId: String) {
+            val instance = currentInstance
+            if (instance != null) {
+                instance.removeZoneById(zoneId)
+                return
+            }
+            val intent = Intent(context, LocationTracker::class.java).apply {
+                action = ACTION_REMOVE_ZONE
+                putExtra("zoneId", zoneId)
+            }
+            context.startService(intent)
+        }
+
+        /**
+         * Clear every zone directly on the running Service instance.
+         * Returns after the engine and persistence are both wiped, so an
+         * immediately-following [getCurrentZoneStates] returns empty.
+         * Falls back to [ACTION_CLEAR_ZONES] Intent dispatch when no
+         * Service is running. Read-after-write is only guaranteed on the
+         * direct path.
+         */
+        fun applyClearZonesDirect(context: Context) {
+            val instance = currentInstance
+            if (instance != null) {
+                instance.clearZones()
+                return
+            }
+            val intent = Intent(context, LocationTracker::class.java).apply {
+                action = ACTION_CLEAR_ZONES
+            }
+            context.startService(intent)
+        }
+
+        /**
          * Update schedule configuration for time-based tracking.
          *
          * Synchronised on the companion so a concurrent
@@ -985,6 +1056,32 @@ class LocationTracker : Service() {
             @Suppress("DEPRECATION")
             intent.getSerializableExtra("zoneData") as? Map<String, Any>
         } ?: return
+        addZoneById(zoneId, zoneName, zoneData)
+    }
+
+    /**
+     * Primitive-args entry point for adding a zone to the running service
+     * instance. Extracted from the Intent-based `addZone(intent)` so the
+     * [Companion.applyAddZoneDirect] helper can dispatch the same logic
+     * synchronously without going through `startService`.
+     *
+     * Full behaviour of the Intent path: validate via engine, surface a
+     * `zone_validation_failed` error on rejection, persist on success, kick
+     * deferred GPS start when the first zone lands, and re-reconcile zone
+     * states against the last-known location for cold-start ENTER when
+     * tracking is already active.
+     */
+    private fun addZoneById(zoneId: String, zoneName: String, zoneData: Map<String, Any>) {
+        // Mirror the Intent handler's guard: ADD_ZONE is only meaningful
+        // while tracking is active. Without this, the direct-apply path
+        // would add the zone to the running Service instance when the
+        // Intent path would have dropped it — same call, opposite
+        // outcome, decided by a race window between stopTracking() and
+        // the Service's onDestroy. Bridge callers who add zones outside
+        // of an active tracking session use their own persistence
+        // pre-tracking (see the RN / Flutter bridges' addZone helpers),
+        // so this guard preserves that split.
+        if (!isRunning) return
 
         // Add to engine (skip invalid zones instead of crashing). Route the
         // rejection through PolyfenceErrorManager so the bridge surfaces the
@@ -1035,13 +1132,20 @@ class LocationTracker : Service() {
 
     private fun removeZone(intent: Intent) {
         val zoneId = intent.getStringExtra("zoneId") ?: return
+        removeZoneById(zoneId)
+    }
 
-        // Remove from engine
+    /**
+     * Primitive-args entry point for removing a zone from the running
+     * service instance. Extracted from the Intent-based `removeZone(intent)`
+     * so [Companion.applyRemoveZoneDirect] can dispatch the same removal
+     * synchronously — engine state and persistence updated before this
+     * returns, so a caller's next `getCurrentZoneStates()` observes the
+     * removal.
+     */
+    private fun removeZoneById(zoneId: String) {
         geofenceEngine.removeZone(zoneId)
-
-        // Remove from persistent storage
         zonePersistence.removeZone(zoneId)
-
     }
 
     private fun clearZones() {

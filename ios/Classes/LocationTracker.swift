@@ -445,81 +445,99 @@ public class LocationTracker: NSObject {
     // v1.0.8 after the iOS console flagged it as a termination risk.)
 
     /**
-     * Add zone for monitoring
+     * Add zone for monitoring.
+     *
+     * The engine's `addZone` and `zonePersistence.saveZone` are both
+     * synchronous internally (the engine uses its own `syncQueue.sync`
+     * for the `zoneStates` write), so the whole state mutation runs on
+     * the caller's thread and is observable by an
+     * immediately-following `getCurrentZoneStates()`. The outer
+     * `geofenceQueue.async` wrapper used to hop this off to a background
+     * queue — that returned before the mutation ran and created a race
+     * where the bridge's next `getZoneStates()` still saw the zone
+     * absent (Bug-021). Removed.
+     *
+     * The `DispatchQueue.main.async` block is preserved — it does the
+     * CLLocationManager health check + deferred-GPS-start logic and
+     * MUST run on main because CLLocationManager delegate callbacks
+     * are main-thread only.
      */
     public func addZone(zoneId: String, zoneName: String, zoneData: [String: Any]) {
-        geofenceQueue.async { [weak self] in
-            guard let self = self else { return }
-            do {
-                try self.geofenceEngine.addZone(zoneId: zoneId, zoneName: zoneName, zoneData: zoneData)
-                // Save to persistent storage
-                self.zonePersistence?.saveZone(zoneId: zoneId, zoneName: zoneName, zoneData: zoneData)
+        do {
+            try geofenceEngine.addZone(zoneId: zoneId, zoneName: zoneName, zoneData: zoneData)
+            zonePersistence?.saveZone(zoneId: zoneId, zoneName: zoneName, zoneData: zoneData)
 
-                // Check CLLocationManager health after zone addition
-                DispatchQueue.main.async {
-                    self.checkLocationManagerHealth()
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.checkLocationManagerHealth()
 
-                    // If GPS was deferred, start it now that we have zones
-                    if self.gpsStartDeferred && self.isRunning {
-                        NSLog("[LocationTracker] First zone added - starting deferred GPS")
-                        self.gpsStartDeferred = false
-                        self.startGpsUpdates()
-                    } else if self.isRunning, let cachedLocation = self.locationManager?.location {
-                        // Tracking is already running. This zone was added AFTER
-                        // startGpsUpdates' initial reconcile already ran, so without
-                        // a re-reconcile the new zone never gets its cold-start
-                        // ENTER even if the user is currently inside it (the engine's
-                        // per-tick checkLocation goes through getZonesToCheck which
-                        // may exclude this zone via clustering until it acquires
-                        // INSIDE state, which would never happen).
-                        // Re-reconciling now uses the cached location to evaluate the
-                        // newly-added zone against the user's current position.
-                        // Safe to call repeatedly because reconcileZoneStates' fresh-
-                        // install branch is now idempotent (fires ENTER only on the
-                        // false -> true state transition).
-                        self.geofenceQueue.async {
-                            self.geofenceEngine.reconcileZoneStates(cachedLocation)
-                        }
+                if self.gpsStartDeferred && self.isRunning {
+                    NSLog("[LocationTracker] First zone added - starting deferred GPS")
+                    self.gpsStartDeferred = false
+                    self.startGpsUpdates()
+                } else if self.isRunning, let cachedLocation = self.locationManager?.location {
+                    // Tracking is already running. This zone was added AFTER
+                    // startGpsUpdates' initial reconcile already ran, so without
+                    // a re-reconcile the new zone never gets its cold-start
+                    // ENTER even if the user is currently inside it (the engine's
+                    // per-tick checkLocation goes through getZonesToCheck which
+                    // may exclude this zone via clustering until it acquires
+                    // INSIDE state, which would never happen).
+                    // Re-reconciling now uses the cached location to evaluate the
+                    // newly-added zone against the user's current position.
+                    // Safe to call repeatedly because reconcileZoneStates' fresh-
+                    // install branch is now idempotent (fires ENTER only on the
+                    // false -> true state transition).
+                    self.geofenceQueue.async {
+                        self.geofenceEngine.reconcileZoneStates(cachedLocation)
                     }
                 }
-            } catch {
-                // Route the rejection through PolyfenceErrorManager so the
-                // bridge surfaces the failure via the onError channel — a
-                // plain NSLog would leave the bridge's addZone() Promise
-                // resolving as success even though the zone was dropped,
-                // and consumers would have no signal to react.
-                NSLog("[LocationTracker] Failed to add zone %@: %@", zoneId, "\(error)")
-                PolyfenceErrorManager.shared.reportError(
-                    type: "zone_validation_failed",
-                    message: "Zone \(zoneId) was rejected: \(error.localizedDescription)",
-                    context: [
-                        "platform": "ios",
-                        "zoneId": zoneId,
-                        "zoneName": zoneName,
-                        "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
-                    ]
-                )
             }
+        } catch {
+            // Route the rejection through PolyfenceErrorManager so the
+            // bridge surfaces the failure via the onError channel — a
+            // plain NSLog would leave the bridge's addZone() Promise
+            // resolving as success even though the zone was dropped,
+            // and consumers would have no signal to react.
+            NSLog("[LocationTracker] Failed to add zone %@: %@", zoneId, "\(error)")
+            PolyfenceErrorManager.shared.reportError(
+                type: "zone_validation_failed",
+                message: "Zone \(zoneId) was rejected: \(error.localizedDescription)",
+                context: [
+                    "platform": "ios",
+                    "zoneId": zoneId,
+                    "zoneName": zoneName,
+                    "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
+                ]
+            )
         }
     }
 
     /**
-     * Remove zone from monitoring
+     * Remove zone from monitoring.
+     *
+     * The engine's `removeZone` uses `syncQueue.sync` internally for the
+     * `zoneStates` write, so the removal is synchronous end-to-end and
+     * observable by an immediately-following `getCurrentZoneStates()`.
+     * The outer `geofenceQueue.async` wrapper used to defer the engine
+     * call to a background queue and returned before it ran (Bug-021).
+     * Removed.
      */
     public func removeZone(zoneId: String) {
-        geofenceQueue.async { [weak self] in
-            self?.geofenceEngine.removeZone(zoneId: zoneId)
-        }
+        geofenceEngine.removeZone(zoneId: zoneId)
         zonePersistence?.removeZone(zoneId: zoneId)
     }
 
     /**
-     * Clear all zones
+     * Clear all zones.
+     *
+     * Same rationale as `removeZone` — the engine's `clearAllZones`
+     * uses `syncQueue.sync`, so the wipe is synchronous and observable
+     * by an immediately-following `getCurrentZoneStates()`. Outer
+     * `geofenceQueue.async` wrapper removed (Bug-021).
      */
     public func clearAllZones() {
-        geofenceQueue.async { [weak self] in
-            self?.geofenceEngine.clearAllZones()
-        }
+        geofenceEngine.clearAllZones()
         zonePersistence?.clearAllZones()
     }
 
