@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.12] - 2026-07-15
+
+### Added
+- **`LocationTracker.applyAddZoneDirect(context, zoneId, zoneName, zoneData)` / `applyRemoveZoneDirect(context, zoneId)` / `applyClearZonesDirect(context)` on Android** — three companion helpers on the running-Service pattern established by `applyConfigurationDirect` in 1.0.11. Bridges should call these instead of dispatching `ACTION_ADD_ZONE` / `ACTION_REMOVE_ZONE` / `ACTION_CLEAR_ZONES` via `startService` when they want the caller's promise to resolve after the engine and persistence are both updated. Direct-apply routes are synchronous on the running Service instance so `getCurrentZoneStates()` immediately after observes the change; falls back to the Intent transport when the Service isn't running (read-after-write only guaranteed on the direct path). Bug-021.
+
+### Changed
+- **iOS `LocationTracker.addZone` / `removeZone` / `clearAllZones` no longer wrap the engine call in `geofenceQueue.async`.** The `GeofenceEngine` methods already use their own `syncQueue.sync` internally for the `zoneStates` write, so the outer wrapper was redundant — it dispatched the mutation onto a background queue and returned before it ran, so an immediately-following `getCurrentZoneStates()` could still see the old state. `addZone` retains its `DispatchQueue.main.async` block for the CLLocationManager health-check / deferred-GPS-start / reconcile logic (those must run on main). Bug-021.
+
 ## [1.0.11] - 2026-07-08
 
 ### Added
