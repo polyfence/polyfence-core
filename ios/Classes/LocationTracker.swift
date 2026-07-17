@@ -817,12 +817,29 @@ public class LocationTracker: NSObject {
     private func showGeofenceNotification(eventType: String, zoneId: String, zoneName: String) {
         guard isRunning else { return }
         guard alertNotificationsEnabled else { return }  // Respect disableAlertNotifications config
-        let title = eventType == "ENTER" ? "Entered Zone" : "Exited Zone"
-        let message = zoneName // Use zone name instead of ID
+        // Zone name leads the title so the alert names the place, not our
+        // category. DWELL and RECOVERY_ENTER are inside-states — only a true
+        // EXIT / RECOVERY_EXIT reads as leaving.
+        let title: String
+        let isInside: Bool
+        switch eventType {
+        case "ENTER", GeofenceEngine.EVENT_RECOVERY_ENTER:
+            title = "Entered \(zoneName)"
+            isInside = true
+        case GeofenceEngine.EVENT_DWELL:
+            title = "Dwelling in \(zoneName)"
+            isInside = true
+        default:  // EXIT, RECOVERY_EXIT
+            title = "Exited \(zoneName)"
+            isInside = false
+        }
 
         let content = UNMutableNotificationContent()
         content.title = title
-        content.body = message
+        // Body carries time-in-zone for DWELL only; ENTER/EXIT stay single-line.
+        if eventType == GeofenceEngine.EVENT_DWELL, let dwellBody = formatDwellBody(zoneId) {
+            content.body = dwellBody
+        }
 
         // Standardized notification configuration
         content.sound = .default  // Standard default sound
@@ -843,7 +860,7 @@ public class LocationTracker: NSObject {
         ]
 
         // Use appropriate category
-        content.categoryIdentifier = eventType == "ENTER" ? "POLYFENCE_ZONE_ENTRY" : "POLYFENCE_ZONE_EXIT"
+        content.categoryIdentifier = isInside ? "POLYFENCE_ZONE_ENTRY" : "POLYFENCE_ZONE_EXIT"
 
         // Immediate local delivery (trigger = nil)
         let request = UNNotificationRequest(
@@ -857,6 +874,20 @@ public class LocationTracker: NSObject {
                 // Notification delivery completed
             }
         }
+    }
+
+    /**
+     * Human-readable "time in zone" line for DWELL alerts, e.g. "Here 12 min".
+     * Returns nil when the engine has no dwell start recorded for the zone.
+     */
+    private func formatDwellBody(_ zoneId: String) -> String? {
+        guard let ms = geofenceEngine.getDwellDurationMs(zoneId) else { return nil }
+        let totalMinutes = Int(ms / 60_000)
+        if totalMinutes < 1 { return "Here under a minute" }
+        if totalMinutes < 60 { return "Here \(totalMinutes) min" }
+        let h = totalMinutes / 60
+        let m = totalMinutes % 60
+        return m == 0 ? "Here \(h)h" : "Here \(h)h \(m)min"
     }
 
     /**
