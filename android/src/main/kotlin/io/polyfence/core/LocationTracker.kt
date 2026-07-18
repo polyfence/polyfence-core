@@ -601,6 +601,12 @@ class LocationTracker : Service() {
     // > 0 the combined health check emits SIGNAL_LOST after this long with no
     // valid fix while inside a zone.
     private var gpsStalenessTimeoutMs: Long = 0L
+
+    // Time of the last VALID fix (passes isValidFix), distinct from
+    // lastLocationTime which is bumped by every fix including coarse ones the
+    // engine rejects. The staleness watchdog keys off this so it still fires
+    // when degraded fixes keep arriving (the indoor / at-altitude case).
+    private var lastValidFixTime: Long = 0L
     private var healthScoreTickCount = 0
     private val healthScoreEmitEveryNTicks = 5  // Emit health score every 5 ticks = 5 minutes
 
@@ -953,14 +959,17 @@ class LocationTracker : Service() {
                     }
                 }
 
-                // Staleness watchdog: no valid fix for the configured timeout
-                // while inside a zone → mark those sessions signal-lost. Runs on
-                // this timer so it fires even when the OS delivers no locations
-                // at all (FusedLocation starvation / suspension) — the location
-                // callback can't self-trigger in that case. Idempotent per zone
-                // (the engine dedupes), so re-firing each tick is harmless.
-                if (gpsStalenessTimeoutMs > 0 && lastLocationTime > 0 &&
-                    timeSinceLastLocation > gpsStalenessTimeoutMs) {
+                // Staleness watchdog: no VALID fix for the configured timeout
+                // while inside a zone → mark those sessions signal-lost. Keys off
+                // lastValidFixTime (not lastLocationTime), so coarse fixes the
+                // engine rejects don't keep it alive — the indoor/at-altitude
+                // repro. Runs on this timer so it fires even when the OS delivers
+                // no locations at all (FusedLocation starvation / suspension).
+                // Idempotent per zone (the engine dedupes), so re-firing each
+                // tick is harmless.
+                val timeSinceValidFix = currentTime - lastValidFixTime
+                if (gpsStalenessTimeoutMs > 0 && lastValidFixTime > 0 &&
+                    timeSinceValidFix > gpsStalenessTimeoutMs) {
                     geofenceEngine.forceSignalLost(lastKnownLocation)
                 }
 
@@ -2390,6 +2399,12 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         }
 
         lastLocationTime = currentTime
+        // Stamp the last VALID fix separately — coarse fixes the engine rejects
+        // must not reset the staleness watchdog, or it never fires while degraded
+        // fixes keep arriving. Both location callbacks funnel through here.
+        if (geofenceEngine.isValidFix(location)) {
+            lastValidFixTime = currentTime
+        }
     }
 
     /**

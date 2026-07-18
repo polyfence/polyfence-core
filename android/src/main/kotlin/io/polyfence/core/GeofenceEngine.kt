@@ -924,6 +924,13 @@ fun getZoneName(zoneId: String): String? {
      * Uses configurable GPS accuracy threshold (default: 100m)
      * This ensures platform parity with iOS
      */
+    /**
+     * Public validity check for the tracker's staleness watchdog — same rule as
+     * the internal ENTER gate, so "time since last valid fix" upstream means the
+     * same thing the engine would accept for a zone transition.
+     */
+    fun isValidFix(location: Location): Boolean = isValidLocation(location)
+
     private fun isValidLocation(location: Location): Boolean {
         return location.hasAccuracy() &&
                location.accuracy > 0f &&
