@@ -223,6 +223,7 @@ class GeofenceEngine {
         zoneConfidence.remove(zoneId)
         zoneEntryTimes.remove(zoneId)
         dwellEventsFired.remove(zoneId)
+        signalLostZones.remove(zoneId)
 
         // Remove persisted state
         zonePersistence?.removeZoneState(zoneId)
@@ -237,6 +238,7 @@ class GeofenceEngine {
         zoneConfidence.clear()
         zoneEntryTimes.clear()
         dwellEventsFired.clear()
+        signalLostZones.clear()
 
         // Clear persisted states
         zonePersistence?.clearAllZoneStates()
@@ -328,13 +330,18 @@ fun getZoneName(zoneId: String): String? {
     private fun resolveSignalLost(location: Location) {
         if (signalLostZones.isEmpty()) return
         val zones = getZonesToCheck()
-        signalLostZones.forEach { zoneId ->
+        // Snapshot to avoid concurrent modification while removing. Only zones
+        // still geometrically inside are resolved here (SIGNAL_RESTORED); zones
+        // now outside are LEFT flagged so the normal EXIT path resolves them —
+        // that path removes the flag (see the EXIT sites), which prevents a
+        // premature clear and a SIGNAL_RESTORED being emitted after an EXIT.
+        signalLostZones.toList().forEach { zoneId ->
             val zone = zones[zoneId]
             if (zone != null && zone.contains(location)) {
                 eventCallback?.invoke(zoneId, EVENT_SIGNAL_RESTORED, location, 0.0)
+                signalLostZones.remove(zoneId)
             }
         }
-        signalLostZones.clear()
     }
 
     /**
@@ -711,6 +718,7 @@ fun getZoneName(zoneId: String): String? {
                 trackEventTelemetry(zoneId, "EXIT")
                 eventCallback?.invoke(zoneId, "EXIT", location, 0.0)
                 handleDwellStateChange(zoneId, false, location, System.nanoTime())
+                signalLostZones.remove(zoneId)
             }
         }
     }
@@ -777,6 +785,9 @@ fun getZoneName(zoneId: String): String? {
             trackEventTelemetry(zoneId, eventType)
             eventCallback?.invoke(zoneId, eventType, location, detectionTimeMs)
 
+            // An EXIT resolves any outstanding signal-lost flag for this zone.
+            if (!isInside) signalLostZones.remove(zoneId)
+
             // Handle dwell tracking on state change
             handleDwellStateChange(zoneId, isInside, location, checkStartTime)
 
@@ -824,6 +835,9 @@ fun getZoneName(zoneId: String): String? {
             val eventType = if (isInside) "ENTER" else "EXIT"
             trackEventTelemetry(zoneId, eventType)
             eventCallback?.invoke(zoneId, eventType, location, detectionTimeMs)
+
+            // An EXIT resolves any outstanding signal-lost flag for this zone.
+            if (!isInside) signalLostZones.remove(zoneId)
 
             // Handle dwell tracking on state change
             handleDwellStateChange(zoneId, isInside, location, checkStartTime)
@@ -912,6 +926,7 @@ fun getZoneName(zoneId: String): String? {
      */
     private fun isValidLocation(location: Location): Boolean {
         return location.hasAccuracy() &&
+               location.accuracy > 0f &&
                location.accuracy < gpsAccuracyThreshold &&
                location.latitude != 0.0 &&
                location.longitude != 0.0
