@@ -728,6 +728,148 @@ class GeofenceEngineTest {
     // Helper Functions
     // ========================================================================
 
+    // ========================================================================
+    // Degraded-GPS handling: Option D (easy-exit) + signal-lost / restored
+    // ========================================================================
+
+    private val circleZoneData = mapOf(
+        "type" to "circle",
+        "center" to mapOf("latitude" to 1.0, "longitude" to 1.0),
+        "radius" to 100.0
+    )
+
+    private fun exits() = events.count { it.second == "EXIT" }
+    private fun enters() = events.count { it.second == "ENTER" }
+    private fun signalLost() = events.count { it.second == "SIGNAL_LOST" }
+    private fun signalRestored() = events.count { it.second == "SIGNAL_RESTORED" }
+
+    @Test
+    fun `option D off - degraded fix outside does not exit`() {
+        engine.setValidationConfig(requireConfirmation = false)
+        engine.addZone("z", "Z", circleZoneData)
+        engine.checkLocation(createLocation(1.0, 1.0,10.0f)) // ENTER
+        events.clear()
+        // degradedExitEnabled defaults to false — coarse fix is discarded
+        engine.checkLocation(createLocation(1.01, 1.0,150.0f))
+        assertEquals("no exit when degraded-exit is off", 0, exits())
+        assertTrue("still inside", engine.getCurrentZoneStates()["z"] == true)
+    }
+
+    @Test
+    fun `option D on - degraded fix confidently outside exits`() {
+        engine.setValidationConfig(requireConfirmation = false)
+        engine.setDegradedExitEnabled(true)
+        engine.addZone("z", "Z", circleZoneData)
+        engine.checkLocation(createLocation(1.0, 1.0,10.0f)) // ENTER
+        events.clear()
+        // ~1113m out; radius 100 + accuracy 150 = 250 buffer -> confidently outside
+        engine.checkLocation(createLocation(1.01, 1.0,150.0f))
+        assertEquals("degraded confident-outside fires EXIT", 1, exits())
+    }
+
+    @Test
+    fun `option D on - degraded fix near edge does not exit`() {
+        engine.setValidationConfig(requireConfirmation = false)
+        engine.setDegradedExitEnabled(true)
+        engine.addZone("z", "Z", circleZoneData)
+        engine.checkLocation(createLocation(1.0, 1.0,10.0f)) // ENTER
+        events.clear()
+        // ~167m from centre; within radius(100)+accuracy(150) uncertainty
+        engine.checkLocation(createLocation(1.0015, 1.0,150.0f))
+        assertEquals("noisy near-edge degraded fix must not exit", 0, exits())
+    }
+
+    @Test
+    fun `option D on - degraded fix inside does not enter`() {
+        engine.setValidationConfig(requireConfirmation = false)
+        engine.setDegradedExitEnabled(true)
+        engine.addZone("z", "Z", circleZoneData)
+        // Never entered; a coarse fix inside must not ENTER (strict-to-enter).
+        engine.checkLocation(createLocation(1.0, 1.0,150.0f))
+        assertEquals("degraded fix must not ENTER", 0, enters())
+    }
+
+    @Test
+    fun `option D on - polygon near edge does not exit`() {
+        engine.setValidationConfig(requireConfirmation = false)
+        engine.setDegradedExitEnabled(true)
+        val poly = mapOf(
+            "type" to "polygon",
+            "polygon" to listOf(
+                mapOf("latitude" to 0.0, "longitude" to 0.0),
+                mapOf("latitude" to 0.01, "longitude" to 0.0),
+                mapOf("latitude" to 0.01, "longitude" to 0.01),
+                mapOf("latitude" to 0.0, "longitude" to 0.01)
+            )
+        )
+        engine.addZone("p", "P", poly)
+        engine.checkLocation(createLocation(0.005, 0.005, 10.0f)) // inside -> ENTER
+        events.clear()
+        // ~55m west of the west edge; accuracy 150 -> within uncertainty
+        engine.checkLocation(createLocation(0.005, -0.0005, 150.0f))
+        assertEquals("noisy near-edge degraded fix must not exit polygon", 0, exits())
+    }
+
+    @Test
+    fun `accuracy at threshold rejected, just under accepted`() {
+        engine.setValidationConfig(requireConfirmation = false)
+        engine.addZone("z", "Z", circleZoneData)
+        engine.checkLocation(createLocation(1.0, 1.0,100.0f)) // == threshold -> rejected
+        assertEquals("accuracy == threshold rejected", 0, enters())
+        engine.checkLocation(createLocation(1.0, 1.0,99.0f)) // < threshold -> accepted
+        assertEquals("accuracy < threshold accepted", 1, enters())
+    }
+
+    @Test
+    fun `signal lost keeps state and dedupes`() {
+        engine.setValidationConfig(requireConfirmation = false)
+        engine.addZone("z", "Z", circleZoneData)
+        engine.checkLocation(createLocation(1.0, 1.0,10.0f)) // ENTER
+        events.clear()
+        engine.forceSignalLost(createLocation(1.0, 1.0,10.0f))
+        assertEquals("one SIGNAL_LOST", 1, signalLost())
+        assertTrue("state unchanged (still inside)", engine.getCurrentZoneStates()["z"] == true)
+        engine.forceSignalLost(createLocation(1.0, 1.0,10.0f))
+        assertEquals("no duplicate SIGNAL_LOST", 1, signalLost())
+    }
+
+    @Test
+    fun `signal restored when still inside on next valid fix`() {
+        engine.setValidationConfig(requireConfirmation = false)
+        engine.addZone("z", "Z", circleZoneData)
+        engine.checkLocation(createLocation(1.0, 1.0,10.0f)) // ENTER
+        engine.forceSignalLost(createLocation(1.0, 1.0,10.0f))
+        events.clear()
+        engine.checkLocation(createLocation(1.0, 1.0,10.0f)) // still inside
+        assertEquals("SIGNAL_RESTORED fired", 1, signalRestored())
+        assertEquals("no EXIT", 0, exits())
+    }
+
+    @Test
+    fun `exit not restored when outside on next valid fix`() {
+        engine.setValidationConfig(requireConfirmation = false)
+        engine.addZone("z", "Z", circleZoneData)
+        engine.checkLocation(createLocation(1.0, 1.0,10.0f)) // ENTER
+        engine.forceSignalLost(createLocation(1.0, 1.0,10.0f))
+        events.clear()
+        engine.checkLocation(createLocation(1.01, 1.0,10.0f)) // valid, outside
+        assertEquals("EXIT fired", 1, exits())
+        assertEquals("no SIGNAL_RESTORED after exit", 0, signalRestored())
+    }
+
+    @Test
+    fun `cross-path - degraded exit then inside fix does not restore`() {
+        engine.setValidationConfig(requireConfirmation = false)
+        engine.setDegradedExitEnabled(true)
+        engine.addZone("z", "Z", circleZoneData)
+        engine.checkLocation(createLocation(1.0, 1.0,10.0f)) // ENTER
+        engine.forceSignalLost(createLocation(1.0, 1.0,10.0f)) // flagged
+        engine.checkLocation(createLocation(1.01, 1.0,150.0f)) // degraded confident-outside -> EXIT, clears flag
+        events.clear()
+        engine.checkLocation(createLocation(1.0, 1.0,10.0f)) // valid inside -> ENTER, but must NOT restore
+        assertEquals("no SIGNAL_RESTORED after a degraded EXIT", 0, signalRestored())
+    }
+
     private fun createLocation(lat: Double, lng: Double, accuracy: Float = 10.0f): Location {
         val location = mock(Location::class.java)
         `when`(location.latitude).thenReturn(lat)
