@@ -16,6 +16,12 @@ class GeofenceEngine {
     static let EVENT_RECOVERY_ENTER = "RECOVERY_ENTER"
     static let EVENT_RECOVERY_EXIT = "RECOVERY_EXIT"
 
+    // Degraded-GPS handling. ENTER always needs a precise fix; these two cover
+    // leaving a zone on a degraded fix (Option D) and total signal loss
+    // (emitted from the LocationTracker staleness watchdog).
+    static let EVENT_SIGNAL_LOST = "SIGNAL_LOST"
+    static let EVENT_SIGNAL_RESTORED = "SIGNAL_RESTORED"
+
     // Dwell event type
     static let EVENT_DWELL = "DWELL"
 
@@ -55,6 +61,11 @@ class GeofenceEngine {
 
     // GPS accuracy threshold in meters (default: 100m to match Android)
     private var gpsAccuracyThreshold: Double = 100.0
+
+    // Degraded-GPS handling (Option D + signal-lost). Off by default.
+    private var degradedExitEnabled: Bool = false
+    // Zones currently flagged SIGNAL_LOST (accessed under syncQueue).
+    private var signalLostZones: Set<String> = []
 
     // Zone clustering configuration
     private var clusteringEnabled: Bool = false
@@ -122,6 +133,23 @@ class GeofenceEngine {
      */
     func setGpsAccuracyThreshold(_ threshold: Double) {
         self.gpsAccuracyThreshold = threshold
+    }
+
+    /**
+     * Option D — degraded-GPS exit handling. When enabled, a fix worse than the
+     * ENTER threshold can still fire EXIT for a zone already inside, but only when
+     * the fix is confidently outside its own accuracy radius. Off by default.
+     */
+    func setDegradedExitEnabled(_ enabled: Bool) {
+        self.degradedExitEnabled = enabled
+    }
+
+    /**
+     * Public validity check for the tracker's staleness watchdog — same rule as
+     * the internal ENTER gate.
+     */
+    func isValidFix(_ location: CLLocation) -> Bool {
+        return isValidLocation(location)
     }
 
     /**
@@ -459,6 +487,7 @@ class GeofenceEngine {
             self.zoneConfidence.removeValue(forKey: zoneId)
             self.zoneEntryTimes.removeValue(forKey: zoneId)
             self.dwellEventsFired.removeValue(forKey: zoneId)
+            self.signalLostZones.remove(zoneId)
         }
 
         // Remove persisted state
@@ -475,6 +504,7 @@ class GeofenceEngine {
             self.zoneConfidence.removeAll()
             self.zoneEntryTimes.removeAll()
             self.dwellEventsFired.removeAll()
+            self.signalLostZones.removeAll()
         }
 
         // Clear persisted states
@@ -515,7 +545,14 @@ class GeofenceEngine {
      * Enhanced check location (ported from Android)
      */
     func checkLocation(_ location: CLLocation) {
-        guard isValidLocation(location) else { return }
+        guard isValidLocation(location) else {
+            // Option D: too coarse to ENTER, but a fix with real coordinates can
+            // still confirm we've LEFT a zone we're already inside.
+            if degradedExitEnabled && hasUsableCoordinates(location) {
+                processDegradedExits(location)
+            }
+            return
+        }
 
         // Handle clustering: refresh active zones if needed
         if clusteringEnabled {
@@ -566,7 +603,72 @@ class GeofenceEngine {
 
         }
 
+        // A valid fix arrived — resolve any outstanding signal-lost flags.
+        resolveSignalLost(location)
+
         _ = CFAbsoluteTimeGetCurrent() - overallStartTime
+    }
+
+    private func hasUsableCoordinates(_ location: CLLocation) -> Bool {
+        return location.coordinate.latitude != 0.0 && location.coordinate.longitude != 0.0
+    }
+
+    /**
+     * Option D exit pass for a degraded fix: fire EXIT only for zones the device
+     * is currently inside AND now confidently outside of (beyond the fix's own
+     * accuracy radius). No ENTERs, no dwell promotion, no false exits from noise.
+     */
+    private func processDegradedExits(_ location: CLLocation) {
+        let accuracy = location.horizontalAccuracy
+        guard accuracy > 0 else { return }
+        let snapshot: [(String, ZoneData)] = syncQueue.sync {
+            self.getZonesToCheck().map { ($0.key, $0.value) }
+        }
+        for (zoneId, zone) in snapshot {
+            let currentState = syncQueue.sync { self.zoneStates[zoneId] ?? false }
+            if currentState && zone.isConfidentlyOutside(location, accuracyBuffer: accuracy) {
+                syncQueue.sync { self.zoneStates[zoneId] = false }
+                persistZoneState(zoneId: zoneId, isInside: false)
+                trackEventTelemetry(zoneId: zoneId, eventType: "EXIT")
+                eventCallback?(zoneId, "EXIT", location, 0.0)
+                handleDwellStateChange(zoneId: zoneId, isInside: false, location: location, checkStartTime: CFAbsoluteTimeGetCurrent())
+                _ = syncQueue.sync { self.signalLostZones.remove(zoneId) }
+            }
+        }
+    }
+
+    /**
+     * Called by the LocationTracker staleness watchdog: emit SIGNAL_LOST once per
+     * held zone WITHOUT changing state, so the session is marked uncertain (not
+     * falsely exited); the next valid fix resolves it. Needs a last-known location.
+     */
+    func forceSignalLost(_ lastKnownLocation: CLLocation?) {
+        guard let location = lastKnownLocation else { return }
+        let held: [String] = syncQueue.sync { self.zoneStates.filter { $0.value }.map { $0.key } }
+        for zoneId in held {
+            let added = syncQueue.sync { self.signalLostZones.insert(zoneId).inserted }
+            if added {
+                eventCallback?(zoneId, GeofenceEngine.EVENT_SIGNAL_LOST, location, 0.0)
+            }
+        }
+    }
+
+    /**
+     * Resolve outstanding SIGNAL_LOST flags on a fresh valid fix: a zone still
+     * geometrically inside fires SIGNAL_RESTORED; a zone now outside is left to
+     * the normal EXIT path (which clears its flag). No premature clear, no
+     * SIGNAL_RESTORED after an EXIT.
+     */
+    private func resolveSignalLost(_ location: CLLocation) {
+        let flagged: [String] = syncQueue.sync { Array(self.signalLostZones) }
+        if flagged.isEmpty { return }
+        let zones: [String: ZoneData] = syncQueue.sync { self.getZonesToCheck() }
+        for zoneId in flagged {
+            if let zone = zones[zoneId], zone.contains(location) {
+                eventCallback?(zoneId, GeofenceEngine.EVENT_SIGNAL_RESTORED, location, 0.0)
+                _ = syncQueue.sync { self.signalLostZones.remove(zoneId) }
+            }
+        }
     }
 
     // MARK: - Private Methods
@@ -633,6 +735,9 @@ class GeofenceEngine {
             trackEventTelemetry(zoneId: zoneId, eventType: eventType)
             eventCallback?(zoneId, eventType, location, detectionTimeMs)
 
+            // An EXIT resolves any outstanding signal-lost flag for this zone.
+            if !isInside { _ = syncQueue.sync { self.signalLostZones.remove(zoneId) } }
+
             // Handle dwell tracking on state change
             handleDwellStateChange(zoneId: zoneId, isInside: isInside, location: location, checkStartTime: checkStartTime)
 
@@ -680,6 +785,9 @@ class GeofenceEngine {
             let eventType = isInside ? "ENTER" : "EXIT"
             trackEventTelemetry(zoneId: zoneId, eventType: eventType)
             eventCallback?(zoneId, eventType, location, detectionTimeMs)
+
+            // An EXIT resolves any outstanding signal-lost flag for this zone.
+            if !isInside { _ = syncQueue.sync { self.signalLostZones.remove(zoneId) } }
 
             // Handle dwell tracking on state change
             handleDwellStateChange(zoneId: zoneId, isInside: isInside, location: location, checkStartTime: checkStartTime)
@@ -888,7 +996,10 @@ class GeofenceEngine {
      * This ensures platform parity with Android
      */
     private func isValidLocation(_ location: CLLocation) -> Bool {
-        return location.horizontalAccuracy > 0 && location.horizontalAccuracy < gpsAccuracyThreshold
+        return location.horizontalAccuracy > 0 &&
+               location.horizontalAccuracy < gpsAccuracyThreshold &&
+               location.coordinate.latitude != 0.0 &&
+               location.coordinate.longitude != 0.0
     }
 
     /**
@@ -990,6 +1101,32 @@ class ZoneData {
         case .polygon:
             guard let polygon = polygon else { return false }
             return GeoMath.isPointInPolygon(point: location.coordinate, polygon: polygon)
+        }
+    }
+
+    /**
+     * True when the location is outside this zone by more than the given accuracy
+     * buffer — even allowing for GPS uncertainty, the device is confidently beyond
+     * the boundary. Used by the degraded-fix EXIT path so a noisy low-accuracy fix
+     * near the edge cannot trigger a false exit.
+     */
+    func isConfidentlyOutside(_ location: CLLocation, accuracyBuffer: Double) -> Bool {
+        switch type {
+        case .circle:
+            guard let center = center, let radius = radius else { return false }
+            let distance = GeoMath.haversineDistance(point1: center, point2: location.coordinate)
+            return distance > radius + accuracyBuffer
+        case .polygon:
+            guard let polygon = polygon, polygon.count >= 3 else { return false }
+            if GeoMath.isPointInPolygon(point: location.coordinate, polygon: polygon) { return false }
+            var nearest = Double.greatestFiniteMagnitude
+            for i in 0..<polygon.count {
+                let a = polygon[i]
+                let b = polygon[(i + 1) % polygon.count]
+                let d = GeoMath.pointToSegmentDistance(p: location.coordinate, a: a, b: b)
+                if d < nearest { nearest = d }
+            }
+            return nearest > accuracyBuffer
         }
     }
 
