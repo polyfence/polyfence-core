@@ -596,6 +596,11 @@ class LocationTracker : Service() {
     // Combined health check runs every 60s instead of separate 30s GPS + 60s permission checks
     private var combinedHealthCheckHandler: android.os.Handler? = null
     private val combinedHealthCheckInterval = 60_000L  // 60 seconds (unified interval)
+
+    // Degraded-GPS staleness timeout (ms); 0 = disabled. Set from config; when
+    // > 0 the combined health check emits SIGNAL_LOST after this long with no
+    // valid fix while inside a zone.
+    private var gpsStalenessTimeoutMs: Long = 0L
     private var healthScoreTickCount = 0
     private val healthScoreEmitEveryNTicks = 5  // Emit health score every 5 ticks = 5 minutes
 
@@ -665,6 +670,11 @@ class LocationTracker : Service() {
 
         // Set GPS accuracy threshold from config (default: 100m for platform parity)
         geofenceEngine.setGpsAccuracyThreshold(config.gpsAccuracyThreshold)
+
+        // Degraded-GPS handling (Option D + signal-lost). Single knob: > 0 ms
+        // enables degraded-exit and arms the staleness watchdog below.
+        gpsStalenessTimeoutMs = config.gpsStalenessTimeoutMs
+        geofenceEngine.setDegradedExitEnabled(gpsStalenessTimeoutMs > 0)
 
         // Setup location callback with recovery
         setupLocationCallbackWithRecovery()
@@ -941,6 +951,17 @@ class LocationTracker : Service() {
                         Log.w(TAG, "Triggering GPS recovery")
                         errorRecovery.handleGpsFailure()
                     }
+                }
+
+                // Staleness watchdog: no valid fix for the configured timeout
+                // while inside a zone → mark those sessions signal-lost. Runs on
+                // this timer so it fires even when the OS delivers no locations
+                // at all (FusedLocation starvation / suspension) — the location
+                // callback can't self-trigger in that case. Idempotent per zone
+                // (the engine dedupes), so re-firing each tick is harmless.
+                if (gpsStalenessTimeoutMs > 0 && lastLocationTime > 0 &&
+                    timeSinceLastLocation > gpsStalenessTimeoutMs) {
+                    geofenceEngine.forceSignalLost(lastKnownLocation)
                 }
 
                 // === System Health Snapshot (was separate 12min timer, now piggybacks) ===
@@ -1810,6 +1831,15 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 geofenceEngine.setGpsAccuracyThreshold(gpsAccuracyThreshold.toFloat())
                 config.gpsAccuracyThreshold = gpsAccuracyThreshold.toFloat()
                 Log.d(TAG, "GPS accuracy threshold updated to ${gpsAccuracyThreshold}m")
+            }
+
+            // Degraded-GPS staleness timeout (0 = off). Gates Option D + signal-lost.
+            val stalenessTimeout = configMap["gpsStalenessTimeoutMs"] as? Number
+            if (stalenessTimeout != null) {
+                gpsStalenessTimeoutMs = stalenessTimeout.toLong()
+                config.gpsStalenessTimeoutMs = gpsStalenessTimeoutMs
+                geofenceEngine.setDegradedExitEnabled(gpsStalenessTimeoutMs > 0)
+                Log.d(TAG, "GPS staleness timeout updated to ${gpsStalenessTimeoutMs}ms")
             }
 
             // Update dwell configuration if provided

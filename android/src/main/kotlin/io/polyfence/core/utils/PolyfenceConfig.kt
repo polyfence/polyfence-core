@@ -85,6 +85,16 @@ class PolyfenceConfig(context: Context) {
             prefs.edit().putFloat("gps_accuracy_threshold", value).apply()
         }
 
+    // Degraded-GPS handling. 0 = off (default). When > 0, a low-accuracy fix may
+    // drive EXITs (Option D) and, after this many ms with no valid fix while
+    // inside a zone, the staleness watchdog emits SIGNAL_LOST. One knob gates
+    // both behaviours.
+    var gpsStalenessTimeoutMs: Long
+        get() = prefs.getLong("gps_staleness_timeout_ms", 0L)
+        set(value) {
+            prefs.edit().putLong("gps_staleness_timeout_ms", value).apply()
+        }
+
     var minUpdateIntervalMs: Long
         get() = prefs.getLong("min_update_interval_ms", DEFAULT_MIN_UPDATE_INTERVAL_MS)
         set(value) {
