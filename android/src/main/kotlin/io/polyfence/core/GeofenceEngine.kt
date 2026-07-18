@@ -299,6 +299,44 @@ fun getZoneName(zoneId: String): String? {
         this.degradedExitEnabled = enabled
     }
 
+    // Zones currently flagged SIGNAL_LOST (GPS went stale while inside them).
+    // Cleared as each resolves — SIGNAL_RESTORED if still inside on the next
+    // valid fix, or EXIT via the normal path if the device left during the gap.
+    private val signalLostZones = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Called by the LocationTracker staleness watchdog when no valid fix has
+     * arrived for the configured timeout while the device is inside one or more
+     * zones. Emits SIGNAL_LOST once per held zone WITHOUT changing zone state,
+     * so the session is marked uncertain (not falsely exited); the next valid
+     * fix resolves it. Needs a last-known location for the event payload.
+     */
+    fun forceSignalLost(lastKnownLocation: Location?) {
+        val location = lastKnownLocation ?: return
+        zoneStates.forEach { (zoneId, inside) ->
+            if (inside && signalLostZones.add(zoneId)) {
+                eventCallback?.invoke(zoneId, EVENT_SIGNAL_LOST, location, 0.0)
+            }
+        }
+    }
+
+    /**
+     * Resolve outstanding SIGNAL_LOST flags on a fresh valid fix: a zone still
+     * geometrically inside fires SIGNAL_RESTORED (clear the uncertainty); a zone
+     * now outside is left to the normal EXIT path. Cleared either way.
+     */
+    private fun resolveSignalLost(location: Location) {
+        if (signalLostZones.isEmpty()) return
+        val zones = getZonesToCheck()
+        signalLostZones.forEach { zoneId ->
+            val zone = zones[zoneId]
+            if (zone != null && zone.contains(location)) {
+                eventCallback?.invoke(zoneId, EVENT_SIGNAL_RESTORED, location, 0.0)
+            }
+        }
+        signalLostZones.clear()
+    }
+
     /**
      * Configure dwell detection
      * @param enabled Whether dwell detection is enabled
@@ -645,6 +683,8 @@ fun getZoneName(zoneId: String): String? {
 
         }
 
+        // A valid fix arrived — resolve any outstanding signal-lost flags.
+        resolveSignalLost(location)
     }
 
     /**
