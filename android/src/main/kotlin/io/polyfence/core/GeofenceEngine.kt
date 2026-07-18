@@ -19,6 +19,12 @@ class GeofenceEngine {
         const val EVENT_RECOVERY_ENTER = "RECOVERY_ENTER"
         const val EVENT_RECOVERY_EXIT = "RECOVERY_EXIT"
 
+        // Degraded-GPS handling. ENTER always needs a precise fix; these two
+        // cover leaving a zone on a degraded fix (Option D) and total signal
+        // loss (emitted from the LocationTracker staleness watchdog).
+        const val EVENT_SIGNAL_LOST = "SIGNAL_LOST"
+        const val EVENT_SIGNAL_RESTORED = "SIGNAL_RESTORED"
+
         // Dwell event type
         const val EVENT_DWELL = "DWELL"
 
@@ -277,6 +283,20 @@ fun getZoneName(zoneId: String): String? {
      */
     fun setGpsAccuracyThreshold(threshold: Float) {
         this.gpsAccuracyThreshold = threshold
+    }
+
+    /**
+     * Option D — degraded-GPS exit handling.
+     * When enabled, a fix whose accuracy is worse than the ENTER threshold can
+     * still fire an EXIT for a zone the device is already inside, but only when
+     * the fix places the device confidently outside (beyond its own accuracy
+     * radius) so GPS noise cannot produce a false exit. ENTER is unaffected —
+     * it always requires a precise fix. Off by default (behaviour change).
+     */
+    private var degradedExitEnabled = false
+
+    fun setDegradedExitEnabled(enabled: Boolean) {
+        this.degradedExitEnabled = enabled
     }
 
     /**
@@ -567,6 +587,13 @@ fun getZoneName(zoneId: String): String? {
      */
     fun checkLocation(location: Location) {
         if (!isValidLocation(location)) {
+            // Option D: too coarse to ENTER, but a fix with real coordinates can
+            // still confirm we've LEFT a zone we're already inside. Discard
+            // outright only when degraded-exit handling is off or the fix has no
+            // usable coordinates.
+            if (degradedExitEnabled && hasUsableCoordinates(location)) {
+                processDegradedExits(location)
+            }
             return
         }
 
@@ -618,6 +645,34 @@ fun getZoneName(zoneId: String): String? {
 
         }
 
+    }
+
+    /**
+     * A fix has usable coordinates if it carries a real position, regardless of
+     * accuracy. Lets a degraded (low-accuracy) fix drive EXITs while still being
+     * rejected for ENTER by isValidLocation.
+     */
+    private fun hasUsableCoordinates(location: Location): Boolean {
+        return location.latitude != 0.0 && location.longitude != 0.0
+    }
+
+    /**
+     * Option D exit pass for a degraded fix: fire EXIT only for zones the device
+     * is currently inside AND now confidently outside of (beyond the fix's own
+     * accuracy radius). No ENTERs, no dwell promotion, no false exits from noise.
+     */
+    private fun processDegradedExits(location: Location) {
+        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else return
+        getZonesToCheck().forEach { (zoneId, zone) ->
+            val currentState = zoneStates[zoneId] ?: false
+            if (currentState && zone.isConfidentlyOutside(location, accuracy)) {
+                zoneStates[zoneId] = false
+                persistZoneState(zoneId, false)
+                trackEventTelemetry(zoneId, "EXIT")
+                eventCallback?.invoke(zoneId, "EXIT", location, 0.0)
+                handleDwellStateChange(zoneId, false, location, System.nanoTime())
+            }
+        }
     }
 
     // Smart validation: Single point for obvious cases, 2-point for edge cases
@@ -817,7 +872,7 @@ fun getZoneName(zoneId: String): String? {
      */
     private fun isValidLocation(location: Location): Boolean {
         return location.hasAccuracy() &&
-               location.accuracy <= gpsAccuracyThreshold &&
+               location.accuracy < gpsAccuracyThreshold &&
                location.latitude != 0.0 &&
                location.longitude != 0.0
     }
@@ -845,6 +900,35 @@ fun getZoneName(zoneId: String): String? {
                 ZoneType.POLYGON -> {
                     val zonePolygon = polygon ?: return false
                     GeoMath.isPointInPolygon(location.latitude, location.longitude, zonePolygon.map { Pair(it.latitude, it.longitude) })
+                }
+            }
+        }
+
+        /**
+         * True when the location is outside this zone by more than the given
+         * accuracy buffer — i.e. even allowing for GPS uncertainty, the device is
+         * confidently beyond the boundary. Used by the degraded-fix EXIT path so
+         * a noisy low-accuracy fix near the edge cannot trigger a false exit.
+         */
+        fun isConfidentlyOutside(location: Location, accuracyBuffer: Double): Boolean {
+            return when (type) {
+                ZoneType.CIRCLE -> {
+                    val zoneCenter = center ?: return false
+                    val zoneRadius = radius ?: return false
+                    val distance = GeoMath.haversineDistance(location.latitude, location.longitude, zoneCenter.latitude, zoneCenter.longitude)
+                    distance > zoneRadius + accuracyBuffer
+                }
+                ZoneType.POLYGON -> {
+                    val zonePolygon = polygon ?: return false
+                    if (zonePolygon.size < 3) return false
+                    val inside = GeoMath.isPointInPolygon(location.latitude, location.longitude, zonePolygon.map { Pair(it.latitude, it.longitude) })
+                    if (inside) return false
+                    val nearestEdge = zonePolygon.indices.minOf { i ->
+                        val a = zonePolygon[i]
+                        val b = zonePolygon[(i + 1) % zonePolygon.size]
+                        GeoMath.pointToSegmentDistance(location.latitude, location.longitude, a.latitude, a.longitude, b.latitude, b.longitude)
+                    }
+                    nearestEdge > accuracyBuffer
                 }
             }
         }
