@@ -151,6 +151,7 @@ class LocationTracker : Service() {
                 base["gpsAccuracyThreshold"] = engine.getGpsAccuracyThreshold().toDouble()
                 base["dwellSettings"] = engine.getDwellConfigMap()
                 base["clusterSettings"] = engine.getClusterConfigMap()
+                base["gpsStalenessTimeoutMs"] = instance?.gpsStalenessTimeoutMs ?: 0L
             } else {
                 // Service not running — return the engine's compile-time
                 // defaults so the caller sees a stable shape rather than
@@ -168,6 +169,7 @@ class LocationTracker : Service() {
                     "activeRadiusMeters" to GeofenceEngine.DEFAULT_CLUSTER_ACTIVE_RADIUS_METERS,
                     "refreshDistanceMeters" to GeofenceEngine.DEFAULT_CLUSTER_REFRESH_DISTANCE_METERS
                 )
+                base["gpsStalenessTimeoutMs"] = 0L
             }
 
             // TrackingScheduler is a companion field lazily initialised
@@ -300,6 +302,7 @@ class LocationTracker : Service() {
                 "startImmediatelyIfInWindow" to true,
                 "timeWindows" to emptyList<Any>()
             )
+            base["gpsStalenessTimeoutMs"] = 0L
             val defaults = ActivitySettings()
             base["activitySettings"] = mapOf(
                 "enabled" to defaults.enabled,

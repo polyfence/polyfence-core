@@ -64,7 +64,8 @@ class LocationTrackerConfigTest {
         "clusterSettings",
         "scheduleSettings",
         "activitySettings",
-        "disableAlertNotifications"
+        "disableAlertNotifications",
+        "gpsStalenessTimeoutMs"
     )
 
     // -------- buildDefaultConfigurationMap --------
@@ -208,7 +209,7 @@ class LocationTrackerConfigTest {
     // -------- getCurrentConfigurationMap null-context fallback --------
 
     @Test
-    fun `getCurrentConfigurationMap with null context still returns the full 12-key shape`() {
+    fun `getCurrentConfigurationMap with null context still returns the full 13-key shape`() {
         // With a null context and no running service, the composed
         // accessor should fall back to engine + scheduler defaults
         // and never omit a key. Shape stability is the whole point
