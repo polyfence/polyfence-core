@@ -746,6 +746,125 @@ class GeofenceEngineTests: XCTestCase {
                        "ENTER must fire for every zone we're inside on fresh-state reconcile, but not for outside zones")
     }
 
+    // MARK: - Degraded-GPS handling: Option D + signal-lost / restored
+
+    private func circleZone() -> [String: Any] {
+        return ["type": "circle", "center": ["latitude": 1.0, "longitude": 1.0], "radius": 100.0]
+    }
+    private func exits() -> Int { events.filter { $0.eventType == "EXIT" }.count }
+    private func enters() -> Int { events.filter { $0.eventType == "ENTER" }.count }
+    private func signalLostCount() -> Int { events.filter { $0.eventType == "SIGNAL_LOST" }.count }
+    private func signalRestoredCount() -> Int { events.filter { $0.eventType == "SIGNAL_RESTORED" }.count }
+
+    func testOptionDOffDegradedFixOutsideDoesNotExit() {
+        engine.setValidationConfig(requireConfirmation: false)
+        try! engine.addZone(zoneId: "z", zoneName: "Z", zoneData: circleZone())
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 10.0)) // ENTER
+        events.removeAll()
+        engine.checkLocation(createLocation(1.01, 1.0, accuracy: 150.0))
+        XCTAssertEqual(exits(), 0, "no exit when degraded-exit is off")
+        XCTAssertTrue(engine.getCurrentZoneStates()["z"] == true, "still inside")
+    }
+
+    func testOptionDOnDegradedFixConfidentlyOutsideExits() {
+        engine.setValidationConfig(requireConfirmation: false)
+        engine.setDegradedExitEnabled(true)
+        try! engine.addZone(zoneId: "z", zoneName: "Z", zoneData: circleZone())
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 10.0))
+        events.removeAll()
+        engine.checkLocation(createLocation(1.01, 1.0, accuracy: 150.0))
+        XCTAssertEqual(exits(), 1, "degraded confident-outside fires EXIT")
+    }
+
+    func testOptionDOnDegradedFixNearEdgeDoesNotExit() {
+        engine.setValidationConfig(requireConfirmation: false)
+        engine.setDegradedExitEnabled(true)
+        try! engine.addZone(zoneId: "z", zoneName: "Z", zoneData: circleZone())
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 10.0))
+        events.removeAll()
+        engine.checkLocation(createLocation(1.0015, 1.0, accuracy: 150.0))
+        XCTAssertEqual(exits(), 0, "noisy near-edge degraded fix must not exit")
+    }
+
+    func testOptionDOnDegradedFixInsideDoesNotEnter() {
+        engine.setValidationConfig(requireConfirmation: false)
+        engine.setDegradedExitEnabled(true)
+        try! engine.addZone(zoneId: "z", zoneName: "Z", zoneData: circleZone())
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 150.0))
+        XCTAssertEqual(enters(), 0, "degraded fix must not ENTER")
+    }
+
+    func testOptionDOnPolygonNearEdgeDoesNotExit() {
+        engine.setValidationConfig(requireConfirmation: false)
+        engine.setDegradedExitEnabled(true)
+        let poly: [[String: Any]] = [
+            ["latitude": 0.0, "longitude": 0.0],
+            ["latitude": 0.01, "longitude": 0.0],
+            ["latitude": 0.01, "longitude": 0.01],
+            ["latitude": 0.0, "longitude": 0.01]
+        ]
+        try! engine.addZone(zoneId: "p", zoneName: "P", zoneData: ["type": "polygon", "polygon": poly])
+        engine.checkLocation(createLocation(0.005, 0.005, accuracy: 10.0)) // inside -> ENTER
+        events.removeAll()
+        engine.checkLocation(createLocation(0.005, -0.0005, accuracy: 150.0))
+        XCTAssertEqual(exits(), 0, "noisy near-edge degraded fix must not exit polygon")
+    }
+
+    func testAccuracyAtThresholdRejectedJustUnderAccepted() {
+        engine.setValidationConfig(requireConfirmation: false)
+        try! engine.addZone(zoneId: "z", zoneName: "Z", zoneData: circleZone())
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 100.0)) // == threshold -> rejected
+        XCTAssertEqual(enters(), 0, "accuracy == threshold rejected")
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 99.0))
+        XCTAssertEqual(enters(), 1, "accuracy < threshold accepted")
+    }
+
+    func testSignalLostKeepsStateAndDedupes() {
+        engine.setValidationConfig(requireConfirmation: false)
+        try! engine.addZone(zoneId: "z", zoneName: "Z", zoneData: circleZone())
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 10.0))
+        events.removeAll()
+        engine.forceSignalLost(createLocation(1.0, 1.0, accuracy: 10.0))
+        XCTAssertEqual(signalLostCount(), 1, "one SIGNAL_LOST")
+        XCTAssertTrue(engine.getCurrentZoneStates()["z"] == true, "state unchanged")
+        engine.forceSignalLost(createLocation(1.0, 1.0, accuracy: 10.0))
+        XCTAssertEqual(signalLostCount(), 1, "no duplicate SIGNAL_LOST")
+    }
+
+    func testSignalRestoredWhenStillInside() {
+        engine.setValidationConfig(requireConfirmation: false)
+        try! engine.addZone(zoneId: "z", zoneName: "Z", zoneData: circleZone())
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 10.0))
+        engine.forceSignalLost(createLocation(1.0, 1.0, accuracy: 10.0))
+        events.removeAll()
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 10.0))
+        XCTAssertEqual(signalRestoredCount(), 1, "SIGNAL_RESTORED fired")
+        XCTAssertEqual(exits(), 0, "no EXIT")
+    }
+
+    func testExitNotRestoredWhenOutside() {
+        engine.setValidationConfig(requireConfirmation: false)
+        try! engine.addZone(zoneId: "z", zoneName: "Z", zoneData: circleZone())
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 10.0))
+        engine.forceSignalLost(createLocation(1.0, 1.0, accuracy: 10.0))
+        events.removeAll()
+        engine.checkLocation(createLocation(1.01, 1.0, accuracy: 10.0)) // valid, outside
+        XCTAssertEqual(exits(), 1, "EXIT fired")
+        XCTAssertEqual(signalRestoredCount(), 0, "no SIGNAL_RESTORED after exit")
+    }
+
+    func testCrossPathDegradedExitThenInsideDoesNotRestore() {
+        engine.setValidationConfig(requireConfirmation: false)
+        engine.setDegradedExitEnabled(true)
+        try! engine.addZone(zoneId: "z", zoneName: "Z", zoneData: circleZone())
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 10.0))
+        engine.forceSignalLost(createLocation(1.0, 1.0, accuracy: 10.0))
+        engine.checkLocation(createLocation(1.01, 1.0, accuracy: 150.0)) // degraded confident-outside -> EXIT, clears flag
+        events.removeAll()
+        engine.checkLocation(createLocation(1.0, 1.0, accuracy: 10.0)) // inside again -> ENTER, must NOT restore
+        XCTAssertEqual(signalRestoredCount(), 0, "no SIGNAL_RESTORED after a degraded EXIT")
+    }
+
     // MARK: - Helper Functions
 
     private func createLocation(_ lat: Double, _ lng: Double, accuracy: CLLocationAccuracy = 10.0) -> CLLocation {
