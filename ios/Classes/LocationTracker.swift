@@ -355,12 +355,13 @@ public class LocationTracker: NSObject {
         }
         RunLoop.main.add(healthScoreTimer!, forMode: .common)
 
-        // Staleness watchdog — mirrors the Android health-check watchdog. Fires
-        // SIGNAL_LOST after gpsStalenessTimeoutMs with no VALID fix while inside a
-        // zone. Repeating (not reset by locations) so it triggers even when the OS
-        // delivers no updates at all. Inert unless gpsStalenessTimeoutMs > 0.
+        // Staleness watchdog — mirrors the Android health-check watchdog, on the
+        // same 60s tick for cross-platform parity. Fires SIGNAL_LOST after
+        // gpsStalenessTimeoutMs with no VALID fix while inside a zone. Repeating
+        // (not reset by locations) so it triggers even when the OS delivers no
+        // updates at all. Inert unless gpsStalenessTimeoutMs > 0.
         stalenessTimer?.invalidate()
-        stalenessTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+        stalenessTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
             guard let self = self, self.isRunning else { return }
             guard self.gpsStalenessTimeoutMs > 0, self.lastValidFixTime > 0 else { return }
             let sinceValidMs = (Date().timeIntervalSince1970 - self.lastValidFixTime) * 1000.0
