@@ -1299,8 +1299,17 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     private fun showGeofenceNotification(eventType: String, zoneId: String, zoneName: String) {
     if (!isRunning) return
     if (!alertNotificationsEnabled) return  // Respect disableAlertNotifications config
-    val title = if (eventType == "ENTER") "Entered Zone" else "Exited Zone"
-    val message = zoneName // Use zone name instead of ID
+    // Zone name leads the title so the alert names the place, not our
+    // category. DWELL and RECOVERY_ENTER are inside-states — only a true
+    // EXIT / RECOVERY_EXIT reads as leaving.
+    val title = when (eventType) {
+        "ENTER", GeofenceEngine.EVENT_RECOVERY_ENTER -> "Entered $zoneName"
+        GeofenceEngine.EVENT_DWELL -> "Dwelling in $zoneName"
+        else -> "Exited $zoneName"
+    }
+    // Body carries time-in-zone for DWELL only; ENTER/EXIT stay single-line.
+    val body: String? =
+        if (eventType == GeofenceEngine.EVENT_DWELL) formatDwellBody(zoneId) else null
 
     // Create PendingIntent to reuse existing app task when notification is tapped
     // Use dynamic package resolution instead of hardcoded class name
@@ -1318,19 +1327,37 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
-    val notification = NotificationCompat.Builder(this, GEOFENCE_CHANNEL_ID)
+    val builder = NotificationCompat.Builder(this, GEOFENCE_CHANNEL_ID)
         .setContentTitle(title)
-        .setContentText(message)
         .setSmallIcon(android.R.drawable.ic_menu_mylocation)
         .setContentIntent(pendingIntent) // Opens app on tap
         .setAutoCancel(true) // Dismisses notification on tap
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setDefaults(NotificationCompat.DEFAULT_ALL)
-        .build()
+    if (body != null) builder.setContentText(body)
+    val notification = builder.build()
 
     val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     notificationManager.notify(System.currentTimeMillis().toInt(), notification)
 }
+
+    /**
+     * Human-readable "time in zone" line for DWELL alerts, e.g. "Here 12 min".
+     * Null when the engine has no dwell start recorded for the zone.
+     */
+    private fun formatDwellBody(zoneId: String): String? {
+        val ms = geofenceEngine.getDwellDurationMs(zoneId) ?: return null
+        val totalMinutes = (ms / 60_000L).toInt()
+        return when {
+            totalMinutes < 1 -> "Here under a minute"
+            totalMinutes < 60 -> "Here $totalMinutes min"
+            else -> {
+                val h = totalMinutes / 60
+                val m = totalMinutes % 60
+                if (m == 0) "Here ${h}h" else "Here ${h}h ${m}min"
+            }
+        }
+    }
 
     private fun createTrackingNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
