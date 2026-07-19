@@ -56,6 +56,12 @@ public class LocationTracker: NSObject {
     // CRITICAL: Prevent auto-tracking to match Android behavior
     private var trackingEnabled: Bool = false
     private var fallbackTimer: Timer?
+    // Degraded-GPS staleness watchdog. gpsStalenessTimeoutMs 0 = disabled;
+    // lastValidFixTime is stamped only on valid fixes (not coarse ones the
+    // engine rejects), so the watchdog still fires while degraded fixes arrive.
+    private var stalenessTimer: Timer?
+    private var gpsStalenessTimeoutMs: Double = 0
+    private var lastValidFixTime: TimeInterval = 0
     private let geofenceQueue = DispatchQueue(label: "polyfence.geofence", qos: .userInitiated)
 
     // Track last location where zone check was performed
@@ -280,6 +286,11 @@ public class LocationTracker: NSObject {
         // Set GPS accuracy threshold from config (default: 100m for platform parity)
         let accuracyThreshold = config?.gpsAccuracyThreshold ?? PolyfenceConfig.DEFAULT_GPS_ACCURACY_THRESHOLD
         geofenceEngine.setGpsAccuracyThreshold(accuracyThreshold)
+
+        // Degraded-GPS handling (Option D + signal-lost). One knob: > 0 ms
+        // enables degraded-exit and arms the staleness watchdog.
+        gpsStalenessTimeoutMs = config?.gpsStalenessTimeoutMs ?? 0
+        geofenceEngine.setDegradedExitEnabled(gpsStalenessTimeoutMs > 0)
     }
 
     // Track if first location after restart has been processed
@@ -344,6 +355,22 @@ public class LocationTracker: NSObject {
         }
         RunLoop.main.add(healthScoreTimer!, forMode: .common)
 
+        // Staleness watchdog — mirrors the Android health-check watchdog, on the
+        // same 60s tick for cross-platform parity. Fires SIGNAL_LOST after
+        // gpsStalenessTimeoutMs with no VALID fix while inside a zone. Repeating
+        // (not reset by locations) so it triggers even when the OS delivers no
+        // updates at all. Inert unless gpsStalenessTimeoutMs > 0.
+        stalenessTimer?.invalidate()
+        stalenessTimer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+            guard let self = self, self.isRunning else { return }
+            guard self.gpsStalenessTimeoutMs > 0, self.lastValidFixTime > 0 else { return }
+            let sinceValidMs = (Date().timeIntervalSince1970 - self.lastValidFixTime) * 1000.0
+            if sinceValidMs > self.gpsStalenessTimeoutMs {
+                self.geofenceEngine.forceSignalLost(self.lastKnownLocation)
+            }
+        }
+        RunLoop.main.add(stalenessTimer!, forMode: .common)
+
         fallbackTimer?.invalidate()
         fallbackTimer = nil
         // Request permissions if needed
@@ -382,6 +409,8 @@ public class LocationTracker: NSObject {
         healthScoreTimer = nil
         fallbackTimer?.invalidate()
         fallbackTimer = nil
+        stalenessTimer?.invalidate()
+        stalenessTimer = nil
         locationManager.stopUpdatingLocation()
 
         if #available(iOS 9.0, *) {
@@ -1062,6 +1091,11 @@ extension LocationTracker: CLLocationManagerDelegate {
 
         // Update GPS health tracking
         lastLocationTime = Date().timeIntervalSince1970
+        // Stamp the last VALID fix separately — coarse fixes the engine rejects
+        // must not reset the staleness watchdog.
+        if geofenceEngine.isValidFix(location) {
+            lastValidFixTime = Date().timeIntervalSince1970
+        }
         consecutiveGpsFailures = 0
         currentGpsAccuracy = location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil
 
@@ -1381,6 +1415,15 @@ extension LocationTracker {
             setGpsAccuracyThreshold(Double(gpsAccuracyThresholdInt))
         }
 
+        // Degraded-GPS staleness timeout (0 = off). Gates Option D + signal-lost.
+        if let staleness = configMap["gpsStalenessTimeoutMs"] as? Double {
+            gpsStalenessTimeoutMs = staleness
+            geofenceEngine.setDegradedExitEnabled(staleness > 0)
+        } else if let stalenessInt = configMap["gpsStalenessTimeoutMs"] as? Int {
+            gpsStalenessTimeoutMs = Double(stalenessInt)
+            geofenceEngine.setDegradedExitEnabled(gpsStalenessTimeoutMs > 0)
+        }
+
         if let dwellSettings = configMap["dwellSettings"] as? [String: Any] {
             let dwellEnabled = dwellSettings["enabled"] as? Bool ?? true
             let dwellThresholdMs = dwellSettings["dwellThresholdMs"] as? Int
@@ -1487,6 +1530,7 @@ extension LocationTracker {
         var base = SmartGpsConfigFactory.toMap(smartConfig)
 
         base["gpsAccuracyThreshold"] = geofenceEngine.getGpsAccuracyThreshold()
+        base["gpsStalenessTimeoutMs"] = gpsStalenessTimeoutMs
         base["dwellSettings"] = geofenceEngine.getDwellConfigMap()
         base["clusterSettings"] = geofenceEngine.getClusterConfigMap()
         base["scheduleSettings"] = TrackingScheduler.shared.getConfigMap()

@@ -77,6 +77,15 @@ public class PolyfenceConfig {
         set { defaults.set(newValue, forKey: "gps_accuracy_threshold") }
     }
 
+    // Degraded-GPS handling. 0 = off (default). When > 0, a low-accuracy fix may
+    // drive EXITs (Option D) and, after this many ms with no valid fix while
+    // inside a zone, the staleness watchdog emits SIGNAL_LOST. One knob gates
+    // both behaviours.
+    public var gpsStalenessTimeoutMs: Double {
+        get { return defaults.double(forKey: "gps_staleness_timeout_ms") }
+        set { defaults.set(newValue, forKey: "gps_staleness_timeout_ms") }
+    }
+
     public var minUpdateIntervalMs: Int {
         get {
             let val = defaults.integer(forKey: "min_update_interval_ms")
@@ -138,13 +147,15 @@ public class PolyfenceConfig {
             "max_update_delay_ms": maxUpdateDelayMs,
             "require_confirmation": requireConfirmation,
             "confidence_points": confidencePoints,
-            "confidence_timeout_ms": confidenceTimeoutMs
+            "confidence_timeout_ms": confidenceTimeoutMs,
+            "gps_staleness_timeout_ms": gpsStalenessTimeoutMs
         ]
     }
 
     public func updateFromMap(_ configMap: [String: Any]) {
         if let val = configMap["gps_interval_ms"] as? Int { gpsIntervalMs = val }
         if let val = configMap["gps_accuracy_threshold"] as? Double { gpsAccuracyThreshold = val }
+        if let val = configMap["gps_staleness_timeout_ms"] as? Double { gpsStalenessTimeoutMs = val }
         if let val = configMap["min_update_interval_ms"] as? Int { minUpdateIntervalMs = val }
         if let val = configMap["max_update_delay_ms"] as? Int { maxUpdateDelayMs = val }
         if let val = configMap["require_confirmation"] as? Bool { requireConfirmation = val }

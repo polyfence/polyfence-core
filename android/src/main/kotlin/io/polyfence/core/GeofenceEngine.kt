@@ -19,6 +19,12 @@ class GeofenceEngine {
         const val EVENT_RECOVERY_ENTER = "RECOVERY_ENTER"
         const val EVENT_RECOVERY_EXIT = "RECOVERY_EXIT"
 
+        // Degraded-GPS handling. ENTER always needs a precise fix; these two
+        // cover leaving a zone on a degraded fix (Option D) and total signal
+        // loss (emitted from the LocationTracker staleness watchdog).
+        const val EVENT_SIGNAL_LOST = "SIGNAL_LOST"
+        const val EVENT_SIGNAL_RESTORED = "SIGNAL_RESTORED"
+
         // Dwell event type
         const val EVENT_DWELL = "DWELL"
 
@@ -217,6 +223,7 @@ class GeofenceEngine {
         zoneConfidence.remove(zoneId)
         zoneEntryTimes.remove(zoneId)
         dwellEventsFired.remove(zoneId)
+        signalLostZones.remove(zoneId)
 
         // Remove persisted state
         zonePersistence?.removeZoneState(zoneId)
@@ -231,6 +238,7 @@ class GeofenceEngine {
         zoneConfidence.clear()
         zoneEntryTimes.clear()
         dwellEventsFired.clear()
+        signalLostZones.clear()
 
         // Clear persisted states
         zonePersistence?.clearAllZoneStates()
@@ -277,6 +285,63 @@ fun getZoneName(zoneId: String): String? {
      */
     fun setGpsAccuracyThreshold(threshold: Float) {
         this.gpsAccuracyThreshold = threshold
+    }
+
+    /**
+     * Option D — degraded-GPS exit handling.
+     * When enabled, a fix whose accuracy is worse than the ENTER threshold can
+     * still fire an EXIT for a zone the device is already inside, but only when
+     * the fix places the device confidently outside (beyond its own accuracy
+     * radius) so GPS noise cannot produce a false exit. ENTER is unaffected —
+     * it always requires a precise fix. Off by default (behaviour change).
+     */
+    private var degradedExitEnabled = false
+
+    fun setDegradedExitEnabled(enabled: Boolean) {
+        this.degradedExitEnabled = enabled
+    }
+
+    // Zones currently flagged SIGNAL_LOST (GPS went stale while inside them).
+    // Cleared as each resolves — SIGNAL_RESTORED if still inside on the next
+    // valid fix, or EXIT via the normal path if the device left during the gap.
+    private val signalLostZones = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Called by the LocationTracker staleness watchdog when no valid fix has
+     * arrived for the configured timeout while the device is inside one or more
+     * zones. Emits SIGNAL_LOST once per held zone WITHOUT changing zone state,
+     * so the session is marked uncertain (not falsely exited); the next valid
+     * fix resolves it. Needs a last-known location for the event payload.
+     */
+    fun forceSignalLost(lastKnownLocation: Location?) {
+        val location = lastKnownLocation ?: return
+        zoneStates.forEach { (zoneId, inside) ->
+            if (inside && signalLostZones.add(zoneId)) {
+                eventCallback?.invoke(zoneId, EVENT_SIGNAL_LOST, location, 0.0)
+            }
+        }
+    }
+
+    /**
+     * Resolve outstanding SIGNAL_LOST flags on a fresh valid fix: a zone still
+     * geometrically inside fires SIGNAL_RESTORED (clear the uncertainty); a zone
+     * now outside is left to the normal EXIT path. Cleared either way.
+     */
+    private fun resolveSignalLost(location: Location) {
+        if (signalLostZones.isEmpty()) return
+        val zones = getZonesToCheck()
+        // Snapshot to avoid concurrent modification while removing. Only zones
+        // still geometrically inside are resolved here (SIGNAL_RESTORED); zones
+        // now outside are LEFT flagged so the normal EXIT path resolves them —
+        // that path removes the flag (see the EXIT sites), which prevents a
+        // premature clear and a SIGNAL_RESTORED being emitted after an EXIT.
+        signalLostZones.toList().forEach { zoneId ->
+            val zone = zones[zoneId]
+            if (zone != null && zone.contains(location)) {
+                eventCallback?.invoke(zoneId, EVENT_SIGNAL_RESTORED, location, 0.0)
+                signalLostZones.remove(zoneId)
+            }
+        }
     }
 
     /**
@@ -567,6 +632,13 @@ fun getZoneName(zoneId: String): String? {
      */
     fun checkLocation(location: Location) {
         if (!isValidLocation(location)) {
+            // Option D: too coarse to ENTER, but a fix with real coordinates can
+            // still confirm we've LEFT a zone we're already inside. Discard
+            // outright only when degraded-exit handling is off or the fix has no
+            // usable coordinates.
+            if (degradedExitEnabled && hasUsableCoordinates(location)) {
+                processDegradedExits(location)
+            }
             return
         }
 
@@ -618,6 +690,37 @@ fun getZoneName(zoneId: String): String? {
 
         }
 
+        // A valid fix arrived — resolve any outstanding signal-lost flags.
+        resolveSignalLost(location)
+    }
+
+    /**
+     * A fix has usable coordinates if it carries a real position, regardless of
+     * accuracy. Lets a degraded (low-accuracy) fix drive EXITs while still being
+     * rejected for ENTER by isValidLocation.
+     */
+    private fun hasUsableCoordinates(location: Location): Boolean {
+        return location.latitude != 0.0 && location.longitude != 0.0
+    }
+
+    /**
+     * Option D exit pass for a degraded fix: fire EXIT only for zones the device
+     * is currently inside AND now confidently outside of (beyond the fix's own
+     * accuracy radius). No ENTERs, no dwell promotion, no false exits from noise.
+     */
+    private fun processDegradedExits(location: Location) {
+        val accuracy = if (location.hasAccuracy()) location.accuracy.toDouble() else return
+        getZonesToCheck().forEach { (zoneId, zone) ->
+            val currentState = zoneStates[zoneId] ?: false
+            if (currentState && zone.isConfidentlyOutside(location, accuracy)) {
+                zoneStates[zoneId] = false
+                persistZoneState(zoneId, false)
+                trackEventTelemetry(zoneId, "EXIT")
+                eventCallback?.invoke(zoneId, "EXIT", location, 0.0)
+                handleDwellStateChange(zoneId, false, location, System.nanoTime())
+                signalLostZones.remove(zoneId)
+            }
+        }
     }
 
     // Smart validation: Single point for obvious cases, 2-point for edge cases
@@ -682,6 +785,9 @@ fun getZoneName(zoneId: String): String? {
             trackEventTelemetry(zoneId, eventType)
             eventCallback?.invoke(zoneId, eventType, location, detectionTimeMs)
 
+            // An EXIT resolves any outstanding signal-lost flag for this zone.
+            if (!isInside) signalLostZones.remove(zoneId)
+
             // Handle dwell tracking on state change
             handleDwellStateChange(zoneId, isInside, location, checkStartTime)
 
@@ -729,6 +835,9 @@ fun getZoneName(zoneId: String): String? {
             val eventType = if (isInside) "ENTER" else "EXIT"
             trackEventTelemetry(zoneId, eventType)
             eventCallback?.invoke(zoneId, eventType, location, detectionTimeMs)
+
+            // An EXIT resolves any outstanding signal-lost flag for this zone.
+            if (!isInside) signalLostZones.remove(zoneId)
 
             // Handle dwell tracking on state change
             handleDwellStateChange(zoneId, isInside, location, checkStartTime)
@@ -815,9 +924,17 @@ fun getZoneName(zoneId: String): String? {
      * Uses configurable GPS accuracy threshold (default: 100m)
      * This ensures platform parity with iOS
      */
+    /**
+     * Public validity check for the tracker's staleness watchdog — same rule as
+     * the internal ENTER gate, so "time since last valid fix" upstream means the
+     * same thing the engine would accept for a zone transition.
+     */
+    fun isValidFix(location: Location): Boolean = isValidLocation(location)
+
     private fun isValidLocation(location: Location): Boolean {
         return location.hasAccuracy() &&
-               location.accuracy <= gpsAccuracyThreshold &&
+               location.accuracy > 0f &&
+               location.accuracy < gpsAccuracyThreshold &&
                location.latitude != 0.0 &&
                location.longitude != 0.0
     }
@@ -845,6 +962,35 @@ fun getZoneName(zoneId: String): String? {
                 ZoneType.POLYGON -> {
                     val zonePolygon = polygon ?: return false
                     GeoMath.isPointInPolygon(location.latitude, location.longitude, zonePolygon.map { Pair(it.latitude, it.longitude) })
+                }
+            }
+        }
+
+        /**
+         * True when the location is outside this zone by more than the given
+         * accuracy buffer — i.e. even allowing for GPS uncertainty, the device is
+         * confidently beyond the boundary. Used by the degraded-fix EXIT path so
+         * a noisy low-accuracy fix near the edge cannot trigger a false exit.
+         */
+        fun isConfidentlyOutside(location: Location, accuracyBuffer: Double): Boolean {
+            return when (type) {
+                ZoneType.CIRCLE -> {
+                    val zoneCenter = center ?: return false
+                    val zoneRadius = radius ?: return false
+                    val distance = GeoMath.haversineDistance(location.latitude, location.longitude, zoneCenter.latitude, zoneCenter.longitude)
+                    distance > zoneRadius + accuracyBuffer
+                }
+                ZoneType.POLYGON -> {
+                    val zonePolygon = polygon ?: return false
+                    if (zonePolygon.size < 3) return false
+                    val inside = GeoMath.isPointInPolygon(location.latitude, location.longitude, zonePolygon.map { Pair(it.latitude, it.longitude) })
+                    if (inside) return false
+                    val nearestEdge = zonePolygon.indices.minOf { i ->
+                        val a = zonePolygon[i]
+                        val b = zonePolygon[(i + 1) % zonePolygon.size]
+                        GeoMath.pointToSegmentDistance(location.latitude, location.longitude, a.latitude, a.longitude, b.latitude, b.longitude)
+                    }
+                    nearestEdge > accuracyBuffer
                 }
             }
         }
