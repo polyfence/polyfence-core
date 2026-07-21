@@ -121,7 +121,12 @@ public class PolyfenceDebugCollector {
             if let timeRangeMs = timeRangeMs {
                 let cutoffTime = Date().timeIntervalSince1970 * 1000 - Double(timeRangeMs)
                 filteredErrors = filteredErrors.filter { error in
-                    let timestamp = error["timestamp"] as? Double ?? 0
+                    // Read the timestamp through NSNumber. Numerics
+                    // stored in a heterogeneous [String: Any] map do
+                    // not bridge reliably via a direct `as? Double`;
+                    // NSNumber.doubleValue accepts either concrete
+                    // type. Same idiom is used across the codebase.
+                    let timestamp = (error["timestamp"] as? NSNumber)?.doubleValue ?? 0
                     return timestamp >= cutoffTime
                 }
             }

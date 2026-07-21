@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.14] - 2026-07-21
+
+### Fixed
+- **`PolyfenceDebugCollector.getErrorHistory(timeRangeMs:errorTypes:)` on iOS now returns matching entries when a `timeRangeMs` is supplied.** The filter was reading `error["timestamp"] as? Double`, but `PolyfenceErrorManager.reportError` writes the value as `Int64(Date().timeIntervalSince1970 * 1000)`. Swift's bridged `as? Double` on an `Int64` stored inside a `[String: Any]` map is unreliable — the cast failed at runtime, defaulted the timestamp to `0`, which is never `>= cutoffTime` for any realistic window, so every entry was silently filtered out and the call returned an empty array. Reader now uses `(error["timestamp"] as? NSNumber)?.doubleValue ?? 0` — matches the codebase convention already used in `LocationTracker`, `SmartGpsConfig`, and `GeofenceEngine`. Regression test locked in `PolyfenceErrorManagerHistoryTests.testErrorHistoryTimeRangeFilterMatchesFreshEntries`. Android was unaffected (Kotlin stores + reads as `Long` uniformly, no cross-type bridge).
+
 ## [1.0.13] - 2026-07-20
 
 ### Added
