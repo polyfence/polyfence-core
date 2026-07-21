@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.13] - 2026-07-20
+
+### Added
+- **`signalLost` / `signalRestored` geofence events on both platforms** — GPS signal loss and recovery are now surfaced as first-class geofence events instead of silently freezing zone state. When a fix goes stale or absent, affected zones are held as uncertain (not exited) and resolve on the next valid fix.
+- **`gpsStalenessTimeoutMs` configuration on both platforms** — opt-in staleness timeout in milliseconds that gates degraded-GPS exit handling and the staleness watchdog. Defaults to `0` (disabled), so there is no behaviour change unless a caller sets it.
+
+### Fixed
+- **Degraded or absent GPS no longer latches zone state.** A low-accuracy or missing fix was previously discarded, freezing the last inside/outside state with no timeout — so a device could remain "inside" a zone indefinitely after losing signal. The engine keeps the accuracy gate on ENTER but now lets a degraded fix fire EXIT when the device is confidently outside (circle: `distance > radius + accuracy`; polygon: outside and nearest edge farther than `accuracy`). The staleness watchdog keys off the last *valid* fix rather than any location callback, so it still fires while signal is lost, and runs on a 60s tick on both platforms.
+- **Geofence alert titles now name the zone.** `DWELL` and `RECOVERY_ENTER` notifications previously rendered as "Exited" for every non-ENTER event; titles now name the zone, and inside-states no longer read as leaving.
+
 ## [1.0.12] - 2026-07-15
 
 ### Added

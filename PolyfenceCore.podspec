@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'PolyfenceCore'
-  s.version          = '1.0.12'
+  s.version          = '1.0.13'
   s.summary          = 'Mobile surface of the Polyfence geofence layer — on-device polygon and circle geofencing for iOS.'
   s.description      = <<-DESC
     Native iOS engine for the Polyfence platform — the same zones you define
