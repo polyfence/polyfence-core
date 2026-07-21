@@ -131,4 +131,43 @@ class PolyfenceErrorManagerHistoryTests: XCTestCase {
         XCTAssertEqual(onlyBattery.count, 1)
         XCTAssertEqual(onlyBattery[0]["message"] as? String, "batt 1")
     }
+
+    func testErrorHistoryTimeRangeFilterMatchesFreshEntries() {
+        // The filter reads the stored `timestamp` through
+        // `(NSNumber)?.doubleValue`. `PolyfenceErrorManager` writes it as
+        // `Int64` inside a `[String: Any]` map, and a direct
+        // `as? Double` bridge on that Int64 fails at runtime — every
+        // entry then falls to the default of 0 and gets dropped from a
+        // non-nil `timeRangeMs` window.
+        let marker = "timerange_regression_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
+        PolyfenceErrorManager.shared.reportError(type: marker, message: "fresh")
+
+        // 1-hour window covers the just-written entry.
+        let history = PolyfenceDebugCollector.shared.getErrorHistory(
+            timeRangeMs: 60 * 60 * 1000,
+            errorTypes: [marker]
+        )
+        XCTAssertEqual(history.count, 1, "timeRangeMs filter must not drop entries stored as Int64 timestamps")
+        XCTAssertEqual(history[0]["message"] as? String, "fresh")
+        // Timestamp is readable via the same NSNumber bridge the filter
+        // uses — pins the cast path rather than only the count.
+        XCTAssertGreaterThan((history[0]["timestamp"] as? NSNumber)?.doubleValue ?? 0, 0)
+    }
+
+    func testErrorHistoryTimeRangeFilterExcludesEntriesOutsideWindow() {
+        // Negative case pairs with the fresh-entries test: a 1ms window
+        // must exclude entries that landed even a few ms earlier. This
+        // proves the filter actually filters, not merely that it stops
+        // rejecting everything — a reader that returned all entries
+        // unconditionally would satisfy the positive test but fail here.
+        let marker = "timerange_exclude_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
+        PolyfenceErrorManager.shared.reportError(type: marker, message: "stale")
+        // Sleep just past the 1ms window so the entry is outside cutoff.
+        Thread.sleep(forTimeInterval: 0.010)
+        let history = PolyfenceDebugCollector.shared.getErrorHistory(
+            timeRangeMs: 1,
+            errorTypes: [marker]
+        )
+        XCTAssertEqual(history.count, 0, "timeRangeMs window must exclude entries older than the cutoff")
+    }
 }
