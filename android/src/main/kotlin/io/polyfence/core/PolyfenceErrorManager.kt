@@ -124,6 +124,7 @@ class PolyfenceErrorManager {
                 "analytics_upload_failed" -> "Failed to upload analytics data: $details"
                 "permission_revoked" -> "Location permission was revoked while tracking"
                 "memory_low" -> "Low memory detected - may affect performance"
+                "pending_events_evicted" -> "Pending events queue reached capacity; oldest events dropped"
                 else -> "Unknown error occurred: $errorType - $details"
             }
         }

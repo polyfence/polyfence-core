@@ -1,0 +1,159 @@
+package io.polyfence.core
+
+import android.content.Context
+import android.util.Log
+import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
+import org.json.JSONObject
+
+/**
+ * Bounded append-only file store for zone-crossing events that need to survive
+ * moments when the consumer's JS/Dart runtime is torn down but the polyfence-core
+ * native service is still running.
+ *
+ * Off when queueSize is 0 (append is a no-op). Drain always reads whatever is on
+ * disk regardless of the current queueSize, so events queued before the caller
+ * disabled the feature stay retrievable — the underlying log file is preserved
+ * across a queueSize=0 window and only cleared by an explicit drainAll.
+ *
+ * A dedicated single-thread executor serialises reads and writes; append and
+ * drainAll are synchronous from the caller's perspective. drainAll dispatches
+ * onto the same executor as append, so a concurrent append cannot lose an
+ * event mid-drain.
+ *
+ * After shutdown, the underlying executor is stopped and further append /
+ * drainAll calls silently fail (the executor rejects submissions); callers
+ * must construct a new instance to resume. The on-disk log file is preserved
+ * across shutdown so a new instance sees the same events.
+ */
+internal class PendingEventsStore(context: Context, private val queueSize: Int) {
+
+    // Uses noBackupFilesDir so the queue is never included in Android Auto Backup
+    // or Device-to-Device transfer — zone-crossing history must not leak to
+    // Google Drive under a consumer app's backup policy. Same lifecycle as
+    // filesDir otherwise: survives app updates, not wiped under memory pressure.
+    private val storeDir = File(context.noBackupFilesDir, DIR_NAME).apply { mkdirs() }
+    private val logFile = File(storeDir, LOG_FILE_NAME)
+    private val countFile = File(storeDir, COUNT_FILE_NAME)
+    private val writer = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "polyfence-pending-events")
+    }
+    private val droppedCount = AtomicLong(loadDroppedCount())
+
+    /** Appends one event; returns the number of events evicted by this append. */
+    fun append(event: Map<String, Any>): Int {
+        if (queueSize <= 0) return 0
+        val callable = java.util.concurrent.Callable {
+            val existing = readAllUnsafe()
+            existing.add(JSONObject(event))
+            var evicted = 0
+            while (existing.size > queueSize) {
+                existing.removeAt(0)
+                evicted++
+            }
+            writeAllUnsafe(existing)
+            if (evicted > 0) {
+                val newTotal = droppedCount.addAndGet(evicted.toLong())
+                persistDroppedCountUnsafe(newTotal)
+            }
+            evicted
+        }
+        return try {
+            writer.submit(callable).get()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to persist pending event: ${e.message}")
+            0
+        }
+    }
+
+    /** Reads every queued event and deletes them in a single serialised block. */
+    fun drainAll(): List<Map<String, Any>> {
+        val callable = java.util.concurrent.Callable {
+            val events = readAllUnsafe()
+            if (events.isNotEmpty()) {
+                logFile.delete()
+            }
+            events.map { jsonToMap(it) }
+        }
+        return try {
+            writer.submit(callable).get()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to drain pending events: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Cumulative count of evicted events since first construction of a store on this device. */
+    fun droppedCountValue(): Long = droppedCount.get()
+
+    /**
+     * Stops the internal writer thread. Blocks briefly on any in-flight append
+     * or drain via the executor's own serialisation. Post-shutdown appends and
+     * drainAll calls silently fail — callers must construct a new instance to
+     * resume. The on-disk log file is preserved.
+     */
+    fun shutdown() {
+        writer.shutdown()
+    }
+
+    // The methods below run only inside the single-thread writer.
+
+    private fun readAllUnsafe(): MutableList<JSONObject> {
+        if (!logFile.exists()) return mutableListOf()
+        val result = mutableListOf<JSONObject>()
+        for (line in logFile.readLines()) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) continue
+            val parsed = runCatching { JSONObject(trimmed) }.getOrNull()
+            if (parsed != null) {
+                result.add(parsed)
+            } else {
+                Log.w(TAG, "Skipping corrupted queue entry (${trimmed.length} chars)")
+            }
+        }
+        return result
+    }
+
+    private fun writeAllUnsafe(events: List<JSONObject>) {
+        val tmp = File(storeDir, TMP_FILE_NAME)
+        tmp.bufferedWriter().use { w ->
+            events.forEach {
+                w.write(it.toString())
+                w.newLine()
+            }
+        }
+        if (!tmp.renameTo(logFile)) {
+            logFile.delete()
+            tmp.renameTo(logFile)
+        }
+    }
+
+    private fun loadDroppedCount(): Long {
+        return runCatching { countFile.readText().trim().toLong() }.getOrDefault(0L)
+    }
+
+    private fun persistDroppedCountUnsafe(value: Long) {
+        val tmp = File(storeDir, TMP_COUNT_FILE_NAME)
+        tmp.writeText(value.toString())
+        if (!tmp.renameTo(countFile)) {
+            countFile.delete()
+            tmp.renameTo(countFile)
+        }
+    }
+
+    private fun jsonToMap(o: JSONObject): Map<String, Any> {
+        val m = mutableMapOf<String, Any>()
+        o.keys().forEach { k -> o.opt(k)?.let { v -> m[k] = v } }
+        return m
+    }
+
+    companion object {
+        private const val TAG = "PendingEventsStore"
+        private const val DIR_NAME = "pending_events"
+        private const val LOG_FILE_NAME = "queue.jsonl"
+        private const val TMP_FILE_NAME = "queue.jsonl.tmp"
+        private const val COUNT_FILE_NAME = "dropped_count"
+        private const val TMP_COUNT_FILE_NAME = "dropped_count.tmp"
+    }
+}

@@ -95,6 +95,16 @@ class PolyfenceConfig(context: Context) {
             prefs.edit().putLong("gps_staleness_timeout_ms", value).apply()
         }
 
+    // Durable pending-events queue cap. 0 = off (default). When > 0, geofence
+    // events fired while the bridge sink is not receiving are persisted to disk
+    // in a bounded ring buffer; oldest events evict on overflow. Drained by the
+    // consumer via LocationTracker.drainPendingEvents.
+    var pendingEventsQueueSize: Int
+        get() = prefs.getInt("pending_events_queue_size", 0)
+        set(value) {
+            prefs.edit().putInt("pending_events_queue_size", value).apply()
+        }
+
     var minUpdateIntervalMs: Long
         get() = prefs.getLong("min_update_interval_ms", DEFAULT_MIN_UPDATE_INTERVAL_MS)
         set(value) {

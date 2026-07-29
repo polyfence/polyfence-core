@@ -90,6 +90,16 @@ public class LocationTracker: NSObject {
     // Core delegate for platform bridge communication
     public weak var coreDelegate: PolyfenceCoreDelegate?
 
+    // Durable-events plumbing. pendingEventsQueueSize == 0 disables persistence
+    // entirely (the default). bridgeAttached is the signal a platform bridge
+    // toggles to false when its internal delivery sink is not receiving —
+    // polyfence-core cannot see past the delegate boundary, so this hint tells
+    // the persist-hook that a live delivery attempt would drop.
+    private var pendingEventsQueueSize: Int = 0
+    private var pendingEventsStore: PendingEventsStore?
+    private var bridgeAttached: Bool = true
+    private let bridgeAttachedLock = NSLock()
+
     // Smart GPS Configuration
     private var smartConfig = SmartGpsConfig()
     private var currentGpsInterval: TimeInterval = 5.0
@@ -291,6 +301,12 @@ public class LocationTracker: NSObject {
         // enables degraded-exit and arms the staleness watchdog.
         gpsStalenessTimeoutMs = config?.gpsStalenessTimeoutMs ?? 0
         geofenceEngine.setDegradedExitEnabled(gpsStalenessTimeoutMs > 0)
+
+        // Durable pending-events queue. Off (append is a no-op) when
+        // pendingEventsQueueSize == 0. The store still initialises so drainAll
+        // works — recovers events queued under a previous larger cap.
+        pendingEventsQueueSize = config?.pendingEventsQueueSize ?? 0
+        pendingEventsStore = PendingEventsStore(queueSize: pendingEventsQueueSize)
     }
 
     // Track if first location after restart has been processed
@@ -790,6 +806,44 @@ public class LocationTracker: NSObject {
             eventData["dwellDurationMs"] = dwellMs
         }
         let finalEventData = eventData
+
+        // Persist the event when live delivery would drop — either no delegate
+        // is registered, or the bridge has signalled its sink is not receiving.
+        // Runs BEFORE the DispatchQueue.main.async delegate dispatch on the
+        // calling thread so the drop-vs-persist decision is made synchronously.
+        //
+        // Unlike Android, iOS does not additionally try/catch the delegate
+        // invocation. Rationale: Swift try/catch catches only Swift Error
+        // values, not the Objective-C NSException that would flow from e.g. a
+        // Flutter FlutterEventSink invoked from the wrong queue — those crash
+        // the process rather than becoming catchable failures. iOS bridges
+        // therefore own the responsibility of calling setBridgeAttached(false)
+        // from their bridge-teardown / invalidation callbacks; the tracker
+        // cannot detect a broken sink post-invocation the way Android can.
+        if pendingEventsQueueSize > 0 {
+            bridgeAttachedLock.lock()
+            let attached = bridgeAttached
+            bridgeAttachedLock.unlock()
+            let delegateMissing = coreDelegate == nil
+            if delegateMissing || !attached {
+                if let store = pendingEventsStore {
+                    let evicted = store.append(finalEventData)
+                    if evicted > 0 {
+                        PolyfenceErrorManager.shared.reportError(
+                            type: "pending_events_evicted",
+                            message: "Pending events queue reached capacity; oldest events dropped",
+                            context: [
+                                "severity": "warning",
+                                "droppedCount": evicted,
+                                "platform": "ios"
+                            ]
+                        )
+                    }
+                } else {
+                    NSLog("[LocationTracker] queue enabled (size=\(pendingEventsQueueSize)) but store is nil — event dropped")
+                }
+            }
+        }
 
         // Send event to delegate on main thread
         DispatchQueue.main.async {
@@ -1455,6 +1509,27 @@ extension LocationTracker {
             geofenceEngine.setDegradedExitEnabled(gpsStalenessTimeoutMs > 0)
         }
 
+        // Durable pending-events queue cap (0 = off). Rebuild the store on
+        // change so the new cap takes effect on the next append. Shut down the
+        // outgoing store first so a mid-flight append cannot race the new
+        // store on the same on-disk log. On-disk events survive the rebuild
+        // because construction does not touch the log file. Triple coercion
+        // because bridges emit Int / Double / NSNumber depending on their
+        // platform-channel serialiser.
+        if let size = configMap["pendingEventsQueueSize"] as? Int {
+            pendingEventsQueueSize = size
+            pendingEventsStore?.shutdown()
+            pendingEventsStore = PendingEventsStore(queueSize: size)
+        } else if let sizeDouble = configMap["pendingEventsQueueSize"] as? Double {
+            pendingEventsQueueSize = Int(sizeDouble)
+            pendingEventsStore?.shutdown()
+            pendingEventsStore = PendingEventsStore(queueSize: Int(sizeDouble))
+        } else if let sizeNS = configMap["pendingEventsQueueSize"] as? NSNumber {
+            pendingEventsQueueSize = sizeNS.intValue
+            pendingEventsStore?.shutdown()
+            pendingEventsStore = PendingEventsStore(queueSize: sizeNS.intValue)
+        }
+
         if let dwellSettings = configMap["dwellSettings"] as? [String: Any] {
             let dwellEnabled = dwellSettings["enabled"] as? Bool ?? true
             let dwellThresholdMs = dwellSettings["dwellThresholdMs"] as? Int
@@ -1562,6 +1637,7 @@ extension LocationTracker {
 
         base["gpsAccuracyThreshold"] = geofenceEngine.getGpsAccuracyThreshold()
         base["gpsStalenessTimeoutMs"] = gpsStalenessTimeoutMs
+        base["pendingEventsQueueSize"] = pendingEventsQueueSize
         base["dwellSettings"] = geofenceEngine.getDwellConfigMap()
         base["clusterSettings"] = geofenceEngine.getClusterConfigMap()
         base["scheduleSettings"] = TrackingScheduler.shared.getConfigMap()
@@ -1613,6 +1689,36 @@ extension LocationTracker {
      */
     public func getCurrentZoneStates() -> [String: Bool] {
         return geofenceEngine.getCurrentZoneStates()
+    }
+
+    /// Tell the tracker whether the bridge's delivery sink is currently receiving.
+    /// Bridges call `false` when their platform-channel sink is torn down (e.g.
+    /// on `FlutterEventSink` teardown, RN bridge invalidation) and `true` when
+    /// it is re-attached. The tracker uses this to decide whether a fired event
+    /// will actually reach the consumer or drop silently — in the drop case,
+    /// the event is persisted into the durable queue (when
+    /// `pendingEventsQueueSize > 0`). Default is `true` — a direct-Swift
+    /// consumer with no bridge sees today's behaviour with no change.
+    public func setBridgeAttached(_ attached: Bool) {
+        bridgeAttachedLock.lock()
+        bridgeAttached = attached
+        bridgeAttachedLock.unlock()
+    }
+
+    /// Drain every event that was persisted while a bridge was not receiving.
+    /// Returns the events in oldest-first order and removes them from disk in
+    /// the same serialised block. Returns an empty array when no events are
+    /// queued or the store is not initialised.
+    public func drainPendingEvents() -> [[String: Any]] {
+        return pendingEventsStore?.drainAll() ?? []
+    }
+
+    /// Cumulative count of events that have been evicted from the pending queue
+    /// since first construction of a store on this device (oldest-first
+    /// eviction fires when the queue cap is reached). Persists across process
+    /// restarts. Does not reset.
+    public func pendingEventsDroppedCount() -> Int64 {
+        return pendingEventsStore?.currentDroppedCount() ?? 0
     }
 
     /**

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Durable native pending-events queue** — a new `PendingEventsStore` primitive on both platforms persists zone-crossing events across the moments when the consumer's JS / Dart runtime is torn down but the polyfence-core native tracker is still running. Off by default: set `pendingEventsQueueSize > 0` on `PolyfenceConfig` (e.g. `500`) to enable. When the queue reaches capacity, oldest events evict first and an `onError` event of type `pending_events_evicted` fires with `context["severity"] = "warning"` and `context["droppedCount"] = N` so the loss is observable. New `LocationTracker.drainPendingEvents(context)` / `pendingEventsDroppedCount(context)` on Android (companion) and `drainPendingEvents()` / `pendingEventsDroppedCount()` on iOS (instance) let the bridge drain the queue on next attach. Events survive a full runtime teardown through the durable file store at `noBackupFilesDir/pending_events/queue.jsonl` (Android) / `Application Support/polyfence-pending-events/queue.jsonl` (iOS, marked `isExcludedFromBackupKey = true`). Both locations are excluded from device-backed-up storage — zone-crossing history never leaks to iCloud or Google Drive under a consumer app's backup policy. Foundational commit — the reconciliation-ordering change that skips zones with drained events during `RECOVERY_ENTER/EXIT` reconciliation, and OS-managed wake-fence registration for surviving full process kill, land in follow-up commits.
+- **`LocationTracker.setBridgeAttached(Bool)`** on both platforms — signal a bridge toggles to `false` when its internal delivery sink is not receiving (e.g. Flutter `EventChannel.onCancel`, RN `hasActiveReactInstance == false`) and `true` when re-attached. Polyfence-core uses this to decide whether a fired event will actually reach the consumer or drop silently — in the drop case it persists into the durable queue. Default `true` so direct-Kotlin/Swift consumers with no bridge see no change on upgrade.
+
 ## [1.0.14] - 2026-07-21
 
 ### Fixed

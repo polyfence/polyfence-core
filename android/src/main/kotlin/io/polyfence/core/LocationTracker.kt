@@ -92,6 +92,34 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Drain every event that was persisted while a bridge was not receiving.
+         * Returns the events in oldest-first order and removes them from disk in the
+         * same serialised block. Safe to call whether or not the tracking Service is
+         * running — a temporary read-only store is constructed off the caller's
+         * context when the Service is not up. Returns an empty list when no events
+         * are queued.
+         */
+        fun drainPendingEvents(context: Context): List<Map<String, Any>> {
+            val runningStore = currentInstance?.pendingEventsStore
+            if (runningStore != null) return runningStore.drainAll()
+            val store = PendingEventsStore(context.applicationContext, 0)
+            return store.drainAll().also { store.shutdown() }
+        }
+
+        /**
+         * Cumulative count of events that have been evicted from the pending queue
+         * since first construction of a store on this device (oldest-first eviction
+         * fires when the queue cap is reached). The counter persists across process
+         * restarts. Does not reset.
+         */
+        fun pendingEventsDroppedCount(context: Context): Long {
+            val runningStore = currentInstance?.pendingEventsStore
+            if (runningStore != null) return runningStore.droppedCountValue()
+            val store = PendingEventsStore(context.applicationContext, 0)
+            return store.droppedCountValue().also { store.shutdown() }
+        }
+
+        /**
          * Get current smart GPS configuration
          */
         fun getCurrentSmartConfiguration(): SmartGpsConfig {
@@ -152,6 +180,7 @@ class LocationTracker : Service() {
                 base["dwellSettings"] = engine.getDwellConfigMap()
                 base["clusterSettings"] = engine.getClusterConfigMap()
                 base["gpsStalenessTimeoutMs"] = instance?.gpsStalenessTimeoutMs ?: 0L
+                base["pendingEventsQueueSize"] = instance?.pendingEventsQueueSize ?: 0
             } else {
                 // Service not running — return the engine's compile-time
                 // defaults so the caller sees a stable shape rather than
@@ -170,6 +199,7 @@ class LocationTracker : Service() {
                     "refreshDistanceMeters" to GeofenceEngine.DEFAULT_CLUSTER_REFRESH_DISTANCE_METERS
                 )
                 base["gpsStalenessTimeoutMs"] = 0L
+                base["pendingEventsQueueSize"] = 0
             }
 
             // TrackingScheduler is a companion field lazily initialised
@@ -303,6 +333,7 @@ class LocationTracker : Service() {
                 "timeWindows" to emptyList<Any>()
             )
             base["gpsStalenessTimeoutMs"] = 0L
+            base["pendingEventsQueueSize"] = 0
             val defaults = ActivitySettings()
             base["activitySettings"] = mapOf(
                 "enabled" to defaults.enabled,
@@ -516,12 +547,36 @@ class LocationTracker : Service() {
     // Core delegate for platform bridge communication
     private var coreDelegate: PolyfenceCoreDelegate? = null
 
+    // Durable-events plumbing. `pendingEventsQueueSize` = 0 disables persistence
+    // entirely (the default). `bridgeAttached` is the signal a platform bridge
+    // toggles to false when its internal delivery sink is not receiving —
+    // polyfence-core cannot see past the delegate boundary, so this hint tells
+    // the persist-hook that a live delivery attempt would drop.
+    private var pendingEventsQueueSize: Int = 0
+    private var pendingEventsStore: PendingEventsStore? = null
+    @Volatile
+    private var bridgeAttached: Boolean = true
+
     /**
      * Set the core delegate for receiving events from the engine.
      * Platform bridges (Flutter, React Native, etc.) implement PolyfenceCoreDelegate.
      */
     fun setCoreDelegate(delegate: PolyfenceCoreDelegate?) {
         coreDelegate = delegate
+    }
+
+    /**
+     * Tell the tracker whether the bridge's delivery sink is currently receiving.
+     * Bridges call `false` when their platform-channel sink is torn down (e.g. on
+     * `EventChannel.onCancel` in Flutter, `hasActiveReactInstance == false` in RN)
+     * and `true` when it is re-attached. The tracker uses this to decide whether
+     * a fired event will actually reach the consumer or drop silently — in the
+     * drop case, the event is persisted into the durable queue (when
+     * `pendingEventsQueueSize > 0`) instead. Default is `true` — a direct-Kotlin
+     * consumer with no bridge sees today's behaviour with no change.
+     */
+    fun setBridgeAttached(attached: Boolean) {
+        bridgeAttached = attached
     }
 
     // Error Recovery Properties
@@ -655,6 +710,12 @@ class LocationTracker : Service() {
 
         // Initialize persistence
         zonePersistence = ZonePersistence(this)
+
+        // Initialize durable pending-events queue. Off (append is a no-op) when
+        // pendingEventsQueueSize == 0. The store still initialises so drainAll
+        // works — recovers events queued under a previous larger cap.
+        pendingEventsQueueSize = config.pendingEventsQueueSize
+        pendingEventsStore = PendingEventsStore(applicationContext, pendingEventsQueueSize)
 
         // Initialize location client
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -1273,7 +1334,48 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             eventMap["dwellDurationMs"] = dwellMs
         }
     }
-    coreDelegate?.onGeofenceEvent(eventMap)
+
+    // Attempt live delivery when a delegate is registered AND the bridge has
+    // signalled its sink is receiving. Any exception thrown by the delegate
+    // (e.g. Flutter EventSink.success off-main → IllegalStateException) flips
+    // bridgeAttached to false and falls through to the persist branch — a
+    // crashed bridge that never called setBridgeAttached(false) auto-recovers
+    // on the next event.
+    val delegate = coreDelegate
+    var deliveredLive = false
+    if (delegate != null && bridgeAttached) {
+        try {
+            delegate.onGeofenceEvent(eventMap)
+            deliveredLive = true
+        } catch (e: Exception) {
+            Log.w(TAG, "PF: delegate.onGeofenceEvent threw ${e.javaClass.simpleName}: ${e.message} — persisting instead")
+            bridgeAttached = false
+        }
+    }
+
+    // Persist to the durable queue if live delivery did not happen — either the
+    // delegate was missing, the bridge was detached, or the delivery attempt
+    // above threw. Guarded by pendingEventsQueueSize > 0 so consumers who never
+    // opt in see no change.
+    if (!deliveredLive && pendingEventsQueueSize > 0) {
+        val store = pendingEventsStore
+        if (store != null) {
+            val evicted = store.append(eventMap.toMap())
+            if (evicted > 0) {
+                PolyfenceErrorManager.reportError(
+                    type = "pending_events_evicted",
+                    message = "Pending events queue reached capacity; oldest events dropped",
+                    context = mapOf(
+                        "severity" to "warning",
+                        "droppedCount" to evicted,
+                        "platform" to "android"
+                    )
+                )
+            }
+        } else {
+            Log.w(TAG, "PF: queue enabled (size=$pendingEventsQueueSize) but store is nil — event dropped")
+        }
+    }
 
     // Terse geofence event log
     val displayName = if (zoneName.isNotEmpty()) zoneName else zoneId
@@ -1879,6 +1981,19 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 config.gpsStalenessTimeoutMs = gpsStalenessTimeoutMs
                 geofenceEngine.setDegradedExitEnabled(gpsStalenessTimeoutMs > 0)
                 Log.d(TAG, "GPS staleness timeout updated to ${gpsStalenessTimeoutMs}ms")
+            }
+
+            // Durable pending-events queue cap (0 = off). Rebuild the store on
+            // change so the new cap takes effect on the next append. On-disk
+            // events survive the rebuild because construction does not touch
+            // the log file.
+            val newQueueSize = configMap["pendingEventsQueueSize"] as? Number
+            if (newQueueSize != null) {
+                pendingEventsQueueSize = newQueueSize.toInt()
+                config.pendingEventsQueueSize = pendingEventsQueueSize
+                pendingEventsStore?.shutdown()
+                pendingEventsStore = PendingEventsStore(applicationContext, pendingEventsQueueSize)
+                Log.d(TAG, "Pending events queue size updated to $pendingEventsQueueSize")
             }
 
             // Update dwell configuration if provided
