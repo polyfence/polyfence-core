@@ -807,48 +807,52 @@ public class LocationTracker: NSObject {
         }
         let finalEventData = eventData
 
-        // Persist the event when live delivery would drop — either no delegate
-        // is registered, or the bridge has signalled its sink is not receiving.
-        // Runs BEFORE the DispatchQueue.main.async delegate dispatch on the
-        // calling thread so the drop-vs-persist decision is made synchronously.
+        // XOR delivery: live-deliver when a delegate is registered AND the
+        // bridge has signalled its sink is receiving; otherwise persist to the
+        // durable queue for a subsequent drain. Never both — persist AFTER a
+        // live delivery would double-report the crossing on the next drain.
         //
         // Unlike Android, iOS does not additionally try/catch the delegate
         // invocation. Rationale: Swift try/catch catches only Swift Error
         // values, not the Objective-C NSException that would flow from e.g. a
-        // Flutter FlutterEventSink invoked from the wrong queue — those crash
-        // the process rather than becoming catchable failures. iOS bridges
-        // therefore own the responsibility of calling setBridgeAttached(false)
-        // from their bridge-teardown / invalidation callbacks; the tracker
-        // cannot detect a broken sink post-invocation the way Android can.
-        if pendingEventsQueueSize > 0 {
-            bridgeAttachedLock.lock()
-            let attached = bridgeAttached
-            bridgeAttachedLock.unlock()
-            let delegateMissing = coreDelegate == nil
-            if delegateMissing || !attached {
-                if let store = pendingEventsStore {
-                    let evicted = store.append(finalEventData)
-                    if evicted > 0 {
-                        PolyfenceErrorManager.shared.reportError(
-                            type: "pending_events_evicted",
-                            message: "Pending events queue reached capacity; oldest events dropped",
-                            context: [
-                                "severity": "warning",
-                                "droppedCount": evicted,
-                                "platform": "ios"
-                            ]
-                        )
-                    }
-                } else {
-                    NSLog("[LocationTracker] queue enabled (size=\(pendingEventsQueueSize)) but store is nil — event dropped")
-                }
+        // FlutterEventSink invoked from the wrong queue — those crash the
+        // process rather than becoming catchable failures. iOS bridges own
+        // the responsibility of calling setBridgeAttached(false) from their
+        // teardown / invalidation callbacks; the tracker cannot detect a
+        // broken sink post-invocation the way Android can.
+        bridgeAttachedLock.lock()
+        let attached = bridgeAttached
+        bridgeAttachedLock.unlock()
+        let delegate = coreDelegate
+        let deliveredLive: Bool
+
+        if delegate != nil && attached {
+            DispatchQueue.main.async {
+                self.geofenceCallback?(finalEventData)
+                delegate?.onGeofenceEvent(finalEventData)
             }
+            deliveredLive = true
+        } else {
+            deliveredLive = false
         }
 
-        // Send event to delegate on main thread
-        DispatchQueue.main.async {
-            self.geofenceCallback?(finalEventData)
-            self.coreDelegate?.onGeofenceEvent(finalEventData)
+        if !deliveredLive && pendingEventsQueueSize > 0 {
+            if let store = pendingEventsStore {
+                let evicted = store.append(finalEventData)
+                if evicted > 0 {
+                    PolyfenceErrorManager.shared.reportError(
+                        type: "pending_events_evicted",
+                        message: "Pending events queue reached capacity; oldest events dropped",
+                        context: [
+                            "severity": "warning",
+                            "droppedCount": evicted,
+                            "platform": "ios"
+                        ]
+                    )
+                }
+            } else {
+                NSLog("[LocationTracker] queue enabled (size=\(pendingEventsQueueSize)) but store is nil — event dropped")
+            }
         }
 
         // Show notification with proper zone name
@@ -1705,12 +1709,32 @@ extension LocationTracker {
         bridgeAttachedLock.unlock()
     }
 
+    /// Test-only seam for iOS unit tests that need to drive the persist-hook
+    /// without wiring a real CLLocationManager fix. Underscore-prefixed and
+    /// internal-scoped to keep it out of the public API while allowing
+    /// `@testable import PolyfenceCore` to reach it. Do not call from
+    /// production code.
+    internal func _testInvokeHandleGeofenceEvent(zoneId: String, eventType: String, location: CLLocation) {
+        trackingEnabled = true
+        handleGeofenceEvent(zoneId: zoneId, eventType: eventType, location: location, detectionTimeMs: 5.0)
+    }
+
     /// Drain every event that was persisted while a bridge was not receiving.
     /// Returns the events in oldest-first order and removes them from disk in
     /// the same serialised block. Returns an empty array when no events are
     /// queued or the store is not initialised.
+    ///
+    /// Drained events are also applied to the engine's zoneStates so a
+    /// subsequent reconcileZoneStates sees the post-drain truth: any zone
+    /// whose drain-final state matches actual position produces no RECOVERY
+    /// event; any zone with a genuine mismatch (e.g. eviction dropped a later
+    /// crossing) still recovers via the normal reconcile mismatch path.
     public func drainPendingEvents() -> [[String: Any]] {
-        return pendingEventsStore?.drainAll() ?? []
+        let events = pendingEventsStore?.drainAll() ?? []
+        if !events.isEmpty {
+            _ = geofenceEngine.applyDrainedEventsToState(events)
+        }
+        return events
     }
 
     /// Cumulative count of events that have been evicted from the pending queue

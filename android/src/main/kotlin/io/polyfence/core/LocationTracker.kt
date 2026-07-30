@@ -93,17 +93,34 @@ class LocationTracker : Service() {
 
         /**
          * Drain every event that was persisted while a bridge was not receiving.
-         * Returns the events in oldest-first order and removes them from disk in the
-         * same serialised block. Safe to call whether or not the tracking Service is
-         * running — a temporary read-only store is constructed off the caller's
-         * context when the Service is not up. Returns an empty list when no events
-         * are queued.
+         * Returns the events in oldest-first order and removes them from disk in
+         * the same serialised block. Safe to call whether or not the tracking
+         * Service is running — a temporary read-only store is constructed off
+         * the caller's context when the Service is not up. Returns an empty
+         * list when no events are queued.
+         *
+         * When the Service is running, drained events are also applied to the
+         * engine's zoneStates so a subsequent reconcileZoneStates sees the
+         * post-drain truth: any zone whose drain-final state matches actual
+         * position produces no RECOVERY event; any zone with a genuine
+         * mismatch (e.g. eviction dropped a later crossing) still recovers
+         * via the normal reconcile mismatch path. When the Service is not
+         * running there's no engine to update — the caller gets the raw
+         * events and reconcile-on-next-boot fills in from persisted state.
          */
         fun drainPendingEvents(context: Context): List<Map<String, Any>> {
-            val runningStore = currentInstance?.pendingEventsStore
-            if (runningStore != null) return runningStore.drainAll()
-            val store = PendingEventsStore(context.applicationContext, 0)
-            return store.drainAll().also { store.shutdown() }
+            val instance = currentInstance
+            val runningStore = instance?.pendingEventsStore
+            val events = if (runningStore != null) {
+                runningStore.drainAll()
+            } else {
+                val store = PendingEventsStore(context.applicationContext, 0)
+                store.drainAll().also { store.shutdown() }
+            }
+            if (instance != null && events.isNotEmpty()) {
+                instance.geofenceEngine.applyDrainedEventsToState(events)
+            }
+            return events
         }
 
         /**

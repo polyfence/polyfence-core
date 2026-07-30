@@ -189,4 +189,5 @@ class LocationTrackerPersistHookTest {
         assertEquals(1, drainedAgain.size)
         assertEquals("throw-2", drainedAgain[0]["zoneId"])
     }
+
 }

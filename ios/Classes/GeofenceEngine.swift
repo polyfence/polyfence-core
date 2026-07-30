@@ -98,6 +98,25 @@ class GeofenceEngine {
     // Track if state was recovered from persistence on startup
     private var stateRecoveredFromPersistence = false
 
+    // Mutual exclusion between reconcile and drain-apply. Both mutate
+    // zoneStates and emit events based on it; if reconcile runs mid-apply, it
+    // could see a half-updated zoneStates and fire a spurious
+    // RECOVERY_ENTER/EXIT for a zone whose drain-final state hasn't been
+    // written yet. Distinct from syncQueue (which serialises fine-grained
+    // zoneStates reads inside checkLocation) so acquiring reconcileLock
+    // cannot recursively contend with syncQueue.sync used inside these
+    // methods.
+    private let reconcileLock = NSLock()
+
+    /// Test-only seam. Swift-only classes have no clean write-access path to a
+    /// `private` stored property from XCTest (KVC needs NSObject, Mirror is
+    /// read-only). Exposing an `internal` setter with an underscore prefix
+    /// keeps the seam out of the public API while letting `@testable import
+    /// PolyfenceCore` reach it. Do not call from production code.
+    internal func _testForceStateRecoveredFromPersistence(_ value: Bool) {
+        stateRecoveredFromPersistence = value
+    }
+
     /**
      * Zone confidence tracking (ported from Android)
      */
@@ -322,11 +341,23 @@ class GeofenceEngine {
     }
 
     /**
-     * Reconcile zone states with current location after service restart
-     * Fires RECOVERY_ENTER/RECOVERY_EXIT events for mismatches
-     * Should be called with first valid location after restart
+     * Reconcile zone states with current location after service restart.
+     * Fires RECOVERY_ENTER/RECOVERY_EXIT events for mismatches. Should be
+     * called with the first valid location after restart.
+     *
+     * Drain-then-reconcile ordering is preserved via applyDrainedEventsToState
+     * (called from LocationTracker.drainPendingEvents BEFORE reconcile runs):
+     * that method walks the drained batch and writes the post-drain truth into
+     * zoneStates. Reconcile then does its normal mismatch check — if the drain
+     * left state consistent with actual position, no recovery event fires; if
+     * a genuine mismatch remains (e.g. eviction dropped a later crossing so
+     * the drain's final state disagrees with GPS), reconcile correctly fires
+     * RECOVERY_ENTER / RECOVERY_EXIT to recover the missed transition. A
+     * skip-list of drained zone IDs would incorrectly suppress that recovery.
      */
     func reconcileZoneStates(_ location: CLLocation) {
+        reconcileLock.lock()
+        defer { reconcileLock.unlock() }
         if !stateRecoveredFromPersistence {
             // Cold-start race guard: if no zones are registered yet, the engine
             // got a location fix before the bridge's addZone() calls landed.
@@ -407,6 +438,41 @@ class GeofenceEngine {
         }
 
         stateRecoveredFromPersistence = false // Reset flag after reconciliation
+    }
+
+    /**
+     * Apply the state implied by a batch of drained pending events to the
+     * engine's zoneStates and persist the updated snapshot. Returns the set
+     * of zoneIds whose state was touched — LocationTracker forwards this to
+     * the next reconcileZoneStates call as the skip-set so the reconciler
+     * does not double-report an event that was already delivered via drain.
+     *
+     * Only ENTER/EXIT/DWELL events (and their RECOVERY variants) mutate
+     * membership. SIGNAL_LOST/SIGNAL_RESTORED are membership-neutral and
+     * ignored by this method.
+     */
+    func applyDrainedEventsToState(_ events: [[String: Any]]) -> Set<String> {
+        reconcileLock.lock()
+        defer { reconcileLock.unlock() }
+        if events.isEmpty { return [] }
+        var touched = Set<String>()
+        for event in events {
+            guard let zoneId = event["zoneId"] as? String,
+                  let eventType = event["eventType"] as? String else { continue }
+            let isInsideAfter: Bool
+            switch eventType {
+            case "ENTER", GeofenceEngine.EVENT_RECOVERY_ENTER, "DWELL":
+                isInsideAfter = true
+            case "EXIT", GeofenceEngine.EVENT_RECOVERY_EXIT:
+                isInsideAfter = false
+            default:
+                continue
+            }
+            syncQueue.sync { self.zoneStates[zoneId] = isInsideAfter }
+            touched.insert(zoneId)
+        }
+        if !touched.isEmpty { persistAllZoneStates() }
+        return touched
     }
 
     /**
