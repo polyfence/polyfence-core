@@ -2,7 +2,10 @@ package io.polyfence.core
 
 import android.content.Context
 import android.util.Log
+import java.io.BufferedWriter
 import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStreamWriter
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -127,11 +130,21 @@ internal class PendingEventsStore(context: Context, private val queueSize: Int) 
 
     private fun writeAllUnsafe(events: List<JSONObject>) {
         val tmp = File(storeDir, TMP_FILE_NAME)
-        tmp.bufferedWriter().use { w ->
+        // Force bytes to disk before rename. This is a queue for surviving
+        // process death; the whole feature loses meaning if a power loss
+        // between rename and disk-flush loses the last durable write. iOS's
+        // `Data.write(to:options:.atomic)` performs the same fsync-then-
+        // rename dance; matching it on Android needs an explicit fd.sync
+        // because `File.bufferedWriter()` only flushes to the buffer, not to
+        // the storage device.
+        FileOutputStream(tmp).use { fos ->
+            val writer = BufferedWriter(OutputStreamWriter(fos, Charsets.UTF_8))
             events.forEach {
-                w.write(it.toString())
-                w.newLine()
+                writer.write(it.toString())
+                writer.newLine()
             }
+            writer.flush()
+            fos.fd.sync()
         }
         if (!tmp.renameTo(logFile)) {
             logFile.delete()
@@ -145,7 +158,14 @@ internal class PendingEventsStore(context: Context, private val queueSize: Int) 
 
     private fun persistDroppedCountUnsafe(value: Long) {
         val tmp = File(storeDir, TMP_COUNT_FILE_NAME)
-        tmp.writeText(value.toString())
+        // Same fsync-before-rename discipline as writeAllUnsafe — a stale
+        // droppedCount that survives a crash after the queue.jsonl was
+        // rewritten would silently under-count evictions when the app
+        // recovers.
+        FileOutputStream(tmp).use { fos ->
+            fos.write(value.toString().toByteArray(Charsets.UTF_8))
+            fos.fd.sync()
+        }
         if (!tmp.renameTo(countFile)) {
             countFile.delete()
             tmp.renameTo(countFile)

@@ -495,7 +495,7 @@ class GeofenceEngine {
     ///
     /// A nil store returns an empty array — matches the "Service not
     /// running, no engine to update" call shape.
-    public func drainAndApply(_ store: PendingEventsStore?) -> [[String: Any]] {
+    func drainAndApply(_ store: PendingEventsStore?) -> [[String: Any]] {
         reconcileLock.lock()
         defer { reconcileLock.unlock() }
         guard let store = store else { return [] }
