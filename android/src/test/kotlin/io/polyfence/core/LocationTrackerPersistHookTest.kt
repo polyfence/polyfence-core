@@ -170,6 +170,24 @@ class LocationTrackerPersistHookTest {
     }
 
     @Test
+    fun `companion setBridgeAttached delegates to the live instance`() {
+        // Companion wrapper is the entry point platform bridges call so they
+        // don't have to reach past the private `currentInstance` field. It
+        // mirrors the existing setBridgePlatform / setPendingCoreDelegate
+        // shape — routes to the running instance when present, stages a
+        // pending value otherwise. This test proves the live-delegation half.
+        invokeUpdateConfigurationFromMap(mapOf("pendingEventsQueueSize" to 10))
+        tracker.setCoreDelegate(NoopDelegate())
+
+        LocationTracker.setBridgeAttached(false)
+        invokeHandleGeofenceEvent("companion-1", "ENTER")
+
+        val drained = LocationTracker.drainPendingEvents(context)
+        assertEquals(1, drained.size)
+        assertEquals("companion-1", drained[0]["zoneId"])
+    }
+
+    @Test
     fun `delegate throw persists the event and auto-flips bridgeAttached to false`() {
         invokeUpdateConfigurationFromMap(mapOf("pendingEventsQueueSize" to 10))
         tracker.setCoreDelegate(ThrowingDelegate())

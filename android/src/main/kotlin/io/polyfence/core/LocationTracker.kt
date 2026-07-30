@@ -72,6 +72,12 @@ class LocationTracker : Service() {
         // Pending core delegate (stored until service starts)
         private var pendingCoreDelegate: PolyfenceCoreDelegate? = null
 
+        // Pending bridge-attached hint (stored until service starts). Non-null
+        // means the bridge has expressed an intent before the Service was up;
+        // the instance-level default reasserts on Service restart, so callers
+        // that toggle this before onCreate need this staging point.
+        private var pendingBridgeAttached: Boolean? = null
+
         /**
          * Store activity settings to be applied when tracking starts
          */
@@ -511,6 +517,23 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Tell the tracker whether the bridge's delivery sink is currently
+         * receiving. Platform bridges (Flutter, React Native, etc.) call this
+         * from their init / dispose / teardown paths. See the instance method
+         * `setBridgeAttached` for the delivery-vs-persist contract.
+         *
+         * If the service is already running, applies to the live instance
+         * immediately. Otherwise stored as pending and applied when the
+         * service is created — the instance-level default (attached=true)
+         * reasserts on every Service restart, so the pending value survives
+         * a stop/start cycle before init completes.
+         */
+        fun setBridgeAttached(attached: Boolean) {
+            pendingBridgeAttached = attached
+            currentInstance?.setBridgeAttached(attached)
+        }
+
+        /**
          * Collect session telemetry from all native components.
          */
         fun getSessionTelemetry(): Map<String, Any?> {
@@ -716,6 +739,11 @@ class LocationTracker : Service() {
         // Apply pending core delegate set before service existed
         pendingCoreDelegate?.let { delegate ->
             coreDelegate = delegate
+        }
+
+        // Apply pending bridge-attached hint set before service existed
+        pendingBridgeAttached?.let { attached ->
+            bridgeAttached = attached
         }
 
         // Log device info for debugging battery issues on Samsung/etc
