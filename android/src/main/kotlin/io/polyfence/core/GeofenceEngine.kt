@@ -651,6 +651,27 @@ fun getZoneName(zoneId: String): String? {
     }
 
     /**
+     * Atomic drain + apply. Holds `reconcileLock` across the store drain
+     * and the state application so a concurrent `reconcileZoneStates`
+     * from the location-callback thread cannot see post-drain / pre-apply
+     * state and mis-fire `RECOVERY_ENTER` / `RECOVERY_EXIT`. Callers must
+     * route through this composite instead of pairing `store.drainAll()`
+     * and `applyDrainedEventsToState(events)` themselves — the gap
+     * between those two calls is where §9's double-report defeat becomes
+     * possible.
+     *
+     * A null store returns an empty list — matches the "Service not
+     * running, no engine to update" call shape.
+     */
+    internal fun drainAndApply(store: PendingEventsStore?): List<Map<String, Any>> = synchronized(reconcileLock) {
+        val events = store?.drainAll() ?: return@synchronized emptyList()
+        if (events.isNotEmpty()) {
+            applyDrainedEventsToState(events)
+        }
+        events
+    }
+
+    /**
      * Persist all current zone states (called after reconciliation or bulk changes)
      */
     private fun persistAllZoneStates() {

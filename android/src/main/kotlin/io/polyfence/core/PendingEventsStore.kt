@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONObject
 
@@ -88,13 +89,22 @@ internal class PendingEventsStore(context: Context, private val queueSize: Int) 
     fun droppedCountValue(): Long = droppedCount.get()
 
     /**
-     * Stops the internal writer thread. Blocks briefly on any in-flight append
-     * or drain via the executor's own serialisation. Post-shutdown appends and
-     * drainAll calls silently fail — callers must construct a new instance to
-     * resume. The on-disk log file is preserved.
+     * Stops the internal writer thread. Blocks until any in-flight append or
+     * drain completes (up to 1s) so a caller rebinding the store on a config
+     * change has a happens-before against the outgoing writer — otherwise
+     * `dropped_count` and `queue.jsonl` can race across the store swap and
+     * lose events or regress the counter. Post-shutdown appends and drainAll
+     * calls silently fail; callers must construct a new instance to resume.
+     * The on-disk log file is preserved. Matches iOS `PendingEventsStore`'s
+     * `serialQueue.sync {}` quiesce semantic.
      */
     fun shutdown() {
         writer.shutdown()
+        try {
+            writer.awaitTermination(1, TimeUnit.SECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
     }
 
     // The methods below run only inside the single-thread writer.

@@ -116,17 +116,18 @@ class LocationTracker : Service() {
          */
         fun drainPendingEvents(context: Context): List<Map<String, Any>> {
             val instance = currentInstance
-            val runningStore = instance?.pendingEventsStore
-            val events = if (runningStore != null) {
-                runningStore.drainAll()
+            return if (instance != null) {
+                // Composite drain-and-apply holds `reconcileLock` across both
+                // operations. Routing here (instead of drain + separate apply)
+                // closes the window where a concurrent `reconcileZoneStates`
+                // on the location-callback thread would see post-drain /
+                // pre-apply state and mis-fire `RECOVERY_*` for a zone the
+                // drained batch already resolved.
+                instance.geofenceEngine.drainAndApply(instance.pendingEventsStore)
             } else {
                 val store = PendingEventsStore(context.applicationContext, 0)
                 store.drainAll().also { store.shutdown() }
             }
-            if (instance != null && events.isNotEmpty()) {
-                instance.geofenceEngine.applyDrainedEventsToState(events)
-            }
-            return events
         }
 
         /**
@@ -1561,6 +1562,14 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         activityRecognitionManager = null
         // Ensure wake lock is released
         releaseWakeLock()
+        // Shut down pending-events writer thread. Its single-thread executor
+        // keeps its worker alive after the Service dies; each stop→destroy→
+        // create cycle would otherwise leak a `polyfence-pending-events`
+        // thread, accumulating in long-lived processes that restart the
+        // foreground service (memory-pressure respawn, scheduled-window
+        // start).
+        pendingEventsStore?.shutdown()
+        pendingEventsStore = null
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {

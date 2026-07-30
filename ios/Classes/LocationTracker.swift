@@ -1740,11 +1740,13 @@ extension LocationTracker {
     /// event; any zone with a genuine mismatch (e.g. eviction dropped a later
     /// crossing) still recovers via the normal reconcile mismatch path.
     public func drainPendingEvents() -> [[String: Any]] {
-        let events = pendingEventsStore?.drainAll() ?? []
-        if !events.isEmpty {
-            _ = geofenceEngine.applyDrainedEventsToState(events)
-        }
-        return events
+        // Composite drain-and-apply holds `reconcileLock` across both
+        // operations. Routing here (instead of drain + separate apply)
+        // closes the window where a concurrent `reconcileZoneStates`
+        // on the location-callback thread would see post-drain /
+        // pre-apply state and mis-fire `RECOVERY_*` for a zone the
+        // drained batch already resolved.
+        return geofenceEngine.drainAndApply(pendingEventsStore)
     }
 
     /// Cumulative count of events that have been evicted from the pending queue

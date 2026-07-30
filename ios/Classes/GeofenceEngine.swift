@@ -105,8 +105,10 @@ class GeofenceEngine {
     // written yet. Distinct from syncQueue (which serialises fine-grained
     // zoneStates reads inside checkLocation) so acquiring reconcileLock
     // cannot recursively contend with syncQueue.sync used inside these
-    // methods.
-    private let reconcileLock = NSLock()
+    // methods. Recursive so drainAndApply can hold it across a call to
+    // applyDrainedEventsToState without deadlocking on itself — matches
+    // Java monitor re-entrance semantics used on Android.
+    private let reconcileLock = NSRecursiveLock()
 
     /// Test-only seam. Swift-only classes have no clean write-access path to a
     /// `private` stored property from XCTest (KVC needs NSObject, Mirror is
@@ -480,6 +482,28 @@ class GeofenceEngine {
         }
         if !touched.isEmpty { persistAllZoneStates() }
         return touched
+    }
+
+    /// Atomic drain + apply. Holds `reconcileLock` across the store drain
+    /// and the state application so a concurrent `reconcileZoneStates`
+    /// from the location-callback thread cannot see post-drain / pre-apply
+    /// state and mis-fire `RECOVERY_ENTER` / `RECOVERY_EXIT`. Callers must
+    /// route through this composite instead of pairing `store.drainAll()`
+    /// and `applyDrainedEventsToState(events)` themselves — the gap
+    /// between those two calls is where §9's double-report defeat becomes
+    /// possible.
+    ///
+    /// A nil store returns an empty array — matches the "Service not
+    /// running, no engine to update" call shape.
+    public func drainAndApply(_ store: PendingEventsStore?) -> [[String: Any]] {
+        reconcileLock.lock()
+        defer { reconcileLock.unlock() }
+        guard let store = store else { return [] }
+        let events = store.drainAll()
+        if !events.isEmpty {
+            _ = applyDrainedEventsToState(events)
+        }
+        return events
     }
 
     /**

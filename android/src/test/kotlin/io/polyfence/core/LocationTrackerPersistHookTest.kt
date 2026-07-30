@@ -155,9 +155,10 @@ class LocationTrackerPersistHookTest {
     }
 
     /**
-     * A delegate whose onGeofenceEvent always throws — represents the
-     * Bug-025-shape scenario where the bridge's underlying sink raises an
-     * exception (e.g. EventSink.success off-main → IllegalStateException).
+     * A delegate whose onGeofenceEvent always throws — a broken bridge
+     * sink (e.g. Flutter EventSink.success off the main thread →
+     * IllegalStateException) that the tracker must catch and auto-flip
+     * bridgeAttached to persist rather than propagate.
      */
     private class ThrowingDelegate : PolyfenceCoreDelegate {
         override fun onGeofenceEvent(eventData: Map<String, Any>) {
