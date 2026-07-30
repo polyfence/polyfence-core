@@ -107,6 +107,30 @@ final class LocationTrackerPersistHookTests: XCTestCase {
         XCTAssertTrue(tracker.drainPendingEvents().isEmpty)
     }
 
+    func testGeofenceCallbackFiresIndependentlyOfDelegateAndBridge() {
+        // A callback-only consumer (setGeofenceCallback with no coreDelegate)
+        // is an in-process direct-Swift subscriber — no bridge boundary, no
+        // drop scenario. The callback MUST fire regardless of the delegate /
+        // bridgeAttached state. An earlier iteration of the persist-hook XOR
+        // accidentally gated geofenceCallback alongside the delegate call, so
+        // callback-only consumers saw silent drops. Test locks in that the
+        // callback path is orthogonal to the delegate/persist XOR.
+        var received: [[String: Any]] = []
+        let expectation = self.expectation(description: "geofence callback fires")
+        tracker.setGeofenceCallback { event in
+            received.append(event)
+            expectation.fulfill()
+        }
+        tracker.coreDelegate = nil
+        tracker.setBridgeAttached(false)
+
+        tracker._testInvokeHandleGeofenceEvent(zoneId: "zone-a", eventType: "ENTER", location: locationAt(lat: 50.0, lng: 0.0))
+
+        wait(for: [expectation], timeout: 1.0)
+        XCTAssertEqual(received.count, 1)
+        XCTAssertEqual(received[0]["zoneId"] as? String, "zone-a")
+    }
+
     func testBridgeAttachedToggleTakesEffectBetweenFires() {
         let delegate = NoopDelegate()
         tracker.updateConfigurationFromMap(["pendingEventsQueueSize": 10])

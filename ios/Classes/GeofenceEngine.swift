@@ -443,9 +443,16 @@ class GeofenceEngine {
     /**
      * Apply the state implied by a batch of drained pending events to the
      * engine's zoneStates and persist the updated snapshot. Returns the set
-     * of zoneIds whose state was touched — LocationTracker forwards this to
-     * the next reconcileZoneStates call as the skip-set so the reconciler
-     * does not double-report an event that was already delivered via drain.
+     * of zoneIds whose state was touched.
+     *
+     * LocationTracker.drainPendingEvents calls this BEFORE the next
+     * reconcileZoneStates fires. The subsequent reconcile then does its
+     * normal mismatch check against the post-drain zoneStates — where the
+     * drained batch left state consistent with actual position, no
+     * recovery event fires; where a genuine mismatch remains (e.g. eviction
+     * dropped a later crossing so the drain's final state disagrees with
+     * GPS), reconcile fires RECOVERY_ENTER / RECOVERY_EXIT to recover the
+     * missed transition.
      *
      * Only ENTER/EXIT/DWELL events (and their RECOVERY variants) mutate
      * membership. SIGNAL_LOST/SIGNAL_RESTORED are membership-neutral and

@@ -807,10 +807,21 @@ public class LocationTracker: NSObject {
         }
         let finalEventData = eventData
 
-        // XOR delivery: live-deliver when a delegate is registered AND the
-        // bridge has signalled its sink is receiving; otherwise persist to the
-        // durable queue for a subsequent drain. Never both — persist AFTER a
-        // live delivery would double-report the crossing on the next drain.
+        // The direct-Swift geofenceCallback is an in-process closure with no
+        // bridge boundary and no drop scenario — fire it unconditionally
+        // whenever an event exists. It is orthogonal to the delegate/persist
+        // XOR below, which specifically guards against the bridge sink being
+        // dead. A callback-only consumer (setGeofenceCallback with no
+        // coreDelegate) MUST still receive events.
+        DispatchQueue.main.async {
+            self.geofenceCallback?(finalEventData)
+        }
+
+        // XOR delivery for the delegate path: live-deliver when a delegate is
+        // registered AND the bridge has signalled its sink is receiving;
+        // otherwise persist to the durable queue for a subsequent drain.
+        // Never both — persist AFTER a live delivery would double-report the
+        // crossing on the next drain.
         //
         // Unlike Android, iOS does not additionally try/catch the delegate
         // invocation. Rationale: Swift try/catch catches only Swift Error
@@ -828,7 +839,6 @@ public class LocationTracker: NSObject {
 
         if delegate != nil && attached {
             DispatchQueue.main.async {
-                self.geofenceCallback?(finalEventData)
                 delegate?.onGeofenceEvent(finalEventData)
             }
             deliveredLive = true
