@@ -58,7 +58,7 @@ implementation("io.polyfence:polyfence-core:1.0.14")
 
 polyfence-core declares **no** `<uses-permission>` entries of its own. Manifest merging happens at build time and cannot be gated on a runtime flag, so any permission this library declared would land in your merged manifest whether or not you use the feature that needs it — and `ACCESS_BACKGROUND_LOCATION` in particular triggers Google Play's manual background-location review. Declare what your integration actually uses:
 
-**Android — always required for background tracking:**
+**Android — required for background tracking.** polyfence-core's own permission gate refuses to start tracking on API 29+ without `ACCESS_BACKGROUND_LOCATION`, so it is required even if you never enable OS wake fences. Requesting it means Google Play's background-location declaration applies to your app:
 
 ```xml
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -78,14 +78,20 @@ polyfence-core declares **no** `<uses-permission>` entries of its own. Manifest 
 
 If `ACCESS_BACKGROUND_LOCATION` is missing or not granted, OS wake fences degrade to polling-only operation and emit an `os_geofence_permission_denied` event on the error channel with `context["severity"] = "warning"`. The runtime permission request is yours to make and to justify to the user.
 
-**iOS — required only if you set `osGeofenceWakeEnabled = true`**, in your app's own `Info.plist`:
+**iOS — required for background tracking**, in your app's own `Info.plist`. `requestAlwaysAuthorization()` is a silent no-op unless *both* usage descriptions are present, and `allowsBackgroundLocationUpdates` requires the `location` background mode — omit any of the three and you get no prompt, no error, and no background fixes:
 
 ```xml
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>Explain here why your app needs location while you are using it.</string>
 <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 <string>Explain here why your app needs location while it is not in use.</string>
+<key>UIBackgroundModes</key>
+<array>
+  <string>location</string>
+</array>
 ```
 
-You also need an "Always" authorization grant. "When in use" cannot deliver region callbacks after the process is killed, so Polyfence treats it the same as an outright denial and reports it through the same error path.
+If you set `osGeofenceWakeEnabled = true` you additionally need an "Always" authorization grant. "When in use" cannot deliver region callbacks after the process is killed, so Polyfence treats it the same as an outright denial and reports it through the same error path.
 
 ### Who this is for
 
