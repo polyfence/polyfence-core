@@ -28,6 +28,13 @@ internal class PendingEventsStore {
     private var droppedCount: Int64
     private let logger = OSLog(subsystem: "io.polyfence.core", category: "PendingEventsStore")
 
+    // Starts true because this instance cannot know what a previous process
+    // left on disk. Only ever cleared by observing an empty drain through this
+    // instance, so a false reading is always something this store proved.
+    // Mutated only inside serialQueue, so it stays totally ordered against
+    // appends that queue behind a drain.
+    private var mayHaveQueuedEvents: Bool = true
+
     init(queueSize: Int, rootDir: URL? = nil) {
         self.queueSize = queueSize
         let baseDir = rootDir ?? PendingEventsStore.defaultBaseDir()
@@ -39,11 +46,21 @@ internal class PendingEventsStore {
         self.droppedCount = PendingEventsStore.loadCount(from: countFile)
     }
 
+    /// False only when this instance has already drained the log to empty and
+    /// nothing has been appended since. Lets a caller that fires on every
+    /// listener attach skip the file read in the overwhelmingly common
+    /// nothing-queued case; a true reading still requires a real drain to
+    /// confirm.
+    func mayHaveEvents() -> Bool {
+        return serialQueue.sync { mayHaveQueuedEvents }
+    }
+
     /// Returns the number of events evicted by this append.
     @discardableResult
     func append(_ event: [String: Any]) -> Int {
         guard queueSize > 0 else { return 0 }
         return serialQueue.sync { [self] in
+            mayHaveQueuedEvents = true
             var events = readAllUnsafe()
             events.append(event)
             var evicted = 0
@@ -67,6 +84,7 @@ internal class PendingEventsStore {
             if !events.isEmpty {
                 try? FileManager.default.removeItem(at: logFile)
             }
+            mayHaveQueuedEvents = false
             return events
         }
     }

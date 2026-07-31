@@ -78,6 +78,12 @@ class LocationTracker : Service() {
         // that toggle this before onCreate need this staging point.
         private var pendingBridgeAttached: Boolean? = null
 
+        // Pending listener-live signal (stored until service starts). Non-null
+        // also means an external caller owns this signal, which suppresses the
+        // delegate-registration shortcut a direct-Kotlin consumer relies on.
+        @Volatile
+        private var pendingEventListenerActive: Boolean? = null
+
         /**
          * Store activity settings to be applied when tracking starts
          */
@@ -224,6 +230,8 @@ class LocationTracker : Service() {
                 base["clusterSettings"] = engine.getClusterConfigMap()
                 base["gpsStalenessTimeoutMs"] = instance?.gpsStalenessTimeoutMs ?: 0L
                 base["pendingEventsQueueSize"] = instance?.pendingEventsQueueSize ?: 0
+                base["pendingEventsAutoDrainEnabled"] =
+                    instance?.pendingEventsAutoDrainEnabled ?: true
                 base["osGeofenceWakeEnabled"] = instance?.osGeofenceWakeEnabled ?: false
                 base["osGeofenceMaxRegions"] = instance?.osGeofenceMaxRegions
                     ?: PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
@@ -246,6 +254,7 @@ class LocationTracker : Service() {
                 )
                 base["gpsStalenessTimeoutMs"] = 0L
                 base["pendingEventsQueueSize"] = 0
+                base["pendingEventsAutoDrainEnabled"] = true
                 base["osGeofenceWakeEnabled"] = false
                 base["osGeofenceMaxRegions"] = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
             }
@@ -382,6 +391,7 @@ class LocationTracker : Service() {
             )
             base["gpsStalenessTimeoutMs"] = 0L
             base["pendingEventsQueueSize"] = 0
+            base["pendingEventsAutoDrainEnabled"] = true
             base["osGeofenceWakeEnabled"] = false
             base["osGeofenceMaxRegions"] = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
             val defaults = ActivitySettings()
@@ -561,6 +571,35 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Tell the tracker whether a consumer's event listener is live.
+         *
+         * Distinct from [setBridgeAttached], which reports whether the bridge's
+         * own platform-channel sink is wired. A sink can be wired long before
+         * anything downstream of it is subscribed — both bridges attach their
+         * sink during `initialize()` — so only this signal means "an event
+         * handed over now reaches somebody".
+         *
+         * On the false→true edge, and when `pendingEventsQueueSize > 0` and the
+         * auto-drain flag is on, the durable queue is drained and replayed
+         * through the normal event callback. Repeated `true` calls are a no-op:
+         * a second subscriber must not replay the batch the first one received.
+         *
+         * Calling this at all declares that the caller owns the signal, which
+         * suppresses the delegate-registration shortcut in [setCoreDelegate].
+         * Bridges therefore call `setEventListenerActive(false)` from their
+         * plugin-attach hook — which the platform guarantees runs before any
+         * method-channel call can register a delegate.
+         *
+         * If the service is already running, applies to the live instance
+         * immediately. Otherwise stored as pending and applied when the service
+         * is created.
+         */
+        fun setEventListenerActive(active: Boolean) {
+            pendingEventListenerActive = active
+            currentInstance?.setEventListenerActive(active)
+        }
+
+        /**
          * Collect session telemetry from all native components.
          */
         fun getSessionTelemetry(): Map<String, Any?> {
@@ -624,6 +663,24 @@ class LocationTracker : Service() {
     @Volatile
     private var bridgeAttached: Boolean = true
 
+    // Auto-delivery plumbing. `eventListenerActive` is the "somebody is
+    // receiving" edge that replays the queue; `bridgeAttached` above is only
+    // "the bridge's sink is wired", which is true from `initialize()` onward
+    // and therefore says nothing about a subscriber existing.
+    @Volatile
+    private var eventListenerActive: Boolean = false
+    private var pendingEventsAutoDrainEnabled: Boolean = true
+
+    // A replay applies zone membership to the engine and persists the whole
+    // snapshot, so it must not run before restoreZonesFromStorage has loaded
+    // the other zones' states — a snapshot written from a half-populated map
+    // would erase them. It must also stay ahead of the first reconcile, which
+    // runs off the first fix after that same restore.
+    @Volatile
+    private var zoneStatesRestored: Boolean = false
+    @Volatile
+    private var autoDrainDeferredUntilZonesRestored: Boolean = false
+
     // OS wake-fence plumbing. Off by default. When on, the registrar mirrors the
     // top-N-nearest zones to Google Play Services' geofence API so a killed
     // process can be woken by an OS-side broadcast that enqueues the crossing
@@ -644,7 +701,15 @@ class LocationTracker : Service() {
      * Platform bridges (Flutter, React Native, etc.) implement PolyfenceCoreDelegate.
      */
     fun setCoreDelegate(delegate: PolyfenceCoreDelegate?) {
+        val hadDelegate = coreDelegate != null
         coreDelegate = delegate
+        // A direct-Kotlin consumer has no listener lifecycle to hook, so
+        // registering a delegate is its "I am receiving" moment. A bridge
+        // declares ownership of the signal from its plugin-attach hook, before
+        // any delegate can be registered, and is excluded here.
+        if (delegate != null && !hadDelegate && pendingEventListenerActive == null) {
+            setEventListenerActive(true)
+        }
     }
 
     /**
@@ -659,6 +724,91 @@ class LocationTracker : Service() {
      */
     fun setBridgeAttached(attached: Boolean) {
         bridgeAttached = attached
+    }
+
+    /**
+     * Tell the tracker whether a consumer's event listener is live. See the
+     * companion overload for the contract; this is the instance half.
+     */
+    fun setEventListenerActive(active: Boolean) {
+        if (eventListenerActive == active) return
+        eventListenerActive = active
+        if (active) replayQueuedEventsToListener()
+    }
+
+    /**
+     * Drain the durable queue and hand the events to the consumer through the
+     * same delegate callback live events use. No-op unless the queue is on, the
+     * auto-drain flag is set, and something is actually queued.
+     */
+    private fun replayQueuedEventsToListener() {
+        if (!pendingEventsAutoDrainEnabled) return
+        if (pendingEventsQueueSize <= 0) return
+        val store = pendingEventsStore ?: return
+        if (!zoneStatesRestored) {
+            autoDrainDeferredUntilZonesRestored = true
+            return
+        }
+        autoDrainDeferredUntilZonesRestored = false
+        // Nothing queued that this store has not already handed over — skip the
+        // file read so repeated attach/detach cycles cost nothing.
+        if (!store.mayHaveEvents()) return
+
+        // Composite drain-and-apply holds `reconcileLock` across the store drain
+        // and the state application, which is what keeps a concurrent
+        // reconcileZoneStates on the location-callback thread from mis-firing
+        // RECOVERY_* for a zone this batch already resolved.
+        val drained = geofenceEngine.drainAndApply(store)
+        if (drained.isEmpty()) return
+
+        val delegate = coreDelegate
+        if (delegate == null) {
+            Log.w(TAG, "PF: listener signalled active but no delegate registered — re-queueing ${drained.size} event(s)")
+            requeueUndeliveredEvents(drained)
+            return
+        }
+
+        val nowMs = System.currentTimeMillis()
+        for ((index, event) in drained.withIndex()) {
+            try {
+                delegate.onGeofenceEvent(markDeliveredLate(event, nowMs))
+            } catch (e: Exception) {
+                // Same auto-recovery the live path uses: a throwing sink is a
+                // dead sink. The rest of the batch goes back on disk rather
+                // than being lost with the failed one.
+                Log.w(TAG, "PF: delegate.onGeofenceEvent threw ${e.javaClass.simpleName} during replay — re-queueing remainder")
+                bridgeAttached = false
+                eventListenerActive = false
+                requeueUndeliveredEvents(drained.subList(index, drained.size))
+                return
+            }
+        }
+        Log.i(TAG, "PF: replayed ${drained.size} queued event(s) to the consumer's listener")
+    }
+
+    /**
+     * Return events to the durable queue after a failed replay. Membership
+     * state applied by the drain stays as-is: re-applying the same events on
+     * the next drain resolves to the same per-zone value.
+     */
+    private fun requeueUndeliveredEvents(events: List<Map<String, Any>>) {
+        val store = pendingEventsStore ?: return
+        events.forEach { store.append(it) }
+    }
+
+    /**
+     * Stamp the replay-provenance fields onto a queued event. `capturedTs` is
+     * the moment the crossing was detected — the `timestamp` the event carried
+     * when it was queued — so `queuedDurationMs` measures the wait, not the
+     * round trip.
+     */
+    private fun markDeliveredLate(event: Map<String, Any>, nowMs: Long): Map<String, Any> {
+        val capturedTs = (event["timestamp"] as? Number)?.toLong() ?: nowMs
+        return event + mapOf(
+            "deliveredLate" to true,
+            "capturedTs" to capturedTs,
+            "queuedDurationMs" to (nowMs - capturedTs).coerceAtLeast(0L)
+        )
     }
 
     /**
@@ -813,7 +963,15 @@ class LocationTracker : Service() {
         // pendingEventsQueueSize == 0. The store still initialises so drainAll
         // works — recovers events queued under a previous larger cap.
         pendingEventsQueueSize = config.pendingEventsQueueSize
+        pendingEventsAutoDrainEnabled = config.pendingEventsAutoDrainEnabled
         pendingEventsStore = PendingEventsStore(applicationContext, pendingEventsQueueSize)
+
+        // Applied after the store exists so a listener that went live before
+        // this Service was created replays against a real queue. The drain
+        // itself still waits for restoreZonesFromStorage.
+        pendingEventListenerActive?.let { active ->
+            setEventListenerActive(active)
+        }
 
         // OS wake-fence registrar. Off unless the consumer opts in — when off,
         // no fences are registered with the OS, no permission is checked, and
@@ -1430,6 +1588,14 @@ class LocationTracker : Service() {
             Log.i(TAG, "Restored $restored zones from storage ($failed failed)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to restore zones: ${e.message}")
+        } finally {
+            // Zone membership is now whole, and the first reconcile still has
+            // not run — the only window where a replay can apply its state
+            // without erasing or being erased by the persisted snapshot.
+            zoneStatesRestored = true
+            if (autoDrainDeferredUntilZonesRestored && eventListenerActive) {
+                replayQueuedEventsToListener()
+            }
         }
     }
 
@@ -2169,6 +2335,21 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 pendingEventsStore?.shutdown()
                 pendingEventsStore = PendingEventsStore(applicationContext, pendingEventsQueueSize)
                 Log.d(TAG, "Pending events queue size updated to $pendingEventsQueueSize")
+            }
+
+            // Automatic replay of queued events (true = on, default). Turning
+            // it on while a listener is already live replays immediately —
+            // otherwise the switch would not take effect until the consumer
+            // happened to resubscribe.
+            val newAutoDrain = configMap["pendingEventsAutoDrainEnabled"] as? Boolean
+            if (newAutoDrain != null) {
+                val autoDrainTurnedOn = newAutoDrain && !pendingEventsAutoDrainEnabled
+                pendingEventsAutoDrainEnabled = newAutoDrain
+                config.pendingEventsAutoDrainEnabled = newAutoDrain
+                if (autoDrainTurnedOn && eventListenerActive) {
+                    replayQueuedEventsToListener()
+                }
+                Log.d(TAG, "Pending events auto-drain updated to $pendingEventsAutoDrainEnabled")
             }
 
             // OS wake-fence slot budget. Applied before the toggle below so a

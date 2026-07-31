@@ -137,6 +137,18 @@ class PolyfenceConfig(context: Context) {
             prefs.edit().putInt("pending_events_queue_size", value).apply()
         }
 
+    // Automatic delivery of queued events. true = on (default) — the moment a
+    // consumer signals a live event listener, the queue is drained and replayed
+    // through the normal event callback. false leaves the queue pull-only, so
+    // nothing is delivered until the consumer calls
+    // LocationTracker.drainPendingEvents itself. Only has an effect while
+    // pendingEventsQueueSize > 0.
+    var pendingEventsAutoDrainEnabled: Boolean
+        get() = prefs.getBoolean("pending_events_auto_drain_enabled", true)
+        set(value) {
+            prefs.edit().putBoolean("pending_events_auto_drain_enabled", value).apply()
+        }
+
     // OS wake-fence registration. false = off (default) — Polyfence's own polling
     // engine is the sole detector; nothing is registered with the OS. When true,
     // the top-N-nearest active zones are registered with GeofencingClient so an

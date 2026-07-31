@@ -88,7 +88,17 @@ public class LocationTracker: NSObject {
     private var geofenceCallback: (([String: Any]) -> Void)?
 
     // Core delegate for platform bridge communication
-    public weak var coreDelegate: PolyfenceCoreDelegate?
+    public weak var coreDelegate: PolyfenceCoreDelegate? {
+        didSet {
+            // A direct-Swift consumer has no listener lifecycle to hook, so
+            // registering a delegate is its "I am receiving" moment. A bridge
+            // declares ownership of the signal before it constructs a tracker,
+            // and is excluded here.
+            guard coreDelegate != nil, oldValue == nil else { return }
+            guard LocationTracker.stagedEventListenerActive() == nil else { return }
+            setEventListenerActive(true)
+        }
+    }
 
     // Durable-events plumbing. pendingEventsQueueSize == 0 disables persistence
     // entirely (the default). bridgeAttached is the signal a platform bridge
@@ -99,6 +109,73 @@ public class LocationTracker: NSObject {
     private var pendingEventsStore: PendingEventsStore?
     private var bridgeAttached: Bool = true
     private let bridgeAttachedLock = NSLock()
+
+    // Auto-delivery plumbing. `eventListenerActive` is the "somebody is
+    // receiving" edge that replays the queue; `bridgeAttached` above is only
+    // "the bridge's sink is wired", which is true from `initialize()` onward
+    // and therefore says nothing about a subscriber existing.
+    private var eventListenerActive: Bool = false
+    private let eventListenerLock = NSLock()
+    private var pendingEventsAutoDrainEnabled: Bool = true
+
+    // A replay applies zone membership to the engine and persists the whole
+    // snapshot, so it must not run before restoreZonesFromStorage has loaded
+    // the other zones' states — a snapshot written from a half-populated map
+    // would erase them. It must also stay ahead of the first reconcile, which
+    // runs off the first fix after that same restore.
+    private var zoneStatesRestored: Bool = false
+    private var autoDrainDeferredUntilZonesRestored: Bool = false
+
+    // Staged listener-live signal. Non-nil also means an external caller owns
+    // this signal, which suppresses the delegate-registration shortcut above.
+    // Type-level rather than per-instance because bridges declare ownership
+    // before any tracker exists, and RN replaces the tracker across bridge
+    // reloads.
+    private static var pendingEventListenerActive: Bool?
+    private static let pendingEventListenerLock = NSLock()
+
+    private static func stagedEventListenerActive() -> Bool? {
+        pendingEventListenerLock.lock()
+        defer { pendingEventListenerLock.unlock() }
+        return pendingEventListenerActive
+    }
+
+    /// Tell the tracker whether a consumer's event listener is live.
+    ///
+    /// Distinct from `setBridgeAttached`, which reports whether the bridge's own
+    /// platform-channel sink is wired. A sink can be wired long before anything
+    /// downstream of it is subscribed — both bridges attach their sink during
+    /// `initialize()` — so only this signal means "an event handed over now
+    /// reaches somebody".
+    ///
+    /// On the false→true edge, and when `pendingEventsQueueSize > 0` and the
+    /// auto-drain flag is on, the durable queue is drained and replayed through
+    /// the normal event callback. Repeated `true` calls are a no-op: a second
+    /// subscriber must not replay the batch the first one received.
+    ///
+    /// Calling this at all declares that the caller owns the signal, which
+    /// suppresses the delegate-registration shortcut. Bridges therefore call
+    /// `setEventListenerActive(false)` from their module-construction hook,
+    /// which the platform guarantees runs before any tracker is built.
+    ///
+    /// Applies to the live tracker when one exists, and is staged for the next
+    /// one otherwise.
+    public static func setEventListenerActive(_ active: Bool) {
+        pendingEventListenerLock.lock()
+        pendingEventListenerActive = active
+        pendingEventListenerLock.unlock()
+        currentInstanceForOsGeofence?.setEventListenerActive(active)
+    }
+
+    /// Test-only seam that returns the staged signal to "nobody has declared
+    /// ownership", the state a direct-Swift consumer runs in. The staging is
+    /// process-wide, so a test that did not reset it would inherit whichever
+    /// value an earlier one left. Do not call from production code.
+    internal static func _testResetEventListenerSignal() {
+        pendingEventListenerLock.lock()
+        pendingEventListenerActive = nil
+        pendingEventListenerLock.unlock()
+    }
 
     // OS wake-fence plumbing. Off by default. When on, the registrar mirrors the
     // top-N-nearest zones to CLLocationManager region monitoring so a killed
@@ -352,7 +429,15 @@ public class LocationTracker: NSObject {
         // pendingEventsQueueSize == 0. The store still initialises so drainAll
         // works — recovers events queued under a previous larger cap.
         pendingEventsQueueSize = config?.pendingEventsQueueSize ?? 0
+        pendingEventsAutoDrainEnabled = config?.pendingEventsAutoDrainEnabled ?? true
         pendingEventsStore = PendingEventsStore(queueSize: pendingEventsQueueSize)
+
+        // Applied after the store exists so a listener that went live before
+        // this tracker was constructed replays against a real queue. The drain
+        // itself still waits for restoreZonesFromStorage.
+        if let staged = LocationTracker.stagedEventListenerActive() {
+            setEventListenerActive(staged)
+        }
 
         // OS wake-fence registrar. Off unless the consumer opts in. Nothing is
         // registered until the app backgrounds, so instantiating here with an
@@ -792,6 +877,7 @@ public class LocationTracker: NSObject {
      * Restore zones from storage on service start
      */
     private func restoreZonesFromStorage() {
+        defer { markZoneStatesRestored() }
         guard let zonePersistence = zonePersistence else { return }
 
         let savedZones = zonePersistence.loadAllZones()
@@ -815,6 +901,25 @@ public class LocationTracker: NSObject {
         }
 
         NSLog("[LocationTracker] Restored \(savedZones.count) zones from storage")
+    }
+
+    /// Zone membership is whole and the first reconcile has not run yet — the
+    /// only window where a replay can apply its state without erasing or being
+    /// erased by the persisted snapshot.
+    private func markZoneStatesRestored() {
+        zoneStatesRestored = true
+        if autoDrainDeferredUntilZonesRestored && isEventListenerActive() {
+            replayQueuedEventsToListener()
+        }
+    }
+
+    /// Test-only seam for the restore step that gates a queue replay. Reaching
+    /// it through `startTracking()` would need a real CLLocationManager fix.
+    /// Underscore-prefixed and internal-scoped to keep it out of the public API
+    /// while allowing `@testable import PolyfenceCore` to reach it. Do not call
+    /// from production code.
+    internal func _testRestoreZonesFromStorage() {
+        restoreZonesFromStorage()
     }
 
     /**
@@ -1736,6 +1841,19 @@ extension LocationTracker {
             pendingEventsStore = PendingEventsStore(queueSize: size)
         }
 
+        // Automatic replay of queued events (true = on, default). Turning it on
+        // while a listener is already live replays immediately — otherwise the
+        // switch would not take effect until the consumer happened to
+        // resubscribe.
+        if let autoDrain = configMap["pendingEventsAutoDrainEnabled"] as? Bool {
+            let autoDrainTurnedOn = autoDrain && !pendingEventsAutoDrainEnabled
+            pendingEventsAutoDrainEnabled = autoDrain
+            config?.pendingEventsAutoDrainEnabled = autoDrain
+            if autoDrainTurnedOn && isEventListenerActive() {
+                replayQueuedEventsToListener()
+            }
+        }
+
         // OS wake-fence slot budget. Applied before the toggle below so a
         // single updateConfiguration carrying both lands the new cap on the
         // registrar this call creates.
@@ -1886,6 +2004,7 @@ extension LocationTracker {
         base["gpsAccuracyThreshold"] = geofenceEngine.getGpsAccuracyThreshold()
         base["gpsStalenessTimeoutMs"] = gpsStalenessTimeoutMs
         base["pendingEventsQueueSize"] = pendingEventsQueueSize
+        base["pendingEventsAutoDrainEnabled"] = pendingEventsAutoDrainEnabled
         base["osGeofenceWakeEnabled"] = osGeofenceWakeEnabled
         base["osGeofenceMaxRegions"] = osGeofenceMaxRegions
         base["dwellSettings"] = geofenceEngine.getDwellConfigMap()
@@ -1953,6 +2072,82 @@ extension LocationTracker {
         bridgeAttachedLock.lock()
         bridgeAttached = attached
         bridgeAttachedLock.unlock()
+    }
+
+    /// Tell the tracker whether a consumer's event listener is live. See the
+    /// static overload for the contract; this is the instance half.
+    public func setEventListenerActive(_ active: Bool) {
+        eventListenerLock.lock()
+        let changed = eventListenerActive != active
+        if changed { eventListenerActive = active }
+        eventListenerLock.unlock()
+        guard changed, active else { return }
+        replayQueuedEventsToListener()
+    }
+
+    private func isEventListenerActive() -> Bool {
+        eventListenerLock.lock()
+        defer { eventListenerLock.unlock() }
+        return eventListenerActive
+    }
+
+    /// Drain the durable queue and hand the events to the consumer through the
+    /// same delegate callback live events use. No-op unless the queue is on, the
+    /// auto-drain flag is set, and something is actually queued.
+    private func replayQueuedEventsToListener() {
+        guard pendingEventsAutoDrainEnabled else { return }
+        guard pendingEventsQueueSize > 0 else { return }
+        guard let store = pendingEventsStore else { return }
+        guard zoneStatesRestored else {
+            autoDrainDeferredUntilZonesRestored = true
+            return
+        }
+        autoDrainDeferredUntilZonesRestored = false
+        // Nothing queued that this store has not already handed over — skip the
+        // file read so repeated attach/detach cycles cost nothing.
+        guard store.mayHaveEvents() else { return }
+
+        // Composite drain-and-apply holds `reconcileLock` across the store drain
+        // and the state application, which is what keeps a concurrent
+        // reconcileZoneStates on the location-callback thread from mis-firing
+        // RECOVERY_* for a zone this batch already resolved.
+        let drained = geofenceEngine.drainAndApply(store)
+        guard !drained.isEmpty else { return }
+
+        guard let delegate = coreDelegate else {
+            NSLog("[LocationTracker] listener signalled active but no delegate registered — re-queueing \(drained.count) event(s)")
+            drained.forEach { store.append($0) }
+            return
+        }
+
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let replayed = drained.map { LocationTracker.markDeliveredLate($0, nowMs: nowMs) }
+        DispatchQueue.main.async {
+            for event in replayed {
+                delegate.onGeofenceEvent(event)
+            }
+        }
+        NSLog("[LocationTracker] replayed \(replayed.count) queued event(s) to the consumer's listener")
+    }
+
+    /// Stamp the replay-provenance fields onto a queued event. `capturedTs` is
+    /// the moment the crossing was detected — the `timestamp` the event carried
+    /// when it was queued — so `queuedDurationMs` measures the wait, not the
+    /// round trip.
+    private static func markDeliveredLate(_ event: [String: Any], nowMs: Int64) -> [String: Any] {
+        var out = event
+        let capturedTs: Int64
+        if let ts = event["timestamp"] as? Int64 {
+            capturedTs = ts
+        } else if let n = event["timestamp"] as? NSNumber {
+            capturedTs = n.int64Value
+        } else {
+            capturedTs = nowMs
+        }
+        out["deliveredLate"] = true
+        out["capturedTs"] = capturedTs
+        out["queuedDurationMs"] = max(0, nowMs - capturedTs)
+        return out
     }
 
     /// True when the in-process polling engine is running and will therefore

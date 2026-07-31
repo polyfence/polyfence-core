@@ -45,10 +45,26 @@ internal class PendingEventsStore(context: Context, private val queueSize: Int) 
     }
     private val droppedCount = AtomicLong(loadDroppedCount())
 
+    // Starts true because this instance cannot know what a previous process
+    // left on disk. Only ever cleared by observing an empty drain through this
+    // instance, so a false reading is always something this store proved.
+    @Volatile
+    private var mayHaveQueuedEvents: Boolean = true
+
+    /**
+     * False only when this instance has already drained the log to empty and
+     * nothing has been appended since. Lets a caller that fires on every
+     * listener attach skip the file read in the overwhelmingly common
+     * nothing-queued case; a true reading still requires a real drain to
+     * confirm.
+     */
+    fun mayHaveEvents(): Boolean = mayHaveQueuedEvents
+
     /** Appends one event; returns the number of events evicted by this append. */
     fun append(event: Map<String, Any>): Int {
         if (queueSize <= 0) return 0
         val callable = java.util.concurrent.Callable {
+            mayHaveQueuedEvents = true
             val existing = readAllUnsafe()
             existing.add(JSONObject(event))
             var evicted = 0
@@ -78,6 +94,10 @@ internal class PendingEventsStore(context: Context, private val queueSize: Int) 
             if (events.isNotEmpty()) {
                 logFile.delete()
             }
+            // Cleared on the writer thread so it is totally ordered against
+            // append's own set — clearing it on the calling thread could
+            // discard a flag raised by an append that queued behind this read.
+            mayHaveQueuedEvents = false
             events.map { jsonToMap(it) }
         }
         return try {

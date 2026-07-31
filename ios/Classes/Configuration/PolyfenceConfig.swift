@@ -117,6 +117,24 @@ public class PolyfenceConfig {
         set { defaults.set(newValue, forKey: "pending_events_queue_size") }
     }
 
+    // Automatic delivery of queued events. true = on (default) — the moment a
+    // consumer signals a live event listener, the queue is drained and replayed
+    // through the normal event callback. false leaves the queue pull-only, so
+    // nothing is delivered until the consumer calls
+    // LocationTracker.drainPendingEvents itself. Only has an effect while
+    // pendingEventsQueueSize > 0.
+    // Reads through `object(forKey:)` because `bool(forKey:)` cannot tell an
+    // absent key from a stored `false`, and this default is `true`.
+    public var pendingEventsAutoDrainEnabled: Bool {
+        get {
+            if defaults.object(forKey: "pending_events_auto_drain_enabled") != nil {
+                return defaults.bool(forKey: "pending_events_auto_drain_enabled")
+            }
+            return true
+        }
+        set { defaults.set(newValue, forKey: "pending_events_auto_drain_enabled") }
+    }
+
     // OS wake-fence registration. false = off (default) — Polyfence's own polling
     // engine is the sole detector; nothing is registered with the OS. When true,
     // the top-N-nearest active zones are registered with CLLocationManager
