@@ -883,7 +883,7 @@ class LocationTracker : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START_TRACKING -> {
-                if (!hasLocationPerms()) {
+                if (!hasCoreTrackingPerms()) {
                     Log.w(TAG, "Missing runtime permissions for location/FGS; not starting tracking")
                     return START_NOT_STICKY // do not restart
                 }
@@ -934,17 +934,40 @@ class LocationTracker : Service() {
         return START_STICKY
     }
 
-    private fun hasLocationPerms(): Boolean {
+    /**
+     * Permissions required to run the tracker at all.
+     *
+     * `ACCESS_BACKGROUND_LOCATION` is deliberately NOT part of this. The
+     * tracker is a foreground service, and a foreground service typed
+     * `location` has location access for as long as it runs. The background
+     * permission governs location access *outside* a foreground service —
+     * passive geofences, jobs, receivers — which is what OS wake fences use
+     * and nothing else here does. Requiring it unconditionally refused to
+     * start for consumers who never asked for that capability, and forced
+     * every integrator through Google Play's background-location review for a
+     * feature they were not using. iOS has always accepted "when in use" here;
+     * this is what makes the platforms agree.
+     */
+    private fun hasCoreTrackingPerms(): Boolean {
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val bgOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
-        } else true
         // API 34 (Android 14) requires FOREGROUND_SERVICE_LOCATION permission
         val fgsOk = if (Build.VERSION.SDK_INT >= 34) {
             ContextCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE_LOCATION) == PackageManager.PERMISSION_GRANTED
         } else true
-        return (fine || coarse) && bgOk && fgsOk
+        return (fine || coarse) && fgsOk
+    }
+
+    /**
+     * Whether the grant that OS wake fences need is held. Only meaningful on
+     * API 29+; the permission does not exist below that, where a foreground
+     * service's location access already covers everything this library does.
+     */
+    private fun hasBackgroundLocationPerm(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
+        return ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     // Track if GPS start is deferred waiting for zones
@@ -955,7 +978,7 @@ class LocationTracker : Service() {
         // of startForegroundService(). Do this BEFORE any checks that might bail out.
         startForeground(NOTIFICATION_ID, createTrackingNotification())
 
-        if (!hasLocationPerms()) {
+        if (!hasCoreTrackingPerms()) {
             Log.e(TAG, "Cannot start tracking - missing permissions")
             @Suppress("DEPRECATION")
             stopForeground(true)
@@ -1111,7 +1134,7 @@ class LocationTracker : Service() {
                 if (!isRunning) return
 
                 // === Permission Check (was separate 60s timer) ===
-                if (!hasLocationPerms()) {
+                if (!hasCoreTrackingPerms()) {
                     Log.w(TAG, "Location permission revoked - stopping tracking gracefully")
                     PolyfenceErrorManager.reportError(
                         "permission_revoked",
@@ -1120,6 +1143,15 @@ class LocationTracker : Service() {
                     )
                     stopTracking()
                     return
+                }
+
+                // Losing the background grant costs OS wake fences, not
+                // tracking. Stopping here would take the whole product away
+                // over a capability the consumer may never have relied on; the
+                // registrar reports the loss and the polling engine carries on
+                // exactly as it does for consumers who never opted in.
+                if (osGeofenceWakeEnabled && !hasBackgroundLocationPerm()) {
+                    osGeofenceRegistrar?.revalidatePermission()
                 }
 
                 // === GPS Health Check (was separate 30s timer) ===

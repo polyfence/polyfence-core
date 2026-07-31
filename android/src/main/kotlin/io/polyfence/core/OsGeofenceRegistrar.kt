@@ -243,6 +243,20 @@ internal class OsGeofenceRegistrar(
     /** Effective slot budget after clamping. Read by tests and by the health field. */
     internal fun effectiveMaxRegions(): Int = maxRegions
 
+    /**
+     * Re-checks the background grant and reports its loss without attempting a
+     * registration. The tracker calls this when it notices the grant has gone
+     * mid-session: registration attempts are driven by movement and zone
+     * changes, so a stationary user could otherwise lose wake coverage with no
+     * signal until something happened to trigger a refresh. Shares the
+     * reporting cooldown, so a per-minute health tick produces one report.
+     */
+    fun revalidatePermission() {
+        if (shutdownRequested) return
+        if (hasBackgroundLocationPermission(context)) return
+        reportPermissionDenied(health?.requested ?: 0)
+    }
+
     private fun refreshRegistrationInternal() {
         // Re-checked here, not only in requestRefresh: the request can be made
         // from a bridge thread, so a foreground transition can land on the main
