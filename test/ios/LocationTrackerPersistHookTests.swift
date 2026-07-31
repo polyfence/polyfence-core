@@ -30,6 +30,10 @@ final class LocationTrackerPersistHookTests: XCTestCase {
             ?? FileManager.default.temporaryDirectory
         storeDir = baseDir.appendingPathComponent("polyfence-pending-events", isDirectory: true)
         try? FileManager.default.removeItem(at: storeDir)
+        // PolyfenceConfig is a UserDefaults suite that outlives an individual
+        // test, and the tracker reads it at construction — so a queue size left
+        // behind by another suite would decide this one's outcome.
+        PolyfenceConfig().pendingEventsQueueSize = 0
         tracker = LocationTracker()
     }
 

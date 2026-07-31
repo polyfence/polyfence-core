@@ -626,6 +626,104 @@ final class OsGeofenceWakeTests: XCTestCase {
         XCTAssertEqual(registrar.healthMap()?["registered"] as? Int, 1)
     }
 
+    // MARK: - Process-restart and single-writer invariants
+    //
+    // These exist because the failure surface of this feature lives almost
+    // entirely in "the process died and came back" paths, which the rest of the
+    // suite structurally cannot reach: it configures a live tracker and reads
+    // back from the same instance.
+
+    func testConfigSurvivesASimulatedProcessRestart() {
+        // Everything the wake path needs must come off disk, because iOS runs
+        // library code on a wake relaunch before any bridge has re-applied
+        // configuration. A field applied only in memory passes every other test
+        // in this suite and reverts in exactly the scenario that matters.
+        let first = LocationTracker()
+        first.updateConfigurationFromMap([
+            "pendingEventsQueueSize": 500,
+            "osGeofenceWakeEnabled": true,
+            "osGeofenceMaxRegions": 12,
+            "gpsStalenessTimeoutMs": 30_000.0,
+            "gpsAccuracyThreshold": 75.0
+        ])
+
+        let persisted = PolyfenceConfig()
+        XCTAssertEqual(persisted.pendingEventsQueueSize, 500)
+        XCTAssertTrue(persisted.osGeofenceWakeEnabled)
+        XCTAssertEqual(persisted.osGeofenceMaxRegions, 12)
+        XCTAssertEqual(persisted.gpsStalenessTimeoutMs, 30_000.0)
+        XCTAssertEqual(persisted.gpsAccuracyThreshold, 75.0)
+
+        // And the relaunched tracker must actually build a usable queue from
+        // it — a zero-capacity store silently discards every append.
+        let relaunched = LocationTracker()
+        XCTAssertEqual(
+            relaunched.getCurrentConfigurationMap()["pendingEventsQueueSize"] as? Int,
+            500
+        )
+        relaunched.locationManager(CLLocationManager(), didEnterRegion: osRegion("z1"))
+        XCTAssertEqual(relaunched.drainPendingEvents().count, 1)
+    }
+
+    func testOneCrossingSeenByBothWritersIsQueuedExactlyOnce() {
+        // The in-process hook persists whenever live delivery did not happen,
+        // so gating the OS path on deliverability rather than on the engine
+        // running would let both record the same physical crossing.
+        PolyfenceConfig().osGeofenceWakeEnabled = true
+        let tracker = LocationTracker()
+        tracker.updateConfigurationFromMap([
+            "pendingEventsQueueSize": 10,
+            "osGeofenceWakeEnabled": true
+        ])
+        _ = tracker.drainPendingEvents()
+        tracker.coreDelegate = LiveDelegate()
+        tracker.setBridgeAttached(false)
+
+        tracker._testInvokeHandleGeofenceEvent(
+            zoneId: "z1",
+            eventType: "ENTER",
+            location: fixAt(51.5, -0.1)
+        )
+        tracker.locationManager(CLLocationManager(), didEnterRegion: osRegion("z1"))
+
+        XCTAssertEqual(
+            tracker.drainPendingEvents().count,
+            1,
+            "one physical crossing must produce one queued event"
+        )
+    }
+
+    func testOsFiredTransitionWritesToTheTrackersStoreInstanceNotACopy() {
+        let tracker = wakeEnabledTracker()
+
+        tracker.locationManager(CLLocationManager(), didEnterRegion: osRegion("z1"))
+
+        // Asserting on a drain result cannot distinguish the shared store from
+        // a transient one — both write the same file. Read the tracker's own
+        // store directly instead.
+        let store = tracker.pendingEventsStoreForOsGeofence
+        XCTAssertNotNil(store)
+        let drained = store!.drainAll()
+        XCTAssertEqual(drained.count, 1)
+        XCTAssertEqual(drained[0]["zoneId"] as? String, "z1")
+    }
+
+    func testStartingStateIsRequestedForOurRegionsOnly() {
+        // CoreLocation reports only subsequent crossings, so the starting state
+        // has to be asked for explicitly — that is what matches Android's
+        // INITIAL_TRIGGER_ENTER for a user already inside a zone.
+        let tracker = wakeEnabledTracker()
+        let manager = CLLocationManager()
+
+        tracker.locationManager(manager, didDetermineState: .inside, for: osRegion("z1"))
+        XCTAssertEqual(tracker.drainPendingEvents().count, 1)
+
+        // Outside must stay silent: replaying an exit for every region the
+        // device happens to be outside of would flood the queue.
+        tracker.locationManager(manager, didDetermineState: .outside, for: osRegion("z2"))
+        XCTAssertTrue(tracker.drainPendingEvents().isEmpty)
+    }
+
     // MARK: - No double-reporting
 
     func testOsFiredTransitionIsSkippedWhileLiveDeliveryIsPossible() {

@@ -85,6 +85,13 @@ class OsGeofenceWakeTest {
     // suites use rather than widening production visibility for tests.
     // ---------------------------------------------------------------
 
+    /**
+     * Marks the in-process engine as stopped, which is the state every OS wake
+     * path exists for: the OS only queues a crossing when the polling engine is
+     * not already recording it.
+     */
+    private fun stopEngine() = setIsRunning(false)
+
     private fun setIsRunning(value: Boolean) {
         val field = LocationTracker::class.java.getDeclaredField("isRunning")
         field.isAccessible = true
@@ -549,6 +556,7 @@ class OsGeofenceWakeTest {
     fun `OS-fired transition lands in the pending events store`() {
         applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
 
+        stopEngine()
         PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
             context = context,
             eventType = "ENTER",
@@ -573,6 +581,7 @@ class OsGeofenceWakeTest {
         // The receiver must share the Service's store instance — a second
         // store would put two independent writer threads on one file. Drain
         // through the tracker's own composite path to prove they agree.
+        stopEngine()
         PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
             context = context,
             eventType = "EXIT",
@@ -590,6 +599,7 @@ class OsGeofenceWakeTest {
     fun `multiple triggering fences enqueue one event each`() {
         applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
 
+        stopEngine()
         PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
             context = context,
             eventType = "ENTER",
@@ -606,6 +616,7 @@ class OsGeofenceWakeTest {
         applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
         LocationTracker.applyAddZoneDirect(tracker, "z1", "Zone 1", circleZoneData(51.5, -0.1))
 
+        stopEngine()
         PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
             context = context,
             eventType = "ENTER",
@@ -624,6 +635,7 @@ class OsGeofenceWakeTest {
         applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
         LocationTracker.applyAddZoneDirect(tracker, "z1", "Congestion Zone", circleZoneData(51.5, -0.1))
 
+        stopEngine()
         PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
             context = context,
             eventType = "ENTER",
@@ -639,6 +651,7 @@ class OsGeofenceWakeTest {
     fun `queue disabled means an OS-fired transition is dropped, not queued`() {
         applyConfig(mapOf("pendingEventsQueueSize" to 0, "osGeofenceWakeEnabled" to true))
 
+        stopEngine()
         PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
             context = context,
             eventType = "ENTER",
@@ -1005,18 +1018,153 @@ class OsGeofenceWakeTest {
     }
 
     // ---------------------------------------------------------------
+    // Process-restart and single-writer invariants
+    //
+    // These four exist because the failure surface of this feature lives
+    // almost entirely in "the process died and came back" paths, which the
+    // rest of the suite structurally cannot reach: it configures a live
+    // tracker and reads back from the same instance.
+    // ---------------------------------------------------------------
+
+    @Test
+    fun `config survives a simulated process restart`() {
+        // Everything the wake path needs must come off disk, because the OS
+        // runs library code on a wake relaunch before any bridge has re-applied
+        // configuration. A field applied only in memory passes every other test
+        // in this suite and reverts in exactly the scenario that matters.
+        applyConfig(
+            mapOf(
+                "pendingEventsQueueSize" to 500,
+                "osGeofenceWakeEnabled" to true,
+                "osGeofenceMaxRegions" to 12,
+                "gpsStalenessTimeoutMs" to 30_000L,
+                "gpsAccuracyThreshold" to 75.0
+            )
+        )
+
+        tracker.onDestroy()
+        val persisted = PolyfenceConfig(context)
+
+        assertEquals(500, persisted.pendingEventsQueueSize)
+        assertTrue(persisted.osGeofenceWakeEnabled)
+        assertEquals(12, persisted.osGeofenceMaxRegions)
+        assertEquals(30_000L, persisted.gpsStalenessTimeoutMs)
+        assertEquals(75.0f, persisted.gpsAccuracyThreshold, 0.001f)
+
+        // And the restarted tracker must actually build a usable queue from it.
+        tracker = Robolectric.buildService(LocationTracker::class.java).create().get()
+        setIsRunning(true)
+        assertEquals(
+            500,
+            LocationTracker.getCurrentConfigurationMap(context)["pendingEventsQueueSize"]
+        )
+    }
+
+    @Test
+    fun `one crossing seen by both writers is queued exactly once`() {
+        // The in-process hook persists whenever live delivery did not happen,
+        // so gating the OS path on deliverability rather than on the engine
+        // running would let both record the same physical crossing.
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        tracker.setCoreDelegate(LiveDelegate())
+        tracker.setBridgeAttached(false)
+
+        fireGeofenceEvent("z1", "ENTER")
+        PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
+            context = context,
+            eventType = "ENTER",
+            zoneIds = listOf("z1"),
+            triggeringLocation = null
+        )
+
+        val drained = LocationTracker.drainPendingEvents(context)
+        assertEquals("one physical crossing must produce one queued event", 1, drained.size)
+    }
+
+    @Test
+    fun `registration asks the OS for entry triggers only`() {
+        grantAllLocationPermissions()
+        val client = succeedingClient()
+        val registrar = backgroundedRegistrar(client)
+
+        registrar.refreshNowForTest(
+            zones = (1..3).map { engineZone("z$it", 51.5 + it * 0.001, -0.1) },
+            seed = fixAt(51.5, -0.1)
+        )
+        idleMainLooper()
+
+        // INITIAL_TRIGGER_EXIT makes Play Services replay an EXIT for every
+        // fence the device is currently outside of — nearly all of them — so
+        // each registration pass would inject a burst of transitions for zones
+        // that were never entered.
+        val captor = ArgumentCaptor.forClass(GeofencingRequest::class.java)
+        verify(client).addGeofences(captor.capture(), any(PendingIntent::class.java))
+        assertEquals(
+            GeofencingRequest.INITIAL_TRIGGER_ENTER,
+            captor.allValues[0].initialTrigger
+        )
+    }
+
+    @Test
+    fun `zones dropped from the selection are retired from the OS`() {
+        grantAllLocationPermissions()
+        val client = succeedingClient()
+        val registrar = backgroundedRegistrar(client)
+
+        registrar.refreshNowForTest(
+            zones = listOf(engineZone("keep", 51.5, -0.1), engineZone("drop", 51.6, -0.1)),
+            seed = fixAt(51.5, -0.1)
+        )
+        idleMainLooper()
+        registrar.refreshNowForTest(
+            zones = listOf(engineZone("keep", 51.5, -0.1)),
+            seed = fixAt(51.5, -0.1)
+        )
+        idleMainLooper()
+
+        // addGeofences replaces by request ID, so anything dropped from a later
+        // selection stays armed for the life of the install unless retired.
+        @Suppress("UNCHECKED_CAST")
+        val idsCaptor = ArgumentCaptor.forClass(List::class.java) as ArgumentCaptor<List<String>>
+        verify(client).removeGeofences(idsCaptor.capture())
+        assertEquals(listOf("drop"), idsCaptor.value)
+    }
+
+    @Test
+    fun `OS-fired transition writes to the tracker's store instance, not a copy`() {
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        setIsRunning(false)
+
+        PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
+            context = context,
+            eventType = "ENTER",
+            zoneIds = listOf("z1"),
+            triggeringLocation = null
+        )
+
+        // Asserting on a drain result cannot distinguish the shared store from
+        // a transient one — both write the same file. Read the Service's own
+        // store directly instead.
+        val storeField = LocationTracker::class.java.getDeclaredField("pendingEventsStore")
+        storeField.isAccessible = true
+        val trackerStore = storeField.get(tracker) as PendingEventsStore
+        val drained = trackerStore.drainAll()
+        assertEquals(1, drained.size)
+        assertEquals("z1", drained[0]["zoneId"])
+    }
+
+    // ---------------------------------------------------------------
     // No double-reporting
     // ---------------------------------------------------------------
 
     @Test
-    fun `OS-fired transition is skipped while live delivery is possible`() {
+    fun `OS-fired transition is skipped while the in-process engine is running`() {
         applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
         tracker.setCoreDelegate(LiveDelegate())
         tracker.setBridgeAttached(true)
 
-        // The in-process engine already reports this crossing to a live sink.
-        // Queueing the OS copy too would hand the consumer one physical
-        // crossing twice on the next drain.
+        // The in-process engine already reports this crossing. Queueing the OS
+        // copy too would hand the consumer one physical crossing twice.
         PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
             context = context,
             eventType = "ENTER",
@@ -1028,11 +1176,12 @@ class OsGeofenceWakeTest {
     }
 
     @Test
-    fun `OS-fired transition is queued when no live sink is attached`() {
+    fun `OS-fired transition is queued when the in-process engine is stopped`() {
         applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
         tracker.setCoreDelegate(LiveDelegate())
         tracker.setBridgeAttached(false)
 
+        stopEngine()
         PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
             context = context,
             eventType = "ENTER",
@@ -1051,6 +1200,7 @@ class OsGeofenceWakeTest {
         // consumer who once enabled the flag can still be woken by that
         // session's fences. With the flag off those wakes must not reach the
         // queue — behaviour has to be indistinguishable from never opting in.
+        stopEngine()
         PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
             context = context,
             eventType = "ENTER",
