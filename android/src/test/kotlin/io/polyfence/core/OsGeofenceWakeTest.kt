@@ -178,9 +178,52 @@ class OsGeofenceWakeTest {
         return client
     }
 
+    /**
+     * A registrar in the only state that holds OS slots: app backgrounded.
+     * While foregrounded the registrar deliberately holds zero slots, so a
+     * registration case built without this would assert against a no-op.
+     */
+    private fun backgroundedRegistrar(
+        client: GeofencingClient,
+        maxRegions: Int = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
+    ): OsGeofenceRegistrar =
+        OsGeofenceRegistrar(context, client, maxRegions).apply { onAppBackgrounded() }
+
     /** Drains the paused Robolectric main looper so posted GMS listeners run. */
     private fun idleMainLooper() {
         shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    /**
+     * Runs [block] on a worker thread while pumping the main looper, and
+     * returns its result.
+     *
+     * The boot path blocks until Play Services settles the registration, and
+     * Play Services delivers that callback on the main looper. Calling it
+     * straight from a Robolectric test would block the very looper that has to
+     * deliver the completion. The production caller is a broadcast receiver's
+     * worker thread, so driving it the same way here is both necessary and
+     * faithful.
+     */
+    private fun <T> awaitOffMainLooper(timeoutMs: Long = 5_000, block: () -> T): T {
+        val result = java.util.concurrent.atomic.AtomicReference<T>()
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val worker = Thread {
+            try {
+                result.set(block())
+            } catch (t: Throwable) {
+                failure.set(t)
+            }
+        }
+        worker.start()
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (worker.isAlive && System.currentTimeMillis() < deadline) {
+            idleMainLooper()
+            Thread.sleep(5)
+        }
+        worker.join(1_000)
+        failure.get()?.let { throw it }
+        return result.get()
     }
 
     /**
@@ -251,7 +294,7 @@ class OsGeofenceWakeTest {
     fun `registrar registers the nearest zones first when enabled`() {
         grantAllLocationPermissions()
         val client = succeedingClient()
-        val registrar = OsGeofenceRegistrar(context, client)
+        val registrar = backgroundedRegistrar(client)
 
         registrar.refreshNowForTest(
             zones = listOf(
@@ -276,7 +319,7 @@ class OsGeofenceWakeTest {
         val selected = OsGeofenceRegistrar.selectTopNNearest(
             zones = listOf(engineZone("a", 1.0, 1.0), engineZone("b", 2.0, 2.0)),
             seed = null,
-            topN = OsGeofenceRegistrar.TOP_N
+            topN = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
         )
         assertEquals(listOf("a", "b"), selected.map { it.zoneId })
     }
@@ -286,7 +329,7 @@ class OsGeofenceWakeTest {
         val selected = OsGeofenceRegistrar.selectTopNNearest(
             zones = listOf(enginePolygonZone("poly", 51.5, -0.1)),
             seed = fixAt(51.5, -0.1),
-            topN = OsGeofenceRegistrar.TOP_N
+            topN = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
         )
         assertEquals(1, selected.size)
         // Centroid of the symmetric square is the zone's nominal centre, and
@@ -303,7 +346,7 @@ class OsGeofenceWakeTest {
     @Test
     fun `health reports requested equals registered under the cap`() {
         grantAllLocationPermissions()
-        val registrar = OsGeofenceRegistrar(context, succeedingClient())
+        val registrar = backgroundedRegistrar(succeedingClient())
 
         registrar.refreshNowForTest(
             zones = (1..5).map { engineZone("z$it", 51.5 + it * 0.001, -0.1) },
@@ -321,7 +364,7 @@ class OsGeofenceWakeTest {
     @Test
     fun `health map shape matches the documented three-key contract`() {
         grantAllLocationPermissions()
-        val registrar = OsGeofenceRegistrar(context, succeedingClient())
+        val registrar = backgroundedRegistrar(succeedingClient())
 
         registrar.refreshNowForTest(
             zones = listOf(engineZone("z1", 51.5, -0.1)),
@@ -342,8 +385,8 @@ class OsGeofenceWakeTest {
     @Test
     fun `cap-hit health reports requested above registered`() {
         grantAllLocationPermissions()
-        val registrar = OsGeofenceRegistrar(context, succeedingClient())
-        val overCap = OsGeofenceRegistrar.TOP_N + 25
+        val registrar = backgroundedRegistrar(succeedingClient())
+        val overCap = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS + 25
 
         registrar.refreshNowForTest(
             zones = (1..overCap).map { engineZone("z$it", 51.5 + it * 0.001, -0.1) },
@@ -354,7 +397,7 @@ class OsGeofenceWakeTest {
         val health = registrar.health
         assertNotNull(health)
         assertEquals(overCap, health!!.requested)
-        assertEquals(OsGeofenceRegistrar.TOP_N, health.registered)
+        assertEquals(PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS, health.registered)
         // A cap-hit is partial coverage, not a failure — lastError stays null
         // so consumers can distinguish it from permission drift.
         assertNull(health.lastError)
@@ -365,9 +408,9 @@ class OsGeofenceWakeTest {
         val selected = OsGeofenceRegistrar.selectTopNNearest(
             zones = (1..500).map { engineZone("z$it", 51.5 + it * 0.001, -0.1) },
             seed = fixAt(51.5, -0.1),
-            topN = OsGeofenceRegistrar.TOP_N
+            topN = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
         )
-        assertEquals(OsGeofenceRegistrar.TOP_N, selected.size)
+        assertEquals(PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS, selected.size)
     }
 
     // ---------------------------------------------------------------
@@ -378,7 +421,7 @@ class OsGeofenceWakeTest {
     fun `permission denial emits a warning onError and does not crash`() {
         denyBackgroundLocationPermission()
         val client = succeedingClient()
-        val registrar = OsGeofenceRegistrar(context, client)
+        val registrar = backgroundedRegistrar(client)
 
         registrar.refreshNowForTest(
             zones = listOf(engineZone("z1", 51.5, -0.1)),
@@ -399,7 +442,7 @@ class OsGeofenceWakeTest {
     @Test
     fun `permission denial populates the health field with the documented marker`() {
         denyBackgroundLocationPermission()
-        val registrar = OsGeofenceRegistrar(context, succeedingClient())
+        val registrar = backgroundedRegistrar(succeedingClient())
 
         registrar.refreshNowForTest(
             zones = listOf(engineZone("z1", 51.5, -0.1)),
@@ -419,7 +462,7 @@ class OsGeofenceWakeTest {
         // there would permanently disable the feature on those devices.
         denyBackgroundLocationPermission()
         val client = succeedingClient()
-        val registrar = OsGeofenceRegistrar(context, client)
+        val registrar = backgroundedRegistrar(client)
 
         registrar.refreshNowForTest(
             zones = listOf(engineZone("z1", 51.5, -0.1)),
@@ -432,12 +475,62 @@ class OsGeofenceWakeTest {
     }
 
     @Test
+    fun `permission absent from the merged manifest degrades like a denied grant`() {
+        // A consumer who never declares ACCESS_BACKGROUND_LOCATION sees
+        // checkSelfPermission report DENIED, so the undeclared case and the
+        // declared-but-refused case converge on one code path — which is why
+        // polyfence-core can safely leave the permission out of its manifest.
+        denyBackgroundLocationPermission()
+        val registrar = backgroundedRegistrar(succeedingClient())
+
+        registrar.refreshNowForTest(
+            zones = listOf(engineZone("z1", 51.5, -0.1)),
+            seed = fixAt(51.5, -0.1)
+        )
+
+        assertEquals(
+            OsGeofenceRegistrar.ERROR_BACKGROUND_LOCATION_DENIED,
+            registrar.health!!.lastError
+        )
+        assertTrue(capturedErrors.any { it["type"] == "os_geofence_permission_denied" })
+    }
+
+    @Test
+    fun `SecurityException from the OS surfaces the same permission-denied path`() {
+        grantAllLocationPermissions()
+        // Play Services can still refuse at call time even when
+        // checkSelfPermission passes — a revoke racing the request, or an OEM
+        // policy. That must land on the documented marker, not escape.
+        val throwingClient = mock(GeofencingClient::class.java)
+        `when`(
+            throwingClient.addGeofences(
+                any(GeofencingRequest::class.java),
+                any(PendingIntent::class.java)
+            )
+        ).thenThrow(SecurityException("no background location"))
+        `when`(throwingClient.removeGeofences(any(PendingIntent::class.java)))
+            .thenReturn(Tasks.forResult<Void>(null))
+
+        val registrar = backgroundedRegistrar(throwingClient)
+        registrar.refreshNowForTest(
+            zones = listOf(engineZone("z1", 51.5, -0.1)),
+            seed = fixAt(51.5, -0.1)
+        )
+
+        assertEquals(
+            OsGeofenceRegistrar.ERROR_BACKGROUND_LOCATION_DENIED,
+            registrar.health!!.lastError
+        )
+        assertEquals(0, registrar.health!!.registered)
+    }
+
+    @Test
     fun `permission denial leaves the pending queue intact and drainable`() {
         denyBackgroundLocationPermission()
         applyConfig(mapOf("pendingEventsQueueSize" to 10))
         fireGeofenceEvent("z1", "ENTER")
 
-        OsGeofenceRegistrar(context, succeedingClient()).refreshNowForTest(
+        backgroundedRegistrar(succeedingClient()).refreshNowForTest(
             zones = listOf(engineZone("z1", 51.5, -0.1)),
             seed = fixAt(51.5, -0.1)
         )
@@ -557,6 +650,361 @@ class OsGeofenceWakeTest {
     }
 
     // ---------------------------------------------------------------
+    // Slot allocation: zero held while foregrounded
+    // ---------------------------------------------------------------
+
+    @Test
+    fun `foreground transition releases every registered fence`() {
+        grantAllLocationPermissions()
+        val client = succeedingClient()
+        val registrar = backgroundedRegistrar(client)
+        registrar.refreshNowForTest(
+            zones = listOf(engineZone("z1", 51.5, -0.1)),
+            seed = fixAt(51.5, -0.1)
+        )
+        idleMainLooper()
+        assertEquals(1, registrar.health!!.registered)
+
+        registrar.onAppForegrounded()
+        idleMainLooper()
+
+        // The consumer gets the whole platform allocation back while its app is
+        // alive — the in-process engine is doing the detection anyway.
+        verify(client).removeGeofences(any(PendingIntent::class.java))
+        assertEquals(0, registrar.health!!.registered)
+        assertNull(registrar.health!!.lastError)
+    }
+
+    @Test
+    fun `no registration happens while the app is foregrounded`() {
+        grantAllLocationPermissions()
+        val client = succeedingClient()
+        // Constructed foregrounded — no onAppBackgrounded() call.
+        val registrar = OsGeofenceRegistrar(context, client)
+        registrar.onAppForegrounded()
+
+        seedEngineZone("z1", 51.5, -0.1)
+        registrar.requestRefresh()
+        idlePastDebounce()
+
+        verify(client, never())
+            .addGeofences(any(GeofencingRequest::class.java), any(PendingIntent::class.java))
+    }
+
+    @Test
+    fun `movement while foregrounded does not register`() {
+        grantAllLocationPermissions()
+        val client = succeedingClient()
+        val registrar = OsGeofenceRegistrar(context, client)
+        registrar.onAppForegrounded()
+
+        seedEngineZone("z1", 51.5, -0.1)
+        registrar.onLocationUpdate(fixAt(51.55, -0.1))
+        idlePastDebounce()
+
+        verify(client, never())
+            .addGeofences(any(GeofencingRequest::class.java), any(PendingIntent::class.java))
+    }
+
+    @Test
+    fun `background transition registers up to the configured cap`() {
+        grantAllLocationPermissions()
+        val client = succeedingClient()
+        val registrar = OsGeofenceRegistrar(context, client, requestedMaxRegions = 3)
+        registrar.onAppForegrounded()
+        repeat(6) { seedEngineZone("z$it", 51.5 + it * 0.001, -0.1) }
+
+        registrar.onAppBackgrounded()
+        idlePastDebounce()
+
+        val captor = ArgumentCaptor.forClass(GeofencingRequest::class.java)
+        verify(client).addGeofences(captor.capture(), any(PendingIntent::class.java))
+        assertEquals(3, captor.allValues[0].geofences.size)
+        assertEquals(6, registrar.health!!.requested)
+        assertEquals(3, registrar.health!!.registered)
+    }
+
+    // ---------------------------------------------------------------
+    // Activity-lifecycle monitor
+    // ---------------------------------------------------------------
+
+    private class MonitorProbe {
+        var foregroundCount = 0
+        var backgroundCount = 0
+    }
+
+    private fun monitorStartedForegrounded(probe: MonitorProbe) =
+        OsGeofenceRegistrar.AppForegroundMonitor(
+            handler = android.os.Handler(Looper.getMainLooper()),
+            startedForegrounded = true,
+            onForeground = { probe.foregroundCount++ },
+            onBackground = { probe.backgroundCount++ }
+        )
+
+    private fun idlePastSettle() {
+        shadowOf(Looper.getMainLooper())
+            .idleFor(Duration.ofMillis(OsGeofenceRegistrar.BACKGROUND_SETTLE_MS + 100))
+    }
+
+    @Test
+    fun `monitor reports the first background even though it never saw the first start`() {
+        // registerActivityLifecycleCallbacks does not replay past callbacks, so
+        // a monitor attached while an activity is already started never sees
+        // its onActivityStarted. Seeding foreground state from the caller's
+        // probe is what makes the very first background transition — the one
+        // that arms wake fences for the session most likely to be killed —
+        // actually fire.
+        val probe = MonitorProbe()
+        val monitor = monitorStartedForegrounded(probe)
+        val activity = android.app.Activity()
+
+        monitor.onActivityStopped(activity)
+        idlePastSettle()
+
+        assertEquals(1, probe.backgroundCount)
+    }
+
+    @Test
+    fun `monitor treats a rotation as continuous foreground`() {
+        val probe = MonitorProbe()
+        val monitor = monitorStartedForegrounded(probe)
+        val activity = android.app.Activity()
+
+        // A configuration change stops and restarts the activity, momentarily
+        // leaving none started. Reporting that as backgrounded would register
+        // and immediately unregister the whole fence set on every rotation.
+        monitor.onActivityStopped(activity)
+        monitor.onActivityStarted(activity)
+        idlePastSettle()
+
+        assertEquals(0, probe.backgroundCount)
+    }
+
+    @Test
+    fun `monitor reports a real background after the settle window`() {
+        val probe = MonitorProbe()
+        val monitor = monitorStartedForegrounded(probe)
+        val activity = android.app.Activity()
+
+        monitor.onActivityStarted(activity)
+        monitor.onActivityStopped(activity)
+        idlePastSettle()
+
+        assertEquals(1, probe.backgroundCount)
+    }
+
+    @Test
+    fun `monitor reports foreground exactly once across a background round-trip`() {
+        val probe = MonitorProbe()
+        val monitor = monitorStartedForegrounded(probe)
+        val activity = android.app.Activity()
+
+        monitor.onActivityStopped(activity)
+        idlePastSettle()
+        monitor.onActivityStarted(activity)
+
+        assertEquals(1, probe.backgroundCount)
+        assertEquals(1, probe.foregroundCount)
+    }
+
+    // ---------------------------------------------------------------
+    // Configurable cap
+    // ---------------------------------------------------------------
+
+    @Test
+    fun `default cap leaves headroom below the platform maximum`() {
+        assertEquals(50, PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS)
+        assertEquals(100, PolyfenceConfig.DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS)
+        assertEquals(
+            PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS,
+            PolyfenceConfig(context).osGeofenceMaxRegions
+        )
+    }
+
+    @Test
+    fun `cap above the platform maximum is clamped rather than rejected`() {
+        // Play Services refuses an over-large request wholesale, so honouring
+        // the raw value would register nothing at all instead of registering
+        // more.
+        assertEquals(
+            PolyfenceConfig.DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS,
+            OsGeofenceRegistrar(context, succeedingClient(), requestedMaxRegions = 5_000)
+                .effectiveMaxRegions()
+        )
+        assertEquals(
+            1,
+            OsGeofenceRegistrar(context, succeedingClient(), requestedMaxRegions = 0)
+                .effectiveMaxRegions()
+        )
+    }
+
+    @Test
+    fun `config persists the clamped cap, not the raw request`() {
+        // Echoing the raw value back through getConfiguration would advertise a
+        // budget the registrar never uses and leave the consumer no way to
+        // discover the effective one.
+        val config = PolyfenceConfig(context)
+        config.osGeofenceMaxRegions = 5_000
+        assertEquals(
+            PolyfenceConfig.DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS,
+            config.osGeofenceMaxRegions
+        )
+        config.osGeofenceMaxRegions = 0
+        assertEquals(1, config.osGeofenceMaxRegions)
+    }
+
+    @Test
+    fun `stale registration callback cannot resurrect health after a release`() {
+        grantAllLocationPermissions()
+        // Play Services resolves on the main looper at an arbitrary later time.
+        // A foreground release landing in between must win — otherwise health
+        // reports N regions monitored moments after all N were removed.
+        val client = succeedingClient()
+        val registrar = backgroundedRegistrar(client)
+        registrar.refreshNowForTest(
+            zones = listOf(engineZone("z1", 51.5, -0.1)),
+            seed = fixAt(51.5, -0.1)
+        )
+
+        registrar.onAppForegrounded()
+        idleMainLooper()
+
+        assertEquals(0, registrar.health!!.registered)
+        assertEquals(0, registrar.health!!.requested)
+    }
+
+    @Test
+    fun `cap propagates from config through updateConfiguration`() {
+        applyConfig(mapOf("osGeofenceMaxRegions" to 12, "osGeofenceWakeEnabled" to true))
+
+        assertEquals(12, PolyfenceConfig(context).osGeofenceMaxRegions)
+        assertEquals(
+            12,
+            LocationTracker.getCurrentConfigurationMap(context)["osGeofenceMaxRegions"]
+        )
+    }
+
+    @Test
+    fun `cap is exposed on the default configuration map`() {
+        assertEquals(
+            PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS,
+            LocationTracker.buildDefaultConfigurationMap()["osGeofenceMaxRegions"]
+        )
+    }
+
+    @Test
+    fun `wake flag survives service reconstruction`() {
+        applyConfig(mapOf("osGeofenceWakeEnabled" to true))
+
+        // When the OS wakes a killed app on a crossing, the receiver runs
+        // before any bridge re-applies configuration. An in-memory-only flag
+        // would read false there and the crossing would be discarded.
+        assertTrue(PolyfenceConfig(context).osGeofenceWakeEnabled)
+        tracker.onDestroy()
+        tracker = Robolectric.buildService(LocationTracker::class.java).create().get()
+        setIsRunning(true)
+
+        assertEquals(
+            true,
+            LocationTracker.getCurrentConfigurationMap(context)["osGeofenceWakeEnabled"]
+        )
+    }
+
+    // ---------------------------------------------------------------
+    // Boot re-registration
+    // ---------------------------------------------------------------
+
+    @Test
+    fun `boot re-registration no-ops when the feature was off at last shutdown`() {
+        grantAllLocationPermissions()
+        PolyfenceConfig(context).osGeofenceWakeEnabled = false
+        LocationTracker.applyAddZoneDirect(tracker, "z1", "Zone 1", circleZoneData(51.5, -0.1))
+        val client = succeedingClient()
+
+        val registered = awaitOffMainLooper {
+            OsGeofenceRegistrar.registerFromPersistedZones(context, client, null)
+        }
+
+        assertEquals(0, registered)
+        verify(client, never())
+            .addGeofences(any(GeofencingRequest::class.java), any(PendingIntent::class.java))
+    }
+
+    @Test
+    fun `boot re-registration no-ops when no zones are persisted`() {
+        grantAllLocationPermissions()
+        PolyfenceConfig(context).osGeofenceWakeEnabled = true
+        LocationTracker.applyClearZonesDirect(tracker)
+        val client = succeedingClient()
+
+        val registered = awaitOffMainLooper {
+            OsGeofenceRegistrar.registerFromPersistedZones(context, client, null)
+        }
+
+        assertEquals(0, registered)
+        verify(client, never())
+            .addGeofences(any(GeofencingRequest::class.java), any(PendingIntent::class.java))
+    }
+
+    @Test
+    fun `boot re-registration re-arms fences from persisted zones`() {
+        grantAllLocationPermissions()
+        PolyfenceConfig(context).osGeofenceWakeEnabled = true
+        LocationTracker.applyAddZoneDirect(tracker, "z1", "Zone 1", circleZoneData(51.5, -0.1))
+        LocationTracker.applyAddZoneDirect(tracker, "z2", "Zone 2", circleZoneData(51.6, -0.1))
+        val client = succeedingClient()
+
+        // Play Services drops every geofence on reboot, and no tracker is
+        // running at boot — the zone set has to come off disk.
+        val registered = awaitOffMainLooper {
+            OsGeofenceRegistrar.registerFromPersistedZones(context, client, fixAt(51.5, -0.1))
+        }
+
+        assertEquals(2, registered)
+        val captor = ArgumentCaptor.forClass(GeofencingRequest::class.java)
+        verify(client).addGeofences(captor.capture(), any(PendingIntent::class.java))
+        assertEquals(
+            setOf("z1", "z2"),
+            captor.allValues[0].geofences.map { it.requestId }.toSet()
+        )
+    }
+
+    @Test
+    fun `boot re-registration honours the configured cap`() {
+        grantAllLocationPermissions()
+        PolyfenceConfig(context).osGeofenceWakeEnabled = true
+        PolyfenceConfig(context).osGeofenceMaxRegions = 2
+        repeat(5) {
+            LocationTracker.applyAddZoneDirect(
+                tracker, "z$it", "Zone $it", circleZoneData(51.5 + it * 0.001, -0.1)
+            )
+        }
+        val client = succeedingClient()
+
+        val registered = awaitOffMainLooper {
+            OsGeofenceRegistrar.registerFromPersistedZones(context, client, fixAt(51.5, -0.1))
+        }
+
+        assertEquals(2, registered)
+    }
+
+    @Test
+    fun `boot receiver ignores broadcasts other than BOOT_COMPLETED`() {
+        grantAllLocationPermissions()
+        PolyfenceConfig(context).osGeofenceWakeEnabled = true
+        LocationTracker.applyAddZoneDirect(tracker, "z1", "Zone 1", circleZoneData(51.5, -0.1))
+
+        // A receiver that acted on any delivered intent would re-register on
+        // unrelated system broadcasts the consumer's manifest happens to route.
+        PolyfenceBootReceiver().onReceive(
+            context,
+            android.content.Intent(android.content.Intent.ACTION_AIRPLANE_MODE_CHANGED)
+        )
+
+        assertNull(LocationTracker.osGeofenceRegistrationHealth())
+    }
+
+    // ---------------------------------------------------------------
     // No double-reporting
     // ---------------------------------------------------------------
 
@@ -633,7 +1081,7 @@ class OsGeofenceWakeTest {
     fun `movement anchor advances even when registration is refused`() {
         denyBackgroundLocationPermission()
         val client = succeedingClient()
-        val registrar = OsGeofenceRegistrar(context, client)
+        val registrar = backgroundedRegistrar(client)
 
         // A refused attempt must still move the anchor. Leaving it null makes
         // every later fix look like "moved far enough", producing one retry
@@ -656,7 +1104,7 @@ class OsGeofenceWakeTest {
     @Test
     fun `repeated denials are rate-limited on the error channel`() {
         denyBackgroundLocationPermission()
-        val registrar = OsGeofenceRegistrar(context, succeedingClient())
+        val registrar = backgroundedRegistrar(succeedingClient())
 
         repeat(10) {
             registrar.refreshNowForTest(
@@ -676,8 +1124,8 @@ class OsGeofenceWakeTest {
     @Test
     fun `denial health reports total zone count, not candidate count`() {
         denyBackgroundLocationPermission()
-        val registrar = OsGeofenceRegistrar(context, succeedingClient())
-        val overCap = OsGeofenceRegistrar.TOP_N + 25
+        val registrar = backgroundedRegistrar(succeedingClient())
+        val overCap = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS + 25
 
         registrar.refreshNowForTest(
             zones = (1..overCap).map { engineZone("z$it", 51.5 + it * 0.001, -0.1) },
@@ -694,7 +1142,7 @@ class OsGeofenceWakeTest {
     fun `rapid zone-set changes coalesce into one registration`() {
         grantAllLocationPermissions()
         val client = succeedingClient()
-        val registrar = OsGeofenceRegistrar(context, client)
+        val registrar = backgroundedRegistrar(client)
 
         seedEngineZone("z1", 51.5, -0.1)
         repeat(5) { registrar.requestRefresh() }
@@ -709,7 +1157,7 @@ class OsGeofenceWakeTest {
     fun `a refresh request does not reach the OS before the debounce window elapses`() {
         grantAllLocationPermissions()
         val client = succeedingClient()
-        val registrar = OsGeofenceRegistrar(context, client)
+        val registrar = backgroundedRegistrar(client)
 
         seedEngineZone("z1", 51.5, -0.1)
         registrar.requestRefresh()
@@ -726,7 +1174,7 @@ class OsGeofenceWakeTest {
     fun `zone-set change reaches the OS with the updated set after debounce`() {
         grantAllLocationPermissions()
         val client = succeedingClient()
-        val registrar = OsGeofenceRegistrar(context, client)
+        val registrar = backgroundedRegistrar(client)
 
         registrar.refreshNowForTest(
             zones = listOf(engineZone("z1", 51.5, -0.1)),
@@ -749,7 +1197,7 @@ class OsGeofenceWakeTest {
     fun `movement below the recalc threshold does not re-register`() {
         grantAllLocationPermissions()
         val client = succeedingClient()
-        val registrar = OsGeofenceRegistrar(context, client)
+        val registrar = backgroundedRegistrar(client)
 
         registrar.refreshNowForTest(
             zones = listOf(engineZone("z1", 51.5, -0.1)),
@@ -768,7 +1216,7 @@ class OsGeofenceWakeTest {
     fun `movement past the recalc threshold re-registers`() {
         grantAllLocationPermissions()
         val client = succeedingClient()
-        val registrar = OsGeofenceRegistrar(context, client)
+        val registrar = backgroundedRegistrar(client)
 
         seedEngineZone("z1", 51.5, -0.1)
         registrar.refreshNowForTest(
@@ -788,7 +1236,7 @@ class OsGeofenceWakeTest {
     fun `shutdown removes registered fences and stops accepting refreshes`() {
         grantAllLocationPermissions()
         val client = succeedingClient()
-        val registrar = OsGeofenceRegistrar(context, client)
+        val registrar = backgroundedRegistrar(client)
 
         seedEngineZone("z1", 51.5, -0.1)
         registrar.shutdown()

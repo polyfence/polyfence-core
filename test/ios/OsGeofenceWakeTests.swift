@@ -31,15 +31,23 @@ final class OsGeofenceWakeTests: XCTestCase {
         PolyfenceErrorManager.shared.initialize { [weak self] error in
             self?.capturedErrors.append(error)
         }
-        PolyfenceConfig().osGeofenceWakeEnabled = false
-        PolyfenceConfig().pendingEventsQueueSize = 0
+        resetPersistedConfig()
     }
 
     override func tearDown() {
         PolyfenceErrorManager.shared.dispose()
-        PolyfenceConfig().osGeofenceWakeEnabled = false
-        PolyfenceConfig().pendingEventsQueueSize = 0
+        resetPersistedConfig()
         super.tearDown()
+    }
+
+    /// PolyfenceConfig is backed by a UserDefaults suite that outlives an
+    /// individual test, and the tracker now reads it at construction, so a
+    /// value left behind by one case would leak into the next.
+    private func resetPersistedConfig() {
+        let config = PolyfenceConfig()
+        config.osGeofenceWakeEnabled = false
+        config.pendingEventsQueueSize = 0
+        config.osGeofenceMaxRegions = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
     }
 
     // MARK: - Fixtures
@@ -90,12 +98,16 @@ final class OsGeofenceWakeTests: XCTestCase {
     ) -> OsGeofenceRegistrar {
         let registrar = OsGeofenceRegistrar(locationManager: CLLocationManager(), topN: topN)
         registrar._setAuthorizationOverrideForTest(.authorizedAlways)
+        // Slots are only held while the app is backgrounded; a foregrounded
+        // registrar deliberately registers nothing.
+        registrar.onAppBackgrounded()
         return registrar
     }
 
     private func deniedRegistrar() -> OsGeofenceRegistrar {
         let registrar = OsGeofenceRegistrar(locationManager: CLLocationManager())
         registrar._setAuthorizationOverrideForTest(.authorizedWhenInUse)
+        registrar.onAppBackgrounded()
         return registrar
     }
 
@@ -432,6 +444,186 @@ final class OsGeofenceWakeTests: XCTestCase {
         tracker.locationManager(CLLocationManager(), didEnterRegion: foreign)
 
         XCTAssertTrue(tracker.drainPendingEvents().isEmpty)
+    }
+
+    // MARK: - Slot allocation: zero held while foregrounded
+
+    func testForegroundTransitionReleasesEveryRegisteredRegion() {
+        let registrar = authorizedRegistrar()
+        registrar.refreshNowForTest(zones: [engineZone("z1", 51.5, -0.1)], seed: fixAt(51.5, -0.1))
+        XCTAssertEqual(registrar.healthMap()?["registered"] as? Int, 1)
+
+        registrar.onAppForegrounded()
+
+        // The consumer gets the whole platform allocation back while its app is
+        // alive — the in-process engine is doing the detection anyway.
+        XCTAssertEqual(registrar.healthMap()?["registered"] as? Int, 0)
+        XCTAssertTrue(registrar.healthMap()?["lastError"] is NSNull)
+    }
+
+    func testNoRegistrationHappensWhileTheAppIsForegrounded() {
+        let registrar = authorizedRegistrar()
+        registrar.onAppForegrounded()
+
+        registrar.requestRefresh()
+        // requestRefresh hops through the registrar's serial queue before it
+        // would schedule anything; draining it proves nothing was scheduled.
+        registrar.drainForTest()
+
+        XCTAssertEqual(registrar.healthMap()?["registered"] as? Int, 0)
+    }
+
+    func testMovementWhileForegroundedDoesNotRegister() {
+        let registrar = authorizedRegistrar()
+        registrar.refreshNowForTest(zones: [engineZone("z1", 51.5, -0.1)], seed: fixAt(51.5, -0.1))
+        registrar.onAppForegrounded()
+
+        registrar.onLocationUpdate(fixAt(51.55, -0.1))
+        registrar.drainForTest()
+
+        XCTAssertEqual(registrar.healthMap()?["registered"] as? Int, 0)
+    }
+
+    func testBackgroundTransitionRegistersUpToTheConfiguredCap() {
+        let registrar = authorizedRegistrar(topN: 3)
+        registrar.onAppForegrounded()
+        registrar.onAppBackgrounded()
+
+        let zones = (1...6).map { engineZone("z\($0)", 51.5 + Double($0) * 0.001, -0.1) }
+        registrar.refreshNowForTest(zones: zones, seed: fixAt(51.5, -0.1))
+
+        XCTAssertEqual(registrar.healthMap()?["requested"] as? Int, 6)
+        XCTAssertEqual(registrar.healthMap()?["registered"] as? Int, 3)
+    }
+
+    func testLifecycleNotificationsDriveRegistration() {
+        #if canImport(UIKit)
+        let registrar = authorizedRegistrar()
+        registrar.startObservingAppLifecycle()
+        registrar.refreshNowForTest(zones: [engineZone("z1", 51.5, -0.1)], seed: fixAt(51.5, -0.1))
+        XCTAssertEqual(registrar.healthMap()?["registered"] as? Int, 1)
+
+        NotificationCenter.default.post(
+            name: UIApplication.willEnterForegroundNotification, object: nil
+        )
+        registrar.drainForTest()
+        XCTAssertEqual(registrar.healthMap()?["registered"] as? Int, 0)
+
+        // And the background notification must re-arm, not just the explicit
+        // call — the notification wiring is the only path production uses.
+        NotificationCenter.default.post(
+            name: UIApplication.didEnterBackgroundNotification, object: nil
+        )
+        registrar.drainForTest()
+        registrar.refreshNowForTest(zones: [engineZone("z1", 51.5, -0.1)], seed: fixAt(51.5, -0.1))
+        XCTAssertEqual(registrar.healthMap()?["registered"] as? Int, 1)
+        #endif
+    }
+
+    func testStartObservingAppLifecycleIsIdempotent() {
+        #if canImport(UIKit)
+        // A double call must not double-register the observers, or one
+        // notification would drive two transitions.
+        let registrar = authorizedRegistrar()
+        registrar.startObservingAppLifecycle()
+        registrar.startObservingAppLifecycle()
+        registrar.refreshNowForTest(zones: [engineZone("z1", 51.5, -0.1)], seed: fixAt(51.5, -0.1))
+
+        NotificationCenter.default.post(
+            name: UIApplication.willEnterForegroundNotification, object: nil
+        )
+        registrar.drainForTest()
+
+        XCTAssertEqual(registrar.healthMap()?["registered"] as? Int, 0)
+        #endif
+    }
+
+    // MARK: - Configurable cap
+
+    func testDefaultCapMatchesThePlatformCeiling() {
+        // Unlike Android there is no headroom to hand out: Apple's per-app
+        // limit is the default and the maximum.
+        XCTAssertEqual(PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS, 20)
+        XCTAssertEqual(PolyfenceConfig.DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS, 20)
+        PolyfenceConfig().resetToDefaults()
+        XCTAssertEqual(PolyfenceConfig().osGeofenceMaxRegions, 20)
+    }
+
+    func testCapAboveThePlatformMaximumIsClampedWithAWarning() {
+        // iOS silently declines regions past 20, so honouring a larger value
+        // would report coverage that does not exist.
+        XCTAssertEqual(OsGeofenceRegistrar.clampMaxRegions(5_000), 20)
+        XCTAssertEqual(OsGeofenceRegistrar.clampMaxRegions(0), 1)
+        XCTAssertEqual(
+            OsGeofenceRegistrar(locationManager: CLLocationManager(), topN: 5_000)
+                .effectiveMaxRegions(),
+            20
+        )
+    }
+
+    func testConfigPersistsTheClampedCapNotTheRawRequest() {
+        // Echoing the raw value back through getConfiguration would advertise a
+        // budget the registrar never uses and leave the consumer no way to
+        // discover the effective one.
+        let config = PolyfenceConfig()
+        config.osGeofenceMaxRegions = 5_000
+        XCTAssertEqual(config.osGeofenceMaxRegions, PolyfenceConfig.DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS)
+        config.osGeofenceMaxRegions = 0
+        XCTAssertEqual(config.osGeofenceMaxRegions, 1)
+    }
+
+    func testClampIsSharedWithTheConfigSurface() {
+        // One clamp implementation, so a value set through config and a value
+        // passed straight to the registrar cannot disagree.
+        XCTAssertEqual(
+            OsGeofenceRegistrar.clampMaxRegions(5_000),
+            PolyfenceConfig.clampOsGeofenceMaxRegions(5_000)
+        )
+        XCTAssertEqual(
+            OsGeofenceRegistrar.clampMaxRegions(0),
+            PolyfenceConfig.clampOsGeofenceMaxRegions(0)
+        )
+    }
+
+    func testCapPropagatesFromConfigThroughUpdateConfiguration() {
+        let tracker = LocationTracker()
+        tracker.updateConfigurationFromMap([
+            "osGeofenceMaxRegions": 12,
+            "osGeofenceWakeEnabled": true
+        ])
+
+        XCTAssertEqual(PolyfenceConfig().osGeofenceMaxRegions, 12)
+        XCTAssertEqual(
+            tracker.getCurrentConfigurationMap()["osGeofenceMaxRegions"] as? Int,
+            12
+        )
+    }
+
+    func testWakeFlagSurvivesTrackerReconstruction() {
+        let first = LocationTracker()
+        first.updateConfigurationFromMap(["osGeofenceWakeEnabled": true])
+
+        // When the OS relaunches a killed app on a crossing, the wake path runs
+        // before any bridge re-applies configuration. An in-memory-only flag
+        // would read false there and the crossing would be discarded.
+        let relaunched = LocationTracker()
+        XCTAssertEqual(
+            relaunched.getCurrentConfigurationMap()["osGeofenceWakeEnabled"] as? Bool,
+            true
+        )
+    }
+
+    // MARK: - Reboot
+
+    func testMonitoredRegionsSurviveRebootWithoutABootReceiver() {
+        // iOS restores CLCircularRegion monitoring across a device restart and
+        // relaunches the app in the background on a crossing, so there is no
+        // iOS counterpart to Android's PolyfenceBootReceiver. This case exists
+        // to state that asymmetry explicitly rather than leave the Kotlin
+        // suite's boot cases looking unmirrored.
+        let registrar = authorizedRegistrar()
+        registrar.refreshNowForTest(zones: [engineZone("z1", 51.5, -0.1)], seed: fixAt(51.5, -0.1))
+        XCTAssertEqual(registrar.healthMap()?["registered"] as? Int, 1)
     }
 
     // MARK: - No double-reporting

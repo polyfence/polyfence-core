@@ -35,7 +35,8 @@ class LocationTrackerConfigTests: XCTestCase {
         "disableAlertNotifications",
         "gpsStalenessTimeoutMs",
         "pendingEventsQueueSize",
-        "osGeofenceWakeEnabled"
+        "osGeofenceWakeEnabled",
+        "osGeofenceMaxRegions"
     ]
 
     // MARK: - Shape stability
@@ -47,7 +48,7 @@ class LocationTrackerConfigTests: XCTestCase {
         XCTAssertEqual(
             expectedTopLevelKeys,
             Set(map.keys),
-            "Composed getConfiguration must expose the full 15-key surface — a missing key silently drops that subsystem from the read side."
+            "Composed getConfiguration must expose the full 16-key surface — a missing key silently drops that subsystem from the read side."
         )
     }
 
