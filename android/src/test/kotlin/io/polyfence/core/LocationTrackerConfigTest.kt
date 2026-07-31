@@ -9,7 +9,7 @@ import org.junit.Test
 /**
  * Shape and default-value coverage for `getCurrentConfigurationMap`
  * and `buildDefaultConfigurationMap`. `getConfiguration()` must
- * return the full 14-key `PolyfenceConfiguration` shape — including
+ * return the full 15-key `PolyfenceConfiguration` shape — including
  * the five settings (`gpsAccuracyThreshold`, `dwellSettings`,
  * `clusterSettings`, `scheduleSettings`, `activitySettings`) that
  * live outside `SmartGpsConfig` — so bridges can cache and re-apply
@@ -66,7 +66,8 @@ class LocationTrackerConfigTest {
         "activitySettings",
         "disableAlertNotifications",
         "gpsStalenessTimeoutMs",
-        "pendingEventsQueueSize"
+        "pendingEventsQueueSize",
+        "osGeofenceWakeEnabled"
     )
 
     // -------- buildDefaultConfigurationMap --------
@@ -210,7 +211,7 @@ class LocationTrackerConfigTest {
     // -------- getCurrentConfigurationMap null-context fallback --------
 
     @Test
-    fun `getCurrentConfigurationMap with null context still returns the full 14-key shape`() {
+    fun `getCurrentConfigurationMap with null context still returns the full 15-key shape`() {
         // With a null context and no running service, the composed
         // accessor should fall back to engine + scheduler defaults
         // and never omit a key. Shape stability is the whole point
