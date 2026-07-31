@@ -37,6 +37,8 @@ When the developer enables `osGeofenceWakeEnabled`, Polyfence registers a small 
 
 On Android those boundaries go to Google Play Services; on iOS, to CoreLocation. Both are components of the device's operating system, not Polyfence services. If you enable this, reflect it in your own privacy policy.
 
+This is also the only part of the library that needs a background-location grant. Base tracking runs as a foreground service and asks for foreground location only, so an integration that leaves wake fences off never requests `ACCESS_BACKGROUND_LOCATION` (Android) or "Always" authorization (iOS), and shares nothing with the OS geofence service.
+
 ### Local persistence (optional)
 
 - **By default**, working zone state lives **in memory** only while the engine runs
