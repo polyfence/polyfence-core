@@ -38,8 +38,12 @@ public class PolyfenceDebugCollector {
     }
 
     private func collectSystemStatus() -> [String: Any] {
+        // Read outside syncQueue — the registrar has its own serial queue and
+        // nesting a sync onto ours would be an ordering hazard for no benefit.
+        let osGeofenceHealth = LocationTracker.currentInstanceForOsGeofence?
+            .osGeofenceRegistrationHealth()
         return syncQueue.sync {
-            return [
+            var status: [String: Any] = [
                 // Throwaway CLLocationManager instances used here for a one-shot
                 // synchronous `authorizationStatus` read. No delegate is set,
                 // no `startUpdating…` is called, and the instance goes out of
@@ -62,6 +66,15 @@ public class PolyfenceDebugCollector {
                 "platformVersion": UIDevice.current.systemVersion,
                 "pluginVersion": self.pluginVersion ?? "unknown"
             ]
+            // Always present so consumers can rely on a stable shape. Null
+            // when osGeofenceWakeEnabled is off or no registration has been
+            // attempted; a { requested, registered, lastError } map otherwise,
+            // letting a consumer surface observe OS-cap hits (requested >
+            // registered) or permission drift (lastError ==
+            // "background_location_denied"). NSNull bridges to null on both
+            // platform channels, matching the Kotlin side's nullable value.
+            status["osGeofenceRegistrationHealth"] = osGeofenceHealth ?? NSNull()
+            return status
         }
     }
 

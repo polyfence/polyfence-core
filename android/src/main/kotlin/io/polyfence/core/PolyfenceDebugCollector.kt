@@ -48,7 +48,7 @@ class PolyfenceDebugCollector {
             )
         }
 
-        private fun collectSystemStatus(context: Context): Map<String, Any> {
+        private fun collectSystemStatus(context: Context): Map<String, Any?> {
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as AndroidLocationManager
 
@@ -61,7 +61,14 @@ class PolyfenceDebugCollector {
                 "lastKnownAccuracy" to lastKnownAccuracy,
                 "lastLocationUpdate" to lastLocationUpdateTime,
                 "platformVersion" to Build.VERSION.RELEASE,
-                "pluginVersion" to getPluginVersion()
+                "pluginVersion" to getPluginVersion(),
+                // Null when osGeofenceWakeEnabled = false. Present as a
+                // { requested, registered, lastError } map when opted in so a
+                // consumer surface can observe OS-cap hits (requested >
+                // registered) or permission drift (lastError set to a
+                // background_location_denied-shaped string).
+                "osGeofenceRegistrationHealth" to
+                    (LocationTracker.osGeofenceRegistrationHealth())
             )
         }
 
