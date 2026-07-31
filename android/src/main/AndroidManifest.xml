@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Merged into every consumer's manifest, not only those that enable OS
+         wake fences: manifest merging happens at build time and cannot depend
+         on a runtime flag. That is already the effective requirement anyway —
+         LocationTracker.hasLocationPerms() refuses to start tracking on API 29+
+         without this grant, so any app using this library for background
+         tracking must hold it. The runtime prompt remains the consumer's. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <application>
+        <!-- Invoked by the Google Play Services geofence API when a registered
+             zone perimeter is crossed while polyfence-core's own service is
+             dead. The receiver writes the event to the durable pending-events
+             queue and returns; delivery happens on the next tracker boot
+             through the normal drain path. Not exported: the PendingIntent
+             uses an explicit ComponentName targeting this class. -->
+        <receiver
+            android:name="io.polyfence.core.PolyfenceGeofenceBroadcastReceiver"
+            android:exported="false" />
+    </application>
+
+</manifest>

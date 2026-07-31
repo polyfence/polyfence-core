@@ -95,6 +95,18 @@ public class PolyfenceConfig {
         set { defaults.set(newValue, forKey: "pending_events_queue_size") }
     }
 
+    // OS wake-fence registration. false = off (default) — Polyfence's own polling
+    // engine is the sole detector; nothing is registered with the OS. When true,
+    // the top-N-nearest active zones are registered with CLLocationManager
+    // region monitoring so an OS-side callback can wake the app after full
+    // process kill and enqueue the crossing into the pending-events queue for
+    // drain-on-next-boot. Requires "Always" location authorization granted by
+    // the consumer app and the corresponding Info.plist usage description.
+    public var osGeofenceWakeEnabled: Bool {
+        get { return defaults.bool(forKey: "os_geofence_wake_enabled") }
+        set { defaults.set(newValue, forKey: "os_geofence_wake_enabled") }
+    }
+
     public var minUpdateIntervalMs: Int {
         get {
             let val = defaults.integer(forKey: "min_update_interval_ms")
