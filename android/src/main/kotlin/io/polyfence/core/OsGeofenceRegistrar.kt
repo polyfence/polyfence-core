@@ -1,6 +1,7 @@
 package io.polyfence.core
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -139,6 +140,10 @@ internal class OsGeofenceRegistrar(
         applyRegistration(zones, seed)
     }
 
+    // Permissions are verified by hasBackgroundLocationPermission() a few lines
+    // in, and a SecurityException from the OS is caught below; lint cannot see
+    // through the helper to the guard.
+    @SuppressLint("MissingPermission")
     private fun applyRegistration(zones: List<GeofenceEngine.Zone>, seed: Location?) {
         // Advance the movement anchor on every ATTEMPT, not only on success.
         // Anchoring on success alone leaves it null whenever registration keeps
