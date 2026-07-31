@@ -225,6 +225,8 @@ class LocationTracker : Service() {
                 base["gpsStalenessTimeoutMs"] = instance?.gpsStalenessTimeoutMs ?: 0L
                 base["pendingEventsQueueSize"] = instance?.pendingEventsQueueSize ?: 0
                 base["osGeofenceWakeEnabled"] = instance?.osGeofenceWakeEnabled ?: false
+                base["osGeofenceMaxRegions"] = instance?.osGeofenceMaxRegions
+                    ?: PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
             } else {
                 // Service not running — return the engine's compile-time
                 // defaults so the caller sees a stable shape rather than
@@ -245,6 +247,7 @@ class LocationTracker : Service() {
                 base["gpsStalenessTimeoutMs"] = 0L
                 base["pendingEventsQueueSize"] = 0
                 base["osGeofenceWakeEnabled"] = false
+                base["osGeofenceMaxRegions"] = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
             }
 
             // TrackingScheduler is a companion field lazily initialised
@@ -380,6 +383,7 @@ class LocationTracker : Service() {
             base["gpsStalenessTimeoutMs"] = 0L
             base["pendingEventsQueueSize"] = 0
             base["osGeofenceWakeEnabled"] = false
+            base["osGeofenceMaxRegions"] = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
             val defaults = ActivitySettings()
             base["activitySettings"] = mapOf(
                 "enabled" to defaults.enabled,
@@ -625,6 +629,7 @@ class LocationTracker : Service() {
     // process can be woken by an OS-side broadcast that enqueues the crossing
     // into the pending queue for drain on the next tracker boot.
     private var osGeofenceWakeEnabled: Boolean = false
+    private var osGeofenceMaxRegions: Int = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
     private var osGeofenceRegistrar: OsGeofenceRegistrar? = null
 
     /** Registrar / receiver seam. Reads what's currently on this Service instance. */
@@ -812,8 +817,13 @@ class LocationTracker : Service() {
         // no zone-change or movement hook fires. The registrar's own
         // initial registration is deferred until a zone or a fix arrives.
         osGeofenceWakeEnabled = config.osGeofenceWakeEnabled
+        osGeofenceMaxRegions = config.osGeofenceMaxRegions
+        PolyfenceBootReceiver.setEnabled(applicationContext, osGeofenceWakeEnabled)
         if (osGeofenceWakeEnabled) {
-            osGeofenceRegistrar = OsGeofenceRegistrar(applicationContext)
+            osGeofenceRegistrar = OsGeofenceRegistrar(
+                applicationContext,
+                requestedMaxRegions = osGeofenceMaxRegions
+            ).apply { startObservingAppLifecycle() }
         }
 
         // Initialize location client
@@ -2126,22 +2136,50 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 Log.d(TAG, "Pending events queue size updated to $pendingEventsQueueSize")
             }
 
+            // OS wake-fence slot budget. Applied before the toggle below so a
+            // single updateConfiguration carrying both lands the new cap on the
+            // registrar this call creates.
+            val newMaxRegions = configMap["osGeofenceMaxRegions"] as? Number
+            val maxRegionsChanged =
+                newMaxRegions != null && newMaxRegions.toInt() != osGeofenceMaxRegions
+            if (newMaxRegions != null) {
+                osGeofenceMaxRegions = newMaxRegions.toInt()
+                config.osGeofenceMaxRegions = osGeofenceMaxRegions
+            }
+
             // OS wake-fence toggle (false = off, default). Instantiating the
-            // registrar is deferred until a zone or a fix arrives, so flipping
-            // on with an empty engine is safe. Flipping off removes any
+            // registrar is deferred until the app backgrounds, so flipping on
+            // with an empty engine is safe. Flipping off removes any
             // currently-registered fences and clears the health snapshot.
             val newOsWake = configMap["osGeofenceWakeEnabled"] as? Boolean
-            if (newOsWake != null && newOsWake != osGeofenceWakeEnabled) {
+            val wakeChanged = newOsWake != null && newOsWake != osGeofenceWakeEnabled
+            if (newOsWake != null) {
                 osGeofenceWakeEnabled = newOsWake
                 config.osGeofenceWakeEnabled = newOsWake
-                if (newOsWake) {
-                    osGeofenceRegistrar = OsGeofenceRegistrar(applicationContext)
-                    osGeofenceRegistrar?.requestRefresh()
-                } else {
-                    osGeofenceRegistrar?.shutdown()
-                    osGeofenceRegistrar = null
+            }
+            // The cap is immutable on a constructed registrar, so a cap change
+            // while the feature is already on has to rebuild it — otherwise the
+            // new budget would not take effect until the next Service start.
+            if (wakeChanged) {
+                PolyfenceBootReceiver.setEnabled(applicationContext, osGeofenceWakeEnabled)
+            }
+            if (wakeChanged || (maxRegionsChanged && osGeofenceWakeEnabled)) {
+                osGeofenceRegistrar?.shutdown()
+                osGeofenceRegistrar = null
+                if (osGeofenceWakeEnabled) {
+                    osGeofenceRegistrar = OsGeofenceRegistrar(
+                        applicationContext,
+                        requestedMaxRegions = osGeofenceMaxRegions
+                    ).apply {
+                        startObservingAppLifecycle()
+                        requestRefresh()
+                    }
                 }
-                Log.d(TAG, "osGeofenceWakeEnabled updated to $newOsWake")
+                Log.d(
+                    TAG,
+                    "OS wake fences updated: enabled=$osGeofenceWakeEnabled " +
+                        "maxRegions=$osGeofenceMaxRegions"
+                )
             }
 
             // Update dwell configuration if provided

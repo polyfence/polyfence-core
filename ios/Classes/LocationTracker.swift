@@ -105,6 +105,7 @@ public class LocationTracker: NSObject {
     // process can be woken by an OS-side callback that enqueues the crossing
     // into the pending queue for drain on the next tracker boot.
     private var osGeofenceWakeEnabled: Bool = false
+    private var osGeofenceMaxRegions: Int = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
     private var osGeofenceRegistrar: OsGeofenceRegistrar?
 
     /// Marks a queued event as having originated from an OS wake fence rather
@@ -185,6 +186,12 @@ public class LocationTracker: NSObject {
     public override init() {
         super.init()
         LocationTracker.currentInstanceForOsGeofence = self
+        // The OS wake-fence flag has to outlive the process: when the OS
+        // relaunches a killed app on a region crossing, the wake path runs
+        // before any bridge has re-applied configuration, so an in-memory-only
+        // flag would read false and the crossing would be discarded — exactly
+        // the loss the feature exists to prevent.
+        config = PolyfenceConfig()
         // Enable battery monitoring before anything else in init so the
         // OS has had as much time as possible to populate batteryLevel by
         // the time captureBatterySessionStart() reads it below. iOS reports
@@ -347,13 +354,25 @@ public class LocationTracker: NSObject {
         pendingEventsQueueSize = config?.pendingEventsQueueSize ?? 0
         pendingEventsStore = PendingEventsStore(queueSize: pendingEventsQueueSize)
 
-        // OS wake-fence registrar. Off unless the consumer opts in. The
-        // registrar's first registration is deferred until a zone or fix
-        // arrives — instantiating with an empty engine is safe.
+        // OS wake-fence registrar. Off unless the consumer opts in. Nothing is
+        // registered until the app backgrounds, so instantiating here with an
+        // empty engine is safe.
+        //
+        // No reboot handling is needed on this platform: iOS restores
+        // CLCircularRegion monitoring across a device restart and relaunches
+        // the app in the background on a crossing. Android has no equivalent —
+        // Play Services drops every geofence on reboot — which is why only that
+        // side carries a boot receiver.
         osGeofenceWakeEnabled = config?.osGeofenceWakeEnabled ?? false
+        osGeofenceMaxRegions = config?.osGeofenceMaxRegions
+            ?? PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
         if let manager = locationManager {
             if osGeofenceWakeEnabled {
-                osGeofenceRegistrar = OsGeofenceRegistrar(locationManager: manager)
+                osGeofenceRegistrar = OsGeofenceRegistrar(
+                    locationManager: manager,
+                    topN: osGeofenceMaxRegions
+                )
+                osGeofenceRegistrar?.startObservingAppLifecycle()
             } else {
                 // Monitored regions outlive the process on iOS. Without this
                 // sweep, a consumer who once enabled the flag would keep being
@@ -1690,22 +1709,40 @@ extension LocationTracker {
             pendingEventsStore = PendingEventsStore(queueSize: sizeNS.intValue)
         }
 
-        // OS wake-fence toggle (false = off, default). Instantiating the
-        // registrar is deferred until a zone or a fix arrives, so flipping
-        // on with an empty engine is safe. Flipping off stops monitoring any
-        // currently-registered regions and clears the health snapshot.
-        if let osWake = configMap["osGeofenceWakeEnabled"] as? Bool,
-           osWake != osGeofenceWakeEnabled {
+        // OS wake-fence slot budget. Applied before the toggle below so a
+        // single updateConfiguration carrying both lands the new cap on the
+        // registrar this call creates.
+        var maxRegionsChanged = false
+        if let requested = (configMap["osGeofenceMaxRegions"] as? NSNumber)?.intValue {
+            maxRegionsChanged = requested != osGeofenceMaxRegions
+            osGeofenceMaxRegions = requested
+            config?.osGeofenceMaxRegions = requested
+        }
+
+        // OS wake-fence toggle (false = off, default). Nothing is registered
+        // until the app backgrounds, so flipping on with an empty engine is
+        // safe. Flipping off stops monitoring any currently-registered regions
+        // and clears the health snapshot.
+        var wakeChanged = false
+        if let osWake = configMap["osGeofenceWakeEnabled"] as? Bool {
+            wakeChanged = osWake != osGeofenceWakeEnabled
             osGeofenceWakeEnabled = osWake
             config?.osGeofenceWakeEnabled = osWake
-            if osWake {
-                if let manager = locationManager {
-                    osGeofenceRegistrar = OsGeofenceRegistrar(locationManager: manager)
-                    osGeofenceRegistrar?.requestRefresh()
-                }
-            } else {
-                osGeofenceRegistrar?.shutdown()
-                osGeofenceRegistrar = nil
+        }
+        // The cap is fixed on a constructed registrar, so a cap change while
+        // the feature is already on has to rebuild it — otherwise the new
+        // budget would not take effect until the next tracker construction.
+        if wakeChanged || (maxRegionsChanged && osGeofenceWakeEnabled) {
+            osGeofenceRegistrar?.shutdown()
+            osGeofenceRegistrar = nil
+            if osGeofenceWakeEnabled, let manager = locationManager {
+                let registrar = OsGeofenceRegistrar(
+                    locationManager: manager,
+                    topN: osGeofenceMaxRegions
+                )
+                registrar.startObservingAppLifecycle()
+                osGeofenceRegistrar = registrar
+                registrar.requestRefresh()
             }
         }
 
@@ -1818,6 +1855,7 @@ extension LocationTracker {
         base["gpsStalenessTimeoutMs"] = gpsStalenessTimeoutMs
         base["pendingEventsQueueSize"] = pendingEventsQueueSize
         base["osGeofenceWakeEnabled"] = osGeofenceWakeEnabled
+        base["osGeofenceMaxRegions"] = osGeofenceMaxRegions
         base["dwellSettings"] = geofenceEngine.getDwellConfigMap()
         base["clusterSettings"] = geofenceEngine.getClusterConfigMap()
         base["scheduleSettings"] = TrackingScheduler.shared.getConfigMap()

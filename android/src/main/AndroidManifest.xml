@@ -1,13 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Merged into every consumer's manifest, not only those that enable OS
-         wake fences: manifest merging happens at build time and cannot depend
-         on a runtime flag. That is already the effective requirement anyway —
-         LocationTracker.hasLocationPerms() refuses to start tracking on API 29+
-         without this grant, so any app using this library for background
-         tracking must hold it. The runtime prompt remains the consumer's. -->
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- No <uses-permission> is declared here on purpose. Manifest merging is a
+         build-time operation, so anything this library declares lands in every
+         consumer's merged manifest whether or not they enable the feature that
+         needs it. ACCESS_BACKGROUND_LOCATION in particular triggers Google
+         Play's manual background-location review, so declaring it here would
+         impose that on integrators who never turn OS wake fences on. Consumers
+         who set osGeofenceWakeEnabled=true declare ACCESS_BACKGROUND_LOCATION
+         and RECEIVE_BOOT_COMPLETED in their own manifest; see the Android
+         integration notes in the README for the exact lines.
+
+         Both receivers below degrade to no-ops without those grants: the
+         registration path reports os_geofence_permission_denied through the
+         normal error channel, and the system simply never delivers
+         BOOT_COMPLETED to an app that has not asked for it. -->
 
     <application>
         <!-- Invoked by the Google Play Services geofence API when a registered
@@ -19,6 +26,31 @@
         <receiver
             android:name="io.polyfence.core.PolyfenceGeofenceBroadcastReceiver"
             android:exported="false" />
+
+        <!-- Play Services drops every registered geofence on device reboot.
+             Without this, a phone that restarts overnight would have no wake
+             coverage until the user next opened the app. Exported because the
+             system, not the app, is the broadcaster. Fires only when the
+             consumer has declared RECEIVE_BOOT_COMPLETED.
+
+             Disabled by default and enabled at runtime only while OS wake
+             fences are on. Left enabled, every consumer that happens to declare
+             RECEIVE_BOOT_COMPLETED for its own reasons would have its process
+             cold-started on every device boot just to read a flag and return —
+             a cost the feature-off path must not impose. -->
+        <receiver
+            android:name="io.polyfence.core.PolyfenceBootReceiver"
+            android:enabled="false"
+            android:exported="true"
+            android:directBootAware="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- Several OEM ROMs send only their proprietary quick-boot
+                     action when resuming from fast-boot. -->
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
