@@ -131,6 +131,25 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Companion accessor for OS-geofence adapters that need to read
+         * live-instance state (broadcast receiver, registrar). Null when
+         * the Service is dead; the receiver falls back to a transient
+         * store constructed against the persisted config in that case.
+         */
+        internal val currentInstanceForOsGeofence: LocationTracker?
+            get() = currentInstance
+
+        /**
+         * Latest snapshot of the OS-geofence registration state as a plain
+         * map for the debug-collector systemStatus surface. Returns null when
+         * `osGeofenceWakeEnabled` is off, matching the "no health data yet"
+         * contract consumers use to distinguish opt-out from cap-hit.
+         */
+        fun osGeofenceRegistrationHealth(): Map<String, Any?>? {
+            return currentInstance?.osGeofenceRegistrar?.health?.toMap()
+        }
+
+        /**
          * Cumulative count of events that have been evicted from the pending queue
          * since first construction of a store on this device (oldest-first eviction
          * fires when the queue cap is reached). The counter persists across process
@@ -205,6 +224,7 @@ class LocationTracker : Service() {
                 base["clusterSettings"] = engine.getClusterConfigMap()
                 base["gpsStalenessTimeoutMs"] = instance?.gpsStalenessTimeoutMs ?: 0L
                 base["pendingEventsQueueSize"] = instance?.pendingEventsQueueSize ?: 0
+                base["osGeofenceWakeEnabled"] = instance?.osGeofenceWakeEnabled ?: false
             } else {
                 // Service not running — return the engine's compile-time
                 // defaults so the caller sees a stable shape rather than
@@ -224,6 +244,7 @@ class LocationTracker : Service() {
                 )
                 base["gpsStalenessTimeoutMs"] = 0L
                 base["pendingEventsQueueSize"] = 0
+                base["osGeofenceWakeEnabled"] = false
             }
 
             // TrackingScheduler is a companion field lazily initialised
@@ -358,6 +379,7 @@ class LocationTracker : Service() {
             )
             base["gpsStalenessTimeoutMs"] = 0L
             base["pendingEventsQueueSize"] = 0
+            base["osGeofenceWakeEnabled"] = false
             val defaults = ActivitySettings()
             base["activitySettings"] = mapOf(
                 "enabled" to defaults.enabled,
@@ -598,6 +620,20 @@ class LocationTracker : Service() {
     @Volatile
     private var bridgeAttached: Boolean = true
 
+    // OS wake-fence plumbing. Off by default. When on, the registrar mirrors the
+    // top-N-nearest zones to Google Play Services' geofence API so a killed
+    // process can be woken by an OS-side broadcast that enqueues the crossing
+    // into the pending queue for drain on the next tracker boot.
+    private var osGeofenceWakeEnabled: Boolean = false
+    private var osGeofenceRegistrar: OsGeofenceRegistrar? = null
+
+    /** Registrar / receiver seam. Reads what's currently on this Service instance. */
+    internal val pendingEventsStoreForOsGeofence: PendingEventsStore?
+        get() = pendingEventsStore
+    internal val geofenceEngineForOsGeofence: GeofenceEngine get() = geofenceEngine
+    internal val lastKnownLocationForOsGeofence: android.location.Location?
+        get() = lastKnownLocation
+
     /**
      * Set the core delegate for receiving events from the engine.
      * Platform bridges (Flutter, React Native, etc.) implement PolyfenceCoreDelegate.
@@ -619,6 +655,14 @@ class LocationTracker : Service() {
     fun setBridgeAttached(attached: Boolean) {
         bridgeAttached = attached
     }
+
+    /**
+     * True when a geofence event fired right now would reach the consumer
+     * live. Mirrors the condition the in-process persist-hook uses to decide
+     * deliver-vs-persist, so the OS wake path can apply the same XOR and avoid
+     * double-reporting a crossing the polling engine also sees.
+     */
+    internal fun canDeliverLive(): Boolean = isRunning && coreDelegate != null && bridgeAttached
 
     // Error Recovery Properties
     private lateinit var errorRecovery: PolyfenceErrorRecovery
@@ -762,6 +806,15 @@ class LocationTracker : Service() {
         // works — recovers events queued under a previous larger cap.
         pendingEventsQueueSize = config.pendingEventsQueueSize
         pendingEventsStore = PendingEventsStore(applicationContext, pendingEventsQueueSize)
+
+        // OS wake-fence registrar. Off unless the consumer opts in — when off,
+        // no fences are registered with the OS, no permission is checked, and
+        // no zone-change or movement hook fires. The registrar's own
+        // initial registration is deferred until a zone or a fix arrives.
+        osGeofenceWakeEnabled = config.osGeofenceWakeEnabled
+        if (osGeofenceWakeEnabled) {
+            osGeofenceRegistrar = OsGeofenceRegistrar(applicationContext)
+        }
 
         // Initialize location client
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -1268,6 +1321,7 @@ class LocationTracker : Service() {
                 geofenceEngine.reconcileZoneStates(cachedLocation)
             }
         }
+        osGeofenceRegistrar?.requestRefresh()
     }
 
     private fun removeZone(intent: Intent) {
@@ -1286,6 +1340,7 @@ class LocationTracker : Service() {
     private fun removeZoneById(zoneId: String) {
         geofenceEngine.removeZone(zoneId)
         zonePersistence.removeZone(zoneId)
+        osGeofenceRegistrar?.requestRefresh()
     }
 
     private fun clearZones() {
@@ -1295,6 +1350,7 @@ class LocationTracker : Service() {
         // Clear from persistent storage
         zonePersistence.clearAllZones()
 
+        osGeofenceRegistrar?.requestRefresh()
     }
 
     // Restore zones from storage on service start
@@ -1318,6 +1374,13 @@ class LocationTracker : Service() {
             // Load persisted zone states AFTER zones are loaded
             // This restores the "inside/outside" state from before service restart
             geofenceEngine.loadPersistedZoneStates()
+
+            // Play Services drops all registered geofences on device reboot,
+            // and this restore path writes to the engine directly rather than
+            // through addZoneById, so it does not hit that method's refresh
+            // hook. Without this the OS-side fences would stay unregistered
+            // until an unrelated zone mutation happened to trigger one.
+            osGeofenceRegistrar?.requestRefresh()
 
             Log.i(TAG, "Restored $restored zones from storage ($failed failed)")
         } catch (e: Exception) {
@@ -1554,7 +1617,6 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
-        currentInstance = null  // Clear instance reference
         errorRecovery.stopMonitoring()
         healthCheckHandler?.removeCallbacksAndMessages(null)
         // Stop activity recognition and unregister receiver
@@ -1570,6 +1632,20 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         // start).
         pendingEventsStore?.shutdown()
         pendingEventsStore = null
+
+        // Remove any OS-registered fences and stop the debounce handler. The
+        // receiver in the manifest can still be woken by a pending OS
+        // transition — it constructs its own transient PendingEventsStore
+        // in that path, so tearing this down does not lose events.
+        osGeofenceRegistrar?.shutdown()
+        osGeofenceRegistrar = null
+
+        // Cleared LAST. The broadcast receiver keys off this reference to
+        // decide whether to reuse the Service's store or construct a transient
+        // one; nulling it before the store is shut down would let a geofence
+        // broadcast in that window open a second writer thread on the same
+        // on-disk log while this one is still running.
+        currentInstance = null
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -2048,6 +2124,24 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 pendingEventsStore?.shutdown()
                 pendingEventsStore = PendingEventsStore(applicationContext, pendingEventsQueueSize)
                 Log.d(TAG, "Pending events queue size updated to $pendingEventsQueueSize")
+            }
+
+            // OS wake-fence toggle (false = off, default). Instantiating the
+            // registrar is deferred until a zone or a fix arrives, so flipping
+            // on with an empty engine is safe. Flipping off removes any
+            // currently-registered fences and clears the health snapshot.
+            val newOsWake = configMap["osGeofenceWakeEnabled"] as? Boolean
+            if (newOsWake != null && newOsWake != osGeofenceWakeEnabled) {
+                osGeofenceWakeEnabled = newOsWake
+                config.osGeofenceWakeEnabled = newOsWake
+                if (newOsWake) {
+                    osGeofenceRegistrar = OsGeofenceRegistrar(applicationContext)
+                    osGeofenceRegistrar?.requestRefresh()
+                } else {
+                    osGeofenceRegistrar?.shutdown()
+                    osGeofenceRegistrar = null
+                }
+                Log.d(TAG, "osGeofenceWakeEnabled updated to $newOsWake")
             }
 
             // Update dwell configuration if provided
@@ -2558,6 +2652,11 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
      */
     private fun updateMovementState(location: android.location.Location) {
         lastKnownLocation = location
+        // Notify the OS-geofence registrar so it can recompute the top-N-nearest
+        // set as the user drives past the previously-registered fringe. Cheap
+        // when the registrar is off (null) or when the movement threshold has
+        // not been crossed (compares two lat/lngs, no allocations).
+        osGeofenceRegistrar?.onLocationUpdate(location)
         val currentTime = System.currentTimeMillis()
         val movementSettings = smartConfig.movementSettings
 

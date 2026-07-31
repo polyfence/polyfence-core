@@ -100,6 +100,37 @@ public class LocationTracker: NSObject {
     private var bridgeAttached: Bool = true
     private let bridgeAttachedLock = NSLock()
 
+    // OS wake-fence plumbing. Off by default. When on, the registrar mirrors the
+    // top-N-nearest zones to CLLocationManager region monitoring so a killed
+    // process can be woken by an OS-side callback that enqueues the crossing
+    // into the pending queue for drain on the next tracker boot.
+    private var osGeofenceWakeEnabled: Bool = false
+    private var osGeofenceRegistrar: OsGeofenceRegistrar?
+
+    /// Marks a queued event as having originated from an OS wake fence rather
+    /// than the in-process polling engine. Consumers that want to distinguish
+    /// "the OS woke us for this" from "we detected it while running" branch on
+    /// this; the drain path treats both identically.
+    public static let EVENT_SOURCE_OS_GEOFENCE = "os_geofence"
+
+    /// Registrar / delegate seam. Reads what's currently on this instance.
+    internal var pendingEventsStoreForOsGeofence: PendingEventsStore? {
+        return pendingEventsStore
+    }
+    internal var geofenceEngineForOsGeofence: GeofenceEngine {
+        return geofenceEngine
+    }
+    internal var lastKnownLocationForOsGeofence: CLLocation? {
+        return lastKnownLocation
+    }
+    /// Process-wide handle the OS-geofence adapters read to reach live tracker
+    /// state. Swift has no companion-object equivalent, so the instance
+    /// maintains it: set on init, cleared on deinit but only when it still
+    /// points at the instance being torn down — a bridge that constructs a
+    /// replacement tracker before releasing the old one must not have the new
+    /// instance's handle nulled by the old one's deinit.
+    internal static private(set) weak var currentInstanceForOsGeofence: LocationTracker?
+
     // Smart GPS Configuration
     private var smartConfig = SmartGpsConfig()
     private var currentGpsInterval: TimeInterval = 5.0
@@ -153,6 +184,7 @@ public class LocationTracker: NSObject {
 
     public override init() {
         super.init()
+        LocationTracker.currentInstanceForOsGeofence = self
         // Enable battery monitoring before anything else in init so the
         // OS has had as much time as possible to populate batteryLevel by
         // the time captureBatterySessionStart() reads it below. iOS reports
@@ -178,6 +210,13 @@ public class LocationTracker: NSObject {
         // getSessionTelemetryData() below; subsequent sessions re-capture
         // via resetTelemetry().
         captureBatterySessionStart()
+    }
+
+    deinit {
+        if LocationTracker.currentInstanceForOsGeofence === self {
+            LocationTracker.currentInstanceForOsGeofence = nil
+        }
+        osGeofenceRegistrar?.shutdown()
     }
 
     /**
@@ -307,6 +346,21 @@ public class LocationTracker: NSObject {
         // works — recovers events queued under a previous larger cap.
         pendingEventsQueueSize = config?.pendingEventsQueueSize ?? 0
         pendingEventsStore = PendingEventsStore(queueSize: pendingEventsQueueSize)
+
+        // OS wake-fence registrar. Off unless the consumer opts in. The
+        // registrar's first registration is deferred until a zone or fix
+        // arrives — instantiating with an empty engine is safe.
+        osGeofenceWakeEnabled = config?.osGeofenceWakeEnabled ?? false
+        if let manager = locationManager {
+            if osGeofenceWakeEnabled {
+                osGeofenceRegistrar = OsGeofenceRegistrar(locationManager: manager)
+            } else {
+                // Monitored regions outlive the process on iOS. Without this
+                // sweep, a consumer who once enabled the flag would keep being
+                // woken by that session's fences after turning it off.
+                OsGeofenceRegistrar.clearStaleRegions(locationManager: manager)
+            }
+        }
     }
 
     // Track if first location after restart has been processed
@@ -537,6 +591,7 @@ public class LocationTracker: NSObject {
                         self.geofenceEngine.reconcileZoneStates(cachedLocation)
                     }
                 }
+                self.osGeofenceRegistrar?.requestRefresh()
             }
         } catch {
             // Route the rejection through PolyfenceErrorManager so the
@@ -571,6 +626,7 @@ public class LocationTracker: NSObject {
     public func removeZone(zoneId: String) {
         geofenceEngine.removeZone(zoneId: zoneId)
         zonePersistence?.removeZone(zoneId: zoneId)
+        osGeofenceRegistrar?.requestRefresh()
     }
 
     /**
@@ -584,6 +640,7 @@ public class LocationTracker: NSObject {
     public func clearAllZones() {
         geofenceEngine.clearAllZones()
         zonePersistence?.clearAllZones()
+        osGeofenceRegistrar?.requestRefresh()
     }
 
     /**
@@ -1323,15 +1380,104 @@ extension LocationTracker: CLLocationManagerDelegate {
     }
 
     public func locationManager(_ manager: CLLocationManager, didStartMonitoringFor region: CLRegion) {
-        // Started monitoring region
+        // Regions monitored from a cold start do not produce a crossing
+        // callback for a boundary the device is already inside, so ask the OS
+        // for the current state explicitly. This is what gives iOS the
+        // starting-state event Android gets from INITIAL_TRIGGER_ENTER.
+        guard region.identifier.hasPrefix(OsGeofenceRegistrar.REGION_ID_PREFIX) else { return }
+        manager.requestState(for: region)
+    }
+
+    public func locationManager(
+        _ manager: CLLocationManager,
+        didDetermineState state: CLRegionState,
+        for region: CLRegion
+    ) {
+        switch state {
+        case .inside:
+            handleOsRegionEvent(region: region, eventType: "ENTER")
+        case .outside, .unknown:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    public func locationManager(
+        _ manager: CLLocationManager,
+        monitoringDidFailFor region: CLRegion?,
+        withError error: Error
+    ) {
+        osGeofenceRegistrar?.recordMonitoringFailure(region: region, error: error)
     }
 
     public func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
-        // Entered region
+        handleOsRegionEvent(region: region, eventType: "ENTER")
     }
 
     public func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
-        // Exited region
+        handleOsRegionEvent(region: region, eventType: "EXIT")
+    }
+
+    /// Persist an OS-fired region transition into the pending queue for drain
+    /// on the tracker's next boot. Delivery to the consumer happens via the
+    /// same drain path in-process events use. The delegate is deliberately
+    /// not invoked from here: this callback exists to catch crossings that
+    /// happen while the tracker is not running, so there is no live sink.
+    ///
+    /// Ignores regions we did not register (an application-side
+    /// `CLCircularRegion` monitored on the same shared manager), and no-ops
+    /// when the store is absent rather than allocating a second store on a
+    /// path that would then race the tracker's own writer on the same file.
+    ///
+    /// Internal (not private) so the parity tests can drive it through the
+    /// public `didEnterRegion` / `didExitRegion` delegate methods.
+    internal func handleOsRegionEvent(region: CLRegion, eventType: String) {
+        let prefix = OsGeofenceRegistrar.REGION_ID_PREFIX
+        guard region.identifier.hasPrefix(prefix) else { return }
+        // With the flag off, behaviour must be indistinguishable from before
+        // this feature existed — including for fences a previous session
+        // registered and the OS is still holding.
+        guard osGeofenceWakeEnabled else { return }
+        guard let store = pendingEventsStore else { return }
+        // The OS fence is a wake source, not a second detector. When live
+        // delivery is currently possible the in-process engine already reports
+        // this crossing, so queueing it too would hand the consumer the same
+        // physical crossing twice on the next drain.
+        guard !canDeliverLive() else { return }
+
+        let zoneId = String(region.identifier.dropFirst(prefix.count))
+        let zoneName = geofenceEngine.getZoneName(zoneId) ?? zoneId
+        let coord = (region as? CLCircularRegion)?.center
+
+        let eventMap: [String: Any] = [
+            "zoneId": zoneId,
+            "zoneName": zoneName,
+            "eventType": eventType,
+            "timestamp": Int64(Date().timeIntervalSince1970 * 1000),
+            "detectionTimeMs": 0.0,
+            "gpsAccuracy": 0.0,
+            "latitude": coord?.latitude ?? 0.0,
+            "longitude": coord?.longitude ?? 0.0,
+            "speedMps": 0.0,
+            "activityAtEvent": "unknown",
+            "distanceToBoundaryM": 0.0,
+            "source": LocationTracker.EVENT_SOURCE_OS_GEOFENCE
+        ]
+
+        let evicted = store.append(eventMap)
+        if evicted > 0 {
+            PolyfenceErrorManager.shared.reportError(
+                type: "pending_events_evicted",
+                message: "Pending events queue reached capacity; oldest events dropped",
+                context: [
+                    "severity": "warning",
+                    "droppedCount": evicted,
+                    "platform": "ios",
+                    "source": LocationTracker.EVENT_SOURCE_OS_GEOFENCE
+                ]
+            )
+        }
     }
 }
 
@@ -1544,6 +1690,25 @@ extension LocationTracker {
             pendingEventsStore = PendingEventsStore(queueSize: sizeNS.intValue)
         }
 
+        // OS wake-fence toggle (false = off, default). Instantiating the
+        // registrar is deferred until a zone or a fix arrives, so flipping
+        // on with an empty engine is safe. Flipping off stops monitoring any
+        // currently-registered regions and clears the health snapshot.
+        if let osWake = configMap["osGeofenceWakeEnabled"] as? Bool,
+           osWake != osGeofenceWakeEnabled {
+            osGeofenceWakeEnabled = osWake
+            config?.osGeofenceWakeEnabled = osWake
+            if osWake {
+                if let manager = locationManager {
+                    osGeofenceRegistrar = OsGeofenceRegistrar(locationManager: manager)
+                    osGeofenceRegistrar?.requestRefresh()
+                }
+            } else {
+                osGeofenceRegistrar?.shutdown()
+                osGeofenceRegistrar = nil
+            }
+        }
+
         if let dwellSettings = configMap["dwellSettings"] as? [String: Any] {
             let dwellEnabled = dwellSettings["enabled"] as? Bool ?? true
             let dwellThresholdMs = dwellSettings["dwellThresholdMs"] as? Int
@@ -1652,6 +1817,7 @@ extension LocationTracker {
         base["gpsAccuracyThreshold"] = geofenceEngine.getGpsAccuracyThreshold()
         base["gpsStalenessTimeoutMs"] = gpsStalenessTimeoutMs
         base["pendingEventsQueueSize"] = pendingEventsQueueSize
+        base["osGeofenceWakeEnabled"] = osGeofenceWakeEnabled
         base["dwellSettings"] = geofenceEngine.getDwellConfigMap()
         base["clusterSettings"] = geofenceEngine.getClusterConfigMap()
         base["scheduleSettings"] = TrackingScheduler.shared.getConfigMap()
@@ -1719,6 +1885,17 @@ extension LocationTracker {
         bridgeAttachedLock.unlock()
     }
 
+    /// True when a geofence event fired right now would reach the consumer
+    /// live. Mirrors the condition the in-process persist-hook uses to decide
+    /// deliver-vs-persist, so the OS wake path can apply the same XOR and
+    /// avoid double-reporting a crossing the polling engine also sees.
+    internal func canDeliverLive() -> Bool {
+        guard trackingEnabled, coreDelegate != nil else { return false }
+        bridgeAttachedLock.lock()
+        defer { bridgeAttachedLock.unlock() }
+        return bridgeAttached
+    }
+
     /// Test-only seam for iOS unit tests that need to drive the persist-hook
     /// without wiring a real CLLocationManager fix. Underscore-prefixed and
     /// internal-scoped to keep it out of the public API while allowing
@@ -1755,6 +1932,15 @@ extension LocationTracker {
     /// restarts. Does not reset.
     public func pendingEventsDroppedCount() -> Int64 {
         return pendingEventsStore?.currentDroppedCount() ?? 0
+    }
+
+    /// Latest snapshot of the OS-geofence registration state as a
+    /// `{ requested, registered, lastError }` map for the debug-collector
+    /// systemStatus surface. `nil` when `osGeofenceWakeEnabled` is off or no
+    /// registration has been attempted yet, matching the "no health data"
+    /// contract consumers use to distinguish opt-out from cap-hit.
+    public func osGeofenceRegistrationHealth() -> [String: Any]? {
+        return osGeofenceRegistrar?.healthMap()
     }
 
     /**
@@ -2167,6 +2353,11 @@ extension LocationTracker {
 
     private func updateMovementState(_ location: CLLocation) {
         lastKnownLocation = location
+        // Notify the OS-geofence registrar so it can recompute the top-N-nearest
+        // set as the user drives past the previously-registered fringe. Cheap
+        // when the registrar is off (nil) or when the movement threshold has
+        // not been crossed (compares two coordinates, no allocations).
+        osGeofenceRegistrar?.onLocationUpdate(location)
         let currentTime = Date().timeIntervalSince1970
         let movementSettings = smartConfig.movementSettings
 
