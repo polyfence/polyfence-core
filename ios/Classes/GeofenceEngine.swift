@@ -401,7 +401,7 @@ class GeofenceEngine {
                     eventCallback?(zoneId, "ENTER", location, detectionTimeMs)
                 }
             }
-            persistAllZoneStates()
+            persistKnownZoneStates()
             return
         }
 
@@ -434,7 +434,7 @@ class GeofenceEngine {
 
         if reconciliationCount > 0 {
             NSLog("[\(GeofenceEngine.TAG)] Reconciled \(reconciliationCount) zone state mismatches")
-            persistAllZoneStates()
+            persistKnownZoneStates()
         } else {
             NSLog("[\(GeofenceEngine.TAG)] All zone states match current location - no reconciliation needed")
         }
@@ -480,7 +480,7 @@ class GeofenceEngine {
             syncQueue.sync { self.zoneStates[zoneId] = isInsideAfter }
             touched.insert(zoneId)
         }
-        if !touched.isEmpty { persistAllZoneStates() }
+        if !touched.isEmpty { persistKnownZoneStates() }
         return touched
     }
 
@@ -507,12 +507,21 @@ class GeofenceEngine {
     }
 
     /**
-     * Persist all current zone states (called after reconciliation or bulk changes)
+     * Persist the zone states this engine currently knows about, after
+     * reconciliation or a bulk change.
+     *
+     * `zoneStates` covers registered zones plus whatever a drained batch
+     * touched — never the whole persisted set — so the write merges rather
+     * than replaces. A call made while the map is partially populated (a
+     * drain that lands before zone restoration, a zone whose stored record
+     * failed to parse on restore) therefore leaves every other zone's stored
+     * membership intact. Removing a zone's persisted state is deliberate and
+     * goes through ZonePersistence.removeZoneState / clearAllZoneStates.
      */
-    private func persistAllZoneStates() {
+    private func persistKnownZoneStates() {
         guard let persistence = zonePersistence else { return }
         let states = syncQueue.sync { self.zoneStates }
-        persistence.saveZoneStates(states)
+        persistence.mergeZoneStates(states)
     }
 
     /**

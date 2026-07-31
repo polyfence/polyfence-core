@@ -574,7 +574,7 @@ fun getZoneName(zoneId: String): String? {
                     eventCallback?.invoke(zoneId, "ENTER", location, detectionTimeMs)
                 }
             }
-            persistAllZoneStates()
+            persistKnownZoneStates()
             return
         }
 
@@ -606,7 +606,7 @@ fun getZoneName(zoneId: String): String? {
 
         if (reconciliationCount > 0) {
             Log.i(TAG, "Reconciled $reconciliationCount zone state mismatches")
-            persistAllZoneStates()
+            persistKnownZoneStates()
         } else {
             Log.d(TAG, "All zone states match current location - no reconciliation needed")
         }
@@ -646,7 +646,7 @@ fun getZoneName(zoneId: String): String? {
             zoneStates[zoneId] = isInsideAfter
             touched.add(zoneId)
         }
-        if (touched.isNotEmpty()) persistAllZoneStates()
+        if (touched.isNotEmpty()) persistKnownZoneStates()
         touched
     }
 
@@ -672,11 +672,20 @@ fun getZoneName(zoneId: String): String? {
     }
 
     /**
-     * Persist all current zone states (called after reconciliation or bulk changes)
+     * Persist the zone states this engine currently knows about, after
+     * reconciliation or a bulk change.
+     *
+     * [zoneStates] covers registered zones plus whatever a drained batch
+     * touched — never the whole persisted set — so the write merges rather
+     * than replaces. A call made while the map is partially populated (a
+     * drain that lands before zone restoration, a zone whose stored record
+     * failed to parse on restore) therefore leaves every other zone's stored
+     * membership intact. Removing a zone's persisted state is deliberate and
+     * goes through ZonePersistence.removeZoneState / clearAllZoneStates.
      */
-    private fun persistAllZoneStates() {
+    private fun persistKnownZoneStates() {
         val persistence = zonePersistence ?: return
-        persistence.saveZoneStates(zoneStates.toMap())
+        persistence.mergeZoneStates(zoneStates.toMap())
     }
 
     /**

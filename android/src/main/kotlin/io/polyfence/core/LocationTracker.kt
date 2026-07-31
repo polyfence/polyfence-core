@@ -671,11 +671,12 @@ class LocationTracker : Service() {
     private var eventListenerActive: Boolean = false
     private var pendingEventsAutoDrainEnabled: Boolean = true
 
-    // A replay applies zone membership to the engine and persists the whole
-    // snapshot, so it must not run before restoreZonesFromStorage has loaded
-    // the other zones' states — a snapshot written from a half-populated map
-    // would erase them. It must also stay ahead of the first reconcile, which
-    // runs off the first fix after that same restore.
+    // A replay applies zone membership to the engine, so it runs once
+    // restoreZonesFromStorage has registered the zones and reloaded their
+    // stored states — the batch then settles against a whole engine rather
+    // than seeding a map that restore is about to overwrite. It must also stay
+    // ahead of the first reconcile, which runs off the first fix after that
+    // same restore.
     @Volatile
     private var zoneStatesRestored: Boolean = false
     @Volatile
@@ -1590,8 +1591,8 @@ class LocationTracker : Service() {
             Log.e(TAG, "Failed to restore zones: ${e.message}")
         } finally {
             // Zone membership is now whole, and the first reconcile still has
-            // not run — the only window where a replay can apply its state
-            // without erasing or being erased by the persisted snapshot.
+            // not run — the window where a replay's state application survives
+            // restore and is still what reconcile evaluates against.
             zoneStatesRestored = true
             if (autoDrainDeferredUntilZonesRestored && eventListenerActive) {
                 replayQueuedEventsToListener()

@@ -178,6 +178,32 @@ public class ZonePersistence {
     }
 
     /**
+     * Merge zone states into persistent storage as a single write-through.
+     *
+     * Zone ids absent from `states` keep their stored membership, so a caller
+     * holding only a partial view of the zone set cannot erase the rest.
+     * Deletion is deliberate and has its own entry points — `removeZoneState`
+     * and `clearAllZoneStates`.
+     *
+     * Thread-safe: Uses barrier queue to prevent race conditions
+     */
+    public func mergeZoneStates(_ states: [String: Bool]) {
+        if states.isEmpty { return }
+        persistenceQueue.async(flags: .barrier) {
+            var merged = self.userDefaults.dictionary(forKey: ZonePersistence.ZONE_STATES_KEY) as? [String: Bool] ?? [:]
+            for (zoneId, isInside) in states {
+                merged[zoneId] = isInside
+            }
+
+            self.userDefaults.set(merged, forKey: ZonePersistence.ZONE_STATES_KEY)
+            self.userDefaults.set(Date().timeIntervalSince1970, forKey: ZonePersistence.LAST_STATE_UPDATE_KEY)
+
+            let insideCount = merged.values.filter { $0 }.count
+            NSLog("[\(ZonePersistence.TAG)] Merged zone states: \(states.count) updated, \(merged.count) stored, inside=\(insideCount)")
+        }
+    }
+
+    /**
      * Save single zone state (write-through)
      * More efficient for single state changes
      */

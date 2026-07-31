@@ -118,11 +118,12 @@ public class LocationTracker: NSObject {
     private let eventListenerLock = NSLock()
     private var pendingEventsAutoDrainEnabled: Bool = true
 
-    // A replay applies zone membership to the engine and persists the whole
-    // snapshot, so it must not run before restoreZonesFromStorage has loaded
-    // the other zones' states — a snapshot written from a half-populated map
-    // would erase them. It must also stay ahead of the first reconcile, which
-    // runs off the first fix after that same restore.
+    // A replay applies zone membership to the engine, so it runs once
+    // restoreZonesFromStorage has registered the zones and reloaded their
+    // stored states — the batch then settles against a whole engine rather
+    // than seeding a map that restore is about to overwrite. It must also stay
+    // ahead of the first reconcile, which runs off the first fix after that
+    // same restore.
     private var zoneStatesRestored: Bool = false
     private var autoDrainDeferredUntilZonesRestored: Bool = false
 
@@ -904,8 +905,8 @@ public class LocationTracker: NSObject {
     }
 
     /// Zone membership is whole and the first reconcile has not run yet — the
-    /// only window where a replay can apply its state without erasing or being
-    /// erased by the persisted snapshot.
+    /// window where a replay's state application survives restore and is still
+    /// what reconcile evaluates against.
     private func markZoneStatesRestored() {
         zoneStatesRestored = true
         if autoDrainDeferredUntilZonesRestored && isEventListenerActive() {
