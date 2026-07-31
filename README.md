@@ -54,6 +54,39 @@ Or in Xcode: File → Add Package Dependencies → paste the repository URL.
 implementation("io.polyfence:polyfence-core:1.0.14")
 ```
 
+### Permissions
+
+polyfence-core declares **no** `<uses-permission>` entries of its own. Manifest merging happens at build time and cannot be gated on a runtime flag, so any permission this library declared would land in your merged manifest whether or not you use the feature that needs it — and `ACCESS_BACKGROUND_LOCATION` in particular triggers Google Play's manual background-location review. Declare what your integration actually uses:
+
+**Android — always required for background tracking:**
+
+```xml
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+```
+
+**Android — additionally required only if you set `osGeofenceWakeEnabled = true`:**
+
+```xml
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+```
+
+`RECEIVE_BOOT_COMPLETED` lets Polyfence re-register OS wake fences after a device restart — Play Services drops all registered geofences on reboot. Without it the boot receiver is simply never invoked and wake coverage resumes the next time your app starts tracking. Nothing crashes.
+
+If `ACCESS_BACKGROUND_LOCATION` is missing or not granted, OS wake fences degrade to polling-only operation and emit an `os_geofence_permission_denied` event on the error channel with `context["severity"] = "warning"`. The runtime permission request is yours to make and to justify to the user.
+
+**iOS — required only if you set `osGeofenceWakeEnabled = true`**, in your app's own `Info.plist`:
+
+```xml
+<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+<string>Explain here why your app needs location while it is not in use.</string>
+```
+
+You also need an "Always" authorization grant. "When in use" cannot deliver region callbacks after the process is killed, so Polyfence treats it the same as an outright denial and reports it through the same error path.
+
 ### Who this is for
 
 polyfence-core is the mobile/native entry point to the Polyfence platform. If you're integrating geofencing into a mobile app, start here. If you're integrating into a Flutter or React Native app, use polyfence-flutter or polyfence-react-native (they wrap this library). If you're integrating into IoT firmware, use polyfence-embedded. If you're calling the API from a server, use the OpenAPI spec at polyfence.io.
