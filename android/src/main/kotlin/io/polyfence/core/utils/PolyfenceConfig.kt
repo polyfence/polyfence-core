@@ -68,6 +68,22 @@ class PolyfenceConfig(context: Context) {
         // Cache Configuration
         const val DEFAULT_LRU_INITIAL_CAPACITY = 16
         const val DEFAULT_LRU_LOAD_FACTOR = 0.75f
+
+        // OS wake-fence slot allocation. Google Play Services caps geofences at
+        // 100 per app; the default reserves half for the consumer's own
+        // registrations because there is no way to discover how many they hold.
+        const val DEFAULT_OS_GEOFENCE_MAX_REGIONS = 50
+        const val DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS = 100
+
+        /**
+         * Constrains a slot budget to what the platform will honour. Play
+         * Services rejects an over-large `addGeofences` request wholesale, so
+         * passing a raw value through would register nothing rather than
+         * register more. Kept identical in shape to the iOS clamp so the same
+         * consumer value produces the same effective budget on both platforms.
+         */
+        fun clampOsGeofenceMaxRegions(requested: Int): Int =
+            requested.coerceIn(1, DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS)
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -115,6 +131,26 @@ class PolyfenceConfig(context: Context) {
         get() = prefs.getBoolean("os_geofence_wake_enabled", false)
         set(value) {
             prefs.edit().putBoolean("os_geofence_wake_enabled", value).apply()
+        }
+
+    // How many OS geofence slots Polyfence may occupy while the app is
+    // backgrounded. Google Play Services allows 100 geofences per APP, not per
+    // library, and exposes no API to query how many are already spoken for —
+    // so a consumer that registers its own geofences has to tell us how much
+    // room to leave. The default leaves half the allocation free; a consumer
+    // with no geofences of its own can raise this to
+    // DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS for full coverage. Values above
+    // the platform maximum are clamped.
+    // Clamped on write so the persisted value is always the value that will
+    // actually be applied. Storing the raw request instead would make
+    // getConfiguration() echo a budget the registrar never uses, and would
+    // leave consumers with no way to discover the effective one.
+    var osGeofenceMaxRegions: Int
+        get() = prefs.getInt("os_geofence_max_regions", DEFAULT_OS_GEOFENCE_MAX_REGIONS)
+        set(value) {
+            prefs.edit()
+                .putInt("os_geofence_max_regions", clampOsGeofenceMaxRegions(value))
+                .apply()
         }
 
     var minUpdateIntervalMs: Long

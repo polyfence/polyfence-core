@@ -1,5 +1,9 @@
 import Foundation
 import CoreLocation
+import os.log
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /**
  * Registers the top-N-nearest active zones with `CLLocationManager` region
@@ -11,9 +15,16 @@ import CoreLocation
  * on next tracker boot.
  *
  * Off unless `PolyfenceConfig.osGeofenceWakeEnabled` is `true`. When on:
+ *  - **Holds OS slots only while the app is backgrounded.** OS regions matter
+ *    solely when the app is not running; while it is foregrounded the
+ *    in-process engine is doing the detection anyway, so every slot is released
+ *    back to the consumer, who shares the same per-app platform allocation.
+ *    Registration therefore happens on `didEnterBackground` and is undone on
+ *    `willEnterForeground`.
  *  - Selects up to `topN` zones by centroid distance from the last-known fix.
  *    The default `topN = TOP_N_CAP` (20) matches Apple's per-app cap on
- *    `CLCircularRegion` monitoring; a lower value can be supplied via init.
+ *    `CLCircularRegion` monitoring; a higher value is clamped to it, because
+ *    the OS declines the excess rather than monitoring it.
  *  - Registers via `CLLocationManager.startMonitoring(for:)`. CoreLocation
  *    reports only subsequent boundary crossings, so `LocationTracker` pairs
  *    each registration with a `requestState(for:)` call to obtain the
@@ -27,11 +38,25 @@ import CoreLocation
  *    granted; the in-process polling engine keeps working unchanged and the
  *    consumer app decides whether to prompt.
  *
+ * Selection is purely distance-based. Weighting zones by heading — preferring
+ * what is ahead of the direction of travel over what has already been passed —
+ * would cover a driving corridor better for the same slot count, but heading is
+ * noisy at low speed and undefined when stationary, so it is deliberately not
+ * part of this selection.
+ *
+ * Registering on the background transition leaves a window of roughly a second
+ * during which the regions are not yet monitored. A process killed inside that
+ * window loses wake coverage for that session. The window is inherent to
+ * registering lazily and is accepted in exchange for holding zero slots while
+ * the app is alive.
+ *
  * Every `CLLocationManager` mutation is funnelled onto the main queue by this
  * class — the framework requires it, and the tracker's manager is deliberately
  * constructed on main for the same reason. Internal state is guarded by a
  * private serial queue, which is never held across a main-queue hop.
  */
+private let registrarLog = OSLog(subsystem: "io.polyfence.core", category: "OsGeofenceRegistrar")
+
 internal final class OsGeofenceRegistrar {
 
     /// Apple's per-app cap on simultaneously-monitored `CLCircularRegion` is
@@ -104,6 +129,15 @@ internal final class OsGeofenceRegistrar {
     private var authorizationOverride: CLAuthorizationStatus?
     private var lastPermissionErrorAt: TimeInterval = 0
 
+    /// Whether the consumer app currently has UI in the foreground. Slots are
+    /// held only while this is false, and the value is probed at construction
+    /// rather than assumed. Neither lifecycle notification is posted for an app
+    /// launched straight into the background — which is exactly the OS-wake
+    /// relaunch path — so assuming foreground there would leave the registrar
+    /// permanently unable to re-arm for that session.
+    private var appInForeground: Bool = OsGeofenceRegistrar.probeAppInForeground()
+    private var observingLifecycle = false
+
     init(
         locationManager: CLLocationManager,
         topN: Int = OsGeofenceRegistrar.TOP_N_CAP,
@@ -111,9 +145,102 @@ internal final class OsGeofenceRegistrar {
         movementRecalcMeters: CLLocationDistance = OsGeofenceRegistrar.MOVEMENT_RECALC_METERS
     ) {
         self.locationManager = locationManager
-        self.topN = topN
+        self.topN = OsGeofenceRegistrar.clampMaxRegions(topN)
         self.debounceMs = debounceMs
         self.movementRecalcMeters = movementRecalcMeters
+    }
+
+    /// Clamps a consumer-supplied slot budget to what iOS will actually
+    /// monitor. Apple caps simultaneously-monitored `CLCircularRegion`s at 20
+    /// per app and silently declines anything past that, so honouring a larger
+    /// value would report coverage that does not exist.
+    static func clampMaxRegions(_ requested: Int) -> Int {
+        let clamped = PolyfenceConfig.clampOsGeofenceMaxRegions(requested)
+        if clamped != requested {
+            os_log(
+                "osGeofenceMaxRegions=%{public}d is out of range; using %{public}d",
+                log: registrarLog, type: .info, requested, clamped
+            )
+        }
+        return clamped
+    }
+
+    /// Effective slot budget after clamping. Read by tests and by callers that
+    /// need to know what was actually applied.
+    func effectiveMaxRegions() -> Int { return topN }
+
+    /// Blocks until any queued state mutation has been applied. `requestRefresh`
+    /// hops through the serial queue before it schedules anything, so a test
+    /// asserting that nothing was scheduled needs a barrier to be meaningful.
+    internal func drainForTest() {
+        syncQueue.sync {}
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    /// One-shot read of whether the app currently has UI in the foreground.
+    /// `UIApplication.shared` is main-thread-only, so an off-main construction
+    /// falls back to "backgrounded": over-registering is corrected by the next
+    /// foreground transition, whereas under-registering is the silent failure
+    /// this feature exists to prevent.
+    private static func probeAppInForeground() -> Bool {
+        #if canImport(UIKit)
+        guard Thread.isMainThread else { return false }
+        return UIApplication.shared.applicationState != .background
+        #else
+        return false
+        #endif
+    }
+
+    /// Begin tracking the consumer app's foreground/background transitions.
+    /// Registration is driven entirely by these: nothing is handed to the OS
+    /// until the app backgrounds, and everything is handed back when it
+    /// returns.
+    func startObservingAppLifecycle() {
+        if observingLifecycle { return }
+        observingLifecycle = true
+        #if canImport(UIKit)
+        let center = NotificationCenter.default
+        center.addObserver(
+            self,
+            selector: #selector(handleDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        center.addObserver(
+            self,
+            selector: #selector(handleWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        #endif
+    }
+
+    @objc private func handleDidEnterBackground() { onAppBackgrounded() }
+    @objc private func handleWillEnterForeground() { onAppForegrounded() }
+
+    /// Release every slot Polyfence holds. Called when the app comes back to
+    /// the foreground: the in-process engine is detecting again, so the
+    /// consumer gets the whole platform allocation back for its own regions.
+    func onAppForegrounded() {
+        syncQueue.sync {
+            self.appInForeground = true
+            self.pendingWorkItem?.cancel()
+            self.pendingWorkItem = nil
+            // Zero registered is the accurate reading here — it is a deliberate
+            // release, not a failure, so lastError stays nil.
+            self.currentHealth = Health(requested: 0, registered: 0, lastError: nil)
+        }
+        let manager = locationManager
+        runOnMain { OsGeofenceRegistrar.clearStaleRegions(locationManager: manager) }
+    }
+
+    /// Arm the wake regions — the app is no longer detecting in-process.
+    func onAppBackgrounded() {
+        syncQueue.sync { self.appInForeground = false }
+        requestRefresh()
     }
 
     /// Test seam: lets a unit test pretend `authorizedAlways` is granted
@@ -133,9 +260,11 @@ internal final class OsGeofenceRegistrar {
     /// Ask the OS to re-evaluate the top-N-nearest set. Debounced — repeated
     /// calls within the window coalesce into one registration attempt. Safe
     /// to call from any thread.
+    /// A no-op while the app is foregrounded, where holding slots would take
+    /// platform allocation from the consumer for no benefit.
     func requestRefresh() {
         syncQueue.async { [weak self] in
-            guard let self = self, !self.shutdownRequested else { return }
+            guard let self = self, !self.shutdownRequested, !self.appInForeground else { return }
             self.pendingWorkItem?.cancel()
             let work = DispatchWorkItem { [weak self] in
                 self?.refreshRegistrationInternal()
@@ -153,10 +282,10 @@ internal final class OsGeofenceRegistrar {
     /// last registration — below that, the currently registered set is still
     /// the nearest and re-registering would only burn OS quota.
     func onLocationUpdate(_ location: CLLocation) {
-        let (seed, alreadyShutdown): (CLLocation?, Bool) = syncQueue.sync {
-            (self.lastSeed, self.shutdownRequested)
+        let (seed, inactive): (CLLocation?, Bool) = syncQueue.sync {
+            (self.lastSeed, self.shutdownRequested || self.appInForeground)
         }
-        if alreadyShutdown { return }
+        if inactive { return }
         guard let seedFix = seed else {
             requestRefresh()
             return
@@ -175,6 +304,7 @@ internal final class OsGeofenceRegistrar {
     /// `LocationTracker.stopTracking` and when the consumer flips
     /// `osGeofenceWakeEnabled` back to false.
     func shutdown() {
+        NotificationCenter.default.removeObserver(self)
         syncQueue.sync {
             self.shutdownRequested = true
             self.pendingWorkItem?.cancel()

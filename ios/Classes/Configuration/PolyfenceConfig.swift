@@ -43,6 +43,12 @@ public class PolyfenceConfig {
     static let MIN_UPDATE_RESTART_INTERVAL_MS: Int = 5000
     static let MAX_UPDATE_RESTART_DELAY_MS: Int = 15000
 
+    // MARK: - OS Wake-Fence Slot Allocation
+    // Apple monitors at most 20 CLCircularRegions per app. Default and ceiling
+    // are the same value because there is no headroom to hand out.
+    public static let DEFAULT_OS_GEOFENCE_MAX_REGIONS: Int = 20
+    public static let DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS: Int = 20
+
     // MARK: - Validation Ranges
     static let MIN_GPS_INTERVAL_MS: Int = 1000
     static let MAX_GPS_INTERVAL_MS: Int = 60000
@@ -105,6 +111,40 @@ public class PolyfenceConfig {
     public var osGeofenceWakeEnabled: Bool {
         get { return defaults.bool(forKey: "os_geofence_wake_enabled") }
         set { defaults.set(newValue, forKey: "os_geofence_wake_enabled") }
+    }
+
+    // How many OS geofence slots Polyfence may occupy while the app is
+    // backgrounded. Unlike Android there is nothing to tune here: iOS hard-caps
+    // simultaneously-monitored CLCircularRegions at 20 per app, so the default
+    // is already the ceiling and any higher value is clamped. The field exists
+    // so the configuration surface stays identical across platforms and so a
+    // consumer that registers its own regions can lower it.
+    // Clamped on write so the persisted value is always the value that will
+    // actually be applied. Storing the raw request instead would make
+    // getConfiguration() echo a budget the registrar never uses, and would
+    // leave consumers with no way to discover the effective one. The clamp
+    // guarantees a stored value is never 0, so treating 0 as "unset" below
+    // cannot swallow a deliberate setting.
+    public var osGeofenceMaxRegions: Int {
+        get {
+            let stored = defaults.integer(forKey: "os_geofence_max_regions")
+            return stored != 0 ? stored : PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
+        }
+        set {
+            defaults.set(
+                PolyfenceConfig.clampOsGeofenceMaxRegions(newValue),
+                forKey: "os_geofence_max_regions"
+            )
+        }
+    }
+
+    /// Constrains a slot budget to what the platform will honour. iOS silently
+    /// declines regions past its per-app cap, so passing a raw value through
+    /// would report coverage that does not exist. Kept identical in shape to
+    /// the Android clamp so the same consumer value produces the same
+    /// effective budget on both platforms.
+    public static func clampOsGeofenceMaxRegions(_ requested: Int) -> Int {
+        return min(max(requested, 1), DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS)
     }
 
     public var minUpdateIntervalMs: Int {
