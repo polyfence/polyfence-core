@@ -117,11 +117,38 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
 
             val liveTracker = LocationTracker.currentInstanceForOsGeofence
 
-            // The OS fence is a wake source, not a second detector. When live
-            // delivery is currently possible the in-process engine already
-            // reports this crossing, so queueing it too would hand the consumer
-            // the same physical crossing twice on the next drain.
-            if (liveTracker?.canDeliverLive() == true) return 0
+            // Gated on the in-process engine RUNNING, not on whether it could
+            // deliver live. Those differ exactly where it matters: a detached
+            // bridge leaves the engine polling and persisting into this same
+            // queue, so gating on deliverability would let both writers record
+            // one physical crossing and hand the consumer a duplicate.
+            if (liveTracker?.isEngineRunningForOsGeofence == true) return 0
+
+            // A queue-less wake has nowhere to deposit the crossing, so the
+            // whole feature is inert. Surface it rather than losing events to a
+            // silent misconfiguration.
+            if (config.pendingEventsQueueSize <= 0) {
+                reportSafely(
+                    type = "os_geofence_queue_disabled",
+                    message = "OS wake fences are enabled but pendingEventsQueueSize is 0; " +
+                        "the woken crossing cannot be stored",
+                    errorContext = mapOf(
+                        "severity" to "warning",
+                        "platform" to "android",
+                        "source" to EVENT_SOURCE_OS_GEOFENCE
+                    )
+                )
+                return 0
+            }
+
+            // One read of persisted zone state serves three purposes below:
+            // resolving names, suppressing registration-time replays, and
+            // rejecting bounding-cover false positives. At wake time there is
+            // usually no live engine, so disk is the only source for all three.
+            val persistence = ZonePersistence(appContext)
+            val persistedZones = runCatching { persistence.loadAllZones() }.getOrDefault(emptyMap())
+            val persistedStates = runCatching { persistence.loadZoneStates() }.getOrDefault(emptyMap())
+            val impliedInside = eventType == "ENTER"
 
             val liveStore = liveTracker?.pendingEventsStoreForOsGeofence
             val store = liveStore ?: PendingEventsStore(
@@ -132,7 +159,26 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
             val timestamp = System.currentTimeMillis()
             var evicted = 0
             for (zoneId in zoneIds) {
-                val zoneName = liveTracker?.geofenceEngineForOsGeofence?.getZoneName(zoneId) ?: zoneId
+                // Play Services replays the current state for every fence at
+                // registration time. Anything that merely restates what we
+                // already believe is not a crossing and must not reach the
+                // consumer as one.
+                if (persistedStates[zoneId] == impliedInside) continue
+
+                // A polygon is registered as a circular cover, so the OS can
+                // wake us for a position inside the cover but outside the
+                // polygon. When the wake carries a fix, the real geometry
+                // settles it; without one the event is kept, and the engine's
+                // reconcile corrects membership on the next in-process fix.
+                if (impliedInside && triggeringLocation != null &&
+                    isDefinitelyOutside(zoneId, persistedZones, triggeringLocation)
+                ) {
+                    continue
+                }
+
+                val zoneName = liveTracker?.geofenceEngineForOsGeofence?.getZoneName(zoneId)
+                    ?: persistedZones[zoneId]?.second
+                    ?: zoneId
                 evicted += store.append(
                     mapOf(
                         "zoneId" to zoneId,
@@ -169,6 +215,26 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
                 )
             }
             return evicted
+        }
+
+        /**
+         * True when the persisted geometry for [zoneId] definitively excludes
+         * [fix]. Returns false when the zone is unknown or unparseable — the
+         * event is then kept, because dropping a crossing on missing data is
+         * worse than forwarding one the engine will correct on its next fix.
+         */
+        private fun isDefinitelyOutside(
+            zoneId: String,
+            persistedZones: Map<String, Triple<String, String, Map<String, Any>>>,
+            fix: Location
+        ): Boolean {
+            val data = persistedZones[zoneId]?.third ?: return false
+            return runCatching {
+                val engine = GeofenceEngine()
+                @Suppress("DEPRECATION")
+                engine.addZone(zoneId, zoneId, data)
+                !engine.isLocationInsideZone(zoneId, fix)
+            }.getOrDefault(false)
         }
 
         /**

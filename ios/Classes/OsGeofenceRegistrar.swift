@@ -78,8 +78,12 @@ internal final class OsGeofenceRegistrar {
     static let MOVEMENT_RECALC_METERS: CLLocationDistance = 1000
 
     /// Fallback bounding-cover radius for polygon zones. `CLCircularRegion`
-    /// only supports circles; the polygon's own containment math still runs
-    /// in-engine on drain, so the bounding cover is only a wake trigger.
+    /// only supports circles, and the cover is strictly larger than the
+    /// polygon, so a wake can fire for a position inside the cover but outside
+    /// the zone. Unlike Android, `didEnterRegion` carries no triggering
+    /// location, so there is nothing to settle it against at wake time: the
+    /// event is enqueued and the engine's reconcile corrects membership on the
+    /// first in-process fix after the tracker resumes.
     static let MIN_POLYGON_COVER_RADIUS_METERS: Double = 100
 
     /// Region identifier prefix so the registrar's own regions can be
@@ -325,6 +329,17 @@ internal final class OsGeofenceRegistrar {
     /// there. iOS keeps monitored regions across app launches, so a consumer
     /// that turns the flag off would otherwise keep being woken by fences from
     /// the session where it was on, with no live registrar able to remove them.
+    /// Main-queue-safe wrapper. `CLLocationManager` mutation is
+    /// main-thread-only, and the tracker is constructed on whichever thread the
+    /// bridge happens to use.
+    static func clearStaleRegionsOnMain(locationManager: CLLocationManager) {
+        if Thread.isMainThread {
+            clearStaleRegions(locationManager: locationManager)
+        } else {
+            DispatchQueue.main.async { clearStaleRegions(locationManager: locationManager) }
+        }
+    }
+
     static func clearStaleRegions(locationManager: CLLocationManager) {
         let stale = locationManager.monitoredRegions.filter {
             $0.identifier.hasPrefix(REGION_ID_PREFIX)

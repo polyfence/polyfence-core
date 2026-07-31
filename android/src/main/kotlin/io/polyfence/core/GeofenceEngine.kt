@@ -688,6 +688,18 @@ fun getZoneName(zoneId: String): String? {
     }
 
     /**
+     * Containment test against a single zone's real geometry.
+     *
+     * The OS wake path registers a polygon as a circular bounding cover, so a
+     * wake can fire for a position inside the cover but outside the polygon.
+     * This lets that path settle the question with the same math the in-process
+     * engine uses. Returns false when the zone is unknown.
+     */
+    fun isLocationInsideZone(zoneId: String, location: Location): Boolean {
+        return zones[zoneId]?.contains(location) ?: false
+    }
+
+    /**
      * Get current zone states for health check API
      */
     fun getCurrentZoneStates(): Map<String, Boolean> {

@@ -36,9 +36,11 @@ import kotlin.math.max
  *    on the foreground transition.
  *  - Selects up to [maxRegions] zones by centroid distance from the last-known
  *    fix, clamped to [PolyfenceConfig.DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS].
- *  - Registers via [GeofencingClient.addGeofences] with
- *    `INITIAL_TRIGGER_ENTER | INITIAL_TRIGGER_EXIT` so a stationary user still
- *    receives a starting-state event.
+ *  - Registers via [GeofencingClient.addGeofences] with `INITIAL_TRIGGER_ENTER`
+ *    only, so a user already inside a zone still receives a starting-state
+ *    event. The EXIT bit is deliberately absent: it would make Play Services
+ *    replay an EXIT for every fence the device is currently outside of, which
+ *    is nearly all of them.
  *  - Re-registers when the zone set changes (debounced by [DEBOUNCE_MS] to
  *    absorb rapid zone churn) or when the user moves more than
  *    [MOVEMENT_RECALC_METERS] from the fix that seeded the current selection.
@@ -115,6 +117,14 @@ internal class OsGeofenceRegistrar(
     private var registrationGeneration: Int = 0
 
     /**
+     * Request IDs currently handed to the OS. `addGeofences` replaces by ID, so
+     * without this the set could only ever grow — anything dropped from a later
+     * nearest-N selection would stay armed indefinitely.
+     */
+    @Volatile
+    private var registeredZoneIds: Set<String> = emptySet()
+
+    /**
      * Whether the consumer app currently has UI in the foreground. Slots are
      * held only while this is false. Starts from a one-shot process-importance
      * read so a registrar constructed after the app is already visible does not
@@ -151,6 +161,7 @@ internal class OsGeofenceRegistrar(
         registrationGeneration++
         handler.removeCallbacks(debounceRunnable)
         removeAllOsGeofences()
+        registeredZoneIds = emptySet()
         // Zero registered is the accurate reading here — it is a deliberate
         // release, not a failure, so lastError stays null.
         health = Health(requested = 0, registered = 0, lastError = null)
@@ -205,6 +216,10 @@ internal class OsGeofenceRegistrar(
      */
     fun shutdown() {
         shutdownRequested = true
+        // Supersede any in-flight registration so its success callback cannot
+        // resurrect health, or leave the caller believing fences are armed,
+        // after teardown.
+        registrationGeneration++
         handler.removeCallbacks(debounceRunnable)
         lifecycleMonitor?.let { monitor ->
             (context.applicationContext as? android.app.Application)
@@ -212,6 +227,7 @@ internal class OsGeofenceRegistrar(
         }
         lifecycleMonitor = null
         removeAllOsGeofences()
+        registeredZoneIds = emptySet()
         health = null
         lastRegistrationLocation = null
     }
@@ -277,11 +293,15 @@ internal class OsGeofenceRegistrar(
         }
 
         val fences = candidates.map { it.toOsGeofence() }
+        // ENTER only. INITIAL_TRIGGER_EXIT makes Play Services fire an EXIT at
+        // registration time for every fence the device is currently outside —
+        // which is nearly all of them — so each registration pass would inject
+        // a burst of transitions for zones that were never entered, evicting
+        // genuine queued crossings to make room. The ENTER bit alone delivers
+        // the intent: a user already standing inside a zone still gets a
+        // starting-state event.
         val request = GeofencingRequest.Builder()
-            .setInitialTrigger(
-                GeofencingRequest.INITIAL_TRIGGER_ENTER or
-                    GeofencingRequest.INITIAL_TRIGGER_EXIT
-            )
+            .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
             .addGeofences(fences)
             .build()
 
@@ -299,6 +319,21 @@ internal class OsGeofenceRegistrar(
         // generation has been superseded updates nothing — otherwise health
         // would report N regions monitored moments after all N were removed.
         val generation = ++registrationGeneration
+
+        // addGeofences replaces by request ID only, so a zone that drops out of
+        // the nearest-N set — on movement recalc or removal — would stay armed
+        // for the life of the install. Explicitly retire what is no longer
+        // selected before adding, matching the iOS registrar's full sweep.
+        val newIds = candidates.map { it.zoneId }.toSet()
+        val staleIds = registeredZoneIds - newIds
+        if (staleIds.isNotEmpty()) {
+            try {
+                geofencingClient.removeGeofences(staleIds.toList())
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to retire stale OS geofences: ${e.message}")
+            }
+        }
+        registeredZoneIds = newIds
 
         try {
             geofencingClient.addGeofences(request, pendingIntent)
@@ -715,10 +750,10 @@ internal class OsGeofenceRegistrar(
          * Fallback radius for polygon zones — Google Play Services' geofence
          * API accepts circles only, so a polygon is registered as a circular
          * bounding cover around its centroid with radius = the maximum vertex
-         * distance. The polygon's own containment math still runs in-engine
-         * on the drain, so the bounding cover is only a wake trigger; false
-         * positives at the wake boundary are filtered by the engine's
-         * per-fix `zone.contains(location)` check.
+         * distance. The cover is strictly larger than the polygon, so the OS
+         * can wake us for a position inside the cover but outside the zone.
+         * The wake carries a triggering location, so the receiver settles that
+         * against the real geometry before enqueueing.
          */
         internal const val MIN_POLYGON_COVER_RADIUS_METERS = 100.0
 

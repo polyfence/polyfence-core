@@ -78,7 +78,15 @@ class PolyfenceBootReceiver : BroadcastReceiver() {
                     PolyfenceBootReceiver::class.java
                 )
                 val pm = context.applicationContext.packageManager
-                if (pm.getComponentEnabledSetting(component) == target) return
+                val current = pm.getComponentEnabledSetting(component)
+                if (current == target) return
+                // DEFAULT means no override has ever been written, so the
+                // manifest's android:enabled="false" is already in force.
+                // Writing an explicit disable there would cost every
+                // feature-off consumer two binder round-trips and a persisted
+                // package-state write on the main thread, to reach the state
+                // they are already in.
+                if (!enabled && current == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT) return
                 pm.setComponentEnabledSetting(component, target, PackageManager.DONT_KILL_APP)
             } catch (e: Exception) {
                 Log.w(TAG, "Could not update boot-receiver component state: ${e.message}")
