@@ -7,6 +7,22 @@ import android.util.Log
 /**
  * Centralized configuration management for Polyfence
  * Single responsibility: Runtime configuration and persistence
+ *
+ * ## Every field here must be written by updateConfigurationFromMap
+ *
+ * This class is the only thing that survives process death. The OS can
+ * relaunch a killed process — on a geofence crossing, on a significant
+ * location change, at boot — and run library code before any bridge has had
+ * the chance to re-apply configuration. Whatever is not persisted here reads
+ * as its compile-time default in that window.
+ *
+ * A field that is applied to an in-memory property but not written back here
+ * therefore appears to work in every test and in every foreground session, and
+ * silently reverts in exactly the scenario the durable-queue and wake-fence
+ * features exist for. Adding a config field means adding it in three places:
+ * this class, the write path in `LocationTracker.updateConfigurationFromMap`,
+ * and the read path in the tracker's setup. The iOS `PolyfenceConfig` carries
+ * the same rule.
  */
 class PolyfenceConfig(context: Context) {
 

@@ -662,12 +662,15 @@ class LocationTracker : Service() {
     }
 
     /**
-     * True when a geofence event fired right now would reach the consumer
-     * live. Mirrors the condition the in-process persist-hook uses to decide
-     * deliver-vs-persist, so the OS wake path can apply the same XOR and avoid
-     * double-reporting a crossing the polling engine also sees.
+     * True when the in-process polling engine is running and will therefore
+     * record this crossing itself — either delivering it live or persisting it
+     * through the same queue the OS wake path writes to.
+     *
+     * Deliberately NOT "can deliver live": a detached bridge leaves the engine
+     * polling and persisting, so gating the OS path on deliverability would let
+     * both writers record one physical crossing.
      */
-    internal fun canDeliverLive(): Boolean = isRunning && coreDelegate != null && bridgeAttached
+    internal val isEngineRunningForOsGeofence: Boolean get() = isRunning
 
     // Error Recovery Properties
     private lateinit var errorRecovery: PolyfenceErrorRecovery
@@ -2140,11 +2143,18 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             // single updateConfiguration carrying both lands the new cap on the
             // registrar this call creates.
             val newMaxRegions = configMap["osGeofenceMaxRegions"] as? Number
+            // Store the clamped value in memory too. Keeping the raw request
+            // here would make getConfiguration echo a budget that was never
+            // applied, indistinguishable from a genuine cap hit, until the next
+            // process start silently swapped it for the persisted clamp.
+            val effectiveMaxRegions = newMaxRegions?.let {
+                PolyfenceConfig.clampOsGeofenceMaxRegions(it.toInt())
+            }
             val maxRegionsChanged =
-                newMaxRegions != null && newMaxRegions.toInt() != osGeofenceMaxRegions
-            if (newMaxRegions != null) {
-                osGeofenceMaxRegions = newMaxRegions.toInt()
-                config.osGeofenceMaxRegions = osGeofenceMaxRegions
+                effectiveMaxRegions != null && effectiveMaxRegions != osGeofenceMaxRegions
+            if (effectiveMaxRegions != null) {
+                osGeofenceMaxRegions = effectiveMaxRegions
+                config.osGeofenceMaxRegions = effectiveMaxRegions
             }
 
             // OS wake-fence toggle (false = off, default). Instantiating the

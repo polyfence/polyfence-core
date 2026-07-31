@@ -377,7 +377,9 @@ public class LocationTracker: NSObject {
                 // Monitored regions outlive the process on iOS. Without this
                 // sweep, a consumer who once enabled the flag would keep being
                 // woken by that session's fences after turning it off.
-                OsGeofenceRegistrar.clearStaleRegions(locationManager: manager)
+                // CLLocationManager mutation is main-thread-only and this runs
+                // on whichever thread constructed the tracker.
+                OsGeofenceRegistrar.clearStaleRegionsOnMain(locationManager: manager)
             }
         }
     }
@@ -1458,15 +1460,36 @@ extension LocationTracker: CLLocationManagerDelegate {
         // this feature existed — including for fences a previous session
         // registered and the OS is still holding.
         guard osGeofenceWakeEnabled else { return }
-        guard let store = pendingEventsStore else { return }
-        // The OS fence is a wake source, not a second detector. When live
-        // delivery is currently possible the in-process engine already reports
-        // this crossing, so queueing it too would hand the consumer the same
-        // physical crossing twice on the next drain.
-        guard !canDeliverLive() else { return }
+        // A queue-less wake has nowhere to deposit the crossing, so the whole
+        // feature is inert. Surface it rather than losing events to a silent
+        // misconfiguration.
+        guard pendingEventsQueueSize > 0, let store = pendingEventsStore else {
+            PolyfenceErrorManager.shared.reportError(
+                type: "os_geofence_queue_disabled",
+                message: "OS wake fences are enabled but pendingEventsQueueSize is 0; "
+                    + "the woken crossing cannot be stored",
+                context: [
+                    "severity": "warning",
+                    "platform": "ios",
+                    "source": LocationTracker.EVENT_SOURCE_OS_GEOFENCE
+                ]
+            )
+            return
+        }
+        // Gated on the in-process engine RUNNING, not on whether it could
+        // deliver live. Those differ exactly where it matters: a detached
+        // bridge leaves the engine polling and persisting into this same queue,
+        // so gating on deliverability would let both writers record one
+        // physical crossing and hand the consumer a duplicate.
+        guard !isEngineRunningForOsGeofence else { return }
 
         let zoneId = String(region.identifier.dropFirst(prefix.count))
-        let zoneName = geofenceEngine.getZoneName(zoneId) ?? zoneId
+        // On a wake relaunch the engine has not loaded zones yet, so the live
+        // lookup misses and the raw id would reach the consumer as the display
+        // name. Disk is the only source that survives the process.
+        let zoneName = geofenceEngine.getZoneName(zoneId)
+            ?? zonePersistence?.loadAllZones()[zoneId]?.1
+            ?? zoneId
         let coord = (region as? CLCircularRegion)?.center
 
         let eventMap: [String: Any] = [
@@ -1662,6 +1685,20 @@ extension LocationTracker {
      * cleanly against getCurrentConfigurationMap and matches the
      * Kotlin implementation's field-for-field coverage.
      */
+    /// Numeric coercion for configuration maps. Platform channels deliver the
+    /// same field as `Int`, `Double`, or `NSNumber` depending on the bridge's
+    /// serialiser, and `Bool` also bridges to `NSNumber` — so it is rejected
+    /// explicitly rather than silently read as 0 or 1.
+    private static func intValue(_ raw: Any?) -> Int? {
+        guard let number = raw as? NSNumber, !(raw is Bool) else { return nil }
+        return number.intValue
+    }
+
+    private static func doubleValue(_ raw: Any?) -> Double? {
+        guard let number = raw as? NSNumber, !(raw is Bool) else { return nil }
+        return number.doubleValue
+    }
+
     public func updateConfigurationFromMap(_ configMap: [String: Any]) {
         updateSmartConfigurationFromMap(configMap)
 
@@ -1671,52 +1708,47 @@ extension LocationTracker {
         // conversion for dwellThresholdMs stays consistent with the
         // bridge-side path, and so a future audit only has one
         // place per subsystem to worry about.
-        if let gpsAccuracyThreshold = configMap["gpsAccuracyThreshold"] as? Double {
+        if let gpsAccuracyThreshold = LocationTracker.doubleValue(configMap["gpsAccuracyThreshold"]) {
             setGpsAccuracyThreshold(gpsAccuracyThreshold)
-        } else if let gpsAccuracyThresholdInt = configMap["gpsAccuracyThreshold"] as? Int {
-            // MethodChannel / NSNumber bridging may deliver an Int
-            // even when the Kotlin side emits Double; accept both.
-            setGpsAccuracyThreshold(Double(gpsAccuracyThresholdInt))
+            config?.gpsAccuracyThreshold = gpsAccuracyThreshold
         }
 
         // Degraded-GPS staleness timeout (0 = off). Gates Option D + signal-lost.
-        if let staleness = configMap["gpsStalenessTimeoutMs"] as? Double {
+        if let staleness = LocationTracker.doubleValue(configMap["gpsStalenessTimeoutMs"]) {
             gpsStalenessTimeoutMs = staleness
+            config?.gpsStalenessTimeoutMs = staleness
             geofenceEngine.setDegradedExitEnabled(staleness > 0)
-        } else if let stalenessInt = configMap["gpsStalenessTimeoutMs"] as? Int {
-            gpsStalenessTimeoutMs = Double(stalenessInt)
-            geofenceEngine.setDegradedExitEnabled(gpsStalenessTimeoutMs > 0)
         }
 
         // Durable pending-events queue cap (0 = off). Rebuild the store on
         // change so the new cap takes effect on the next append. Shut down the
         // outgoing store first so a mid-flight append cannot race the new
         // store on the same on-disk log. On-disk events survive the rebuild
-        // because construction does not touch the log file. Triple coercion
-        // because bridges emit Int / Double / NSNumber depending on their
-        // platform-channel serialiser.
-        if let size = configMap["pendingEventsQueueSize"] as? Int {
+        // because construction does not touch the log file.
+        //
+        // Parsed once rather than through a per-numeric-type branch chain: the
+        // value has to be applied in memory AND persisted, and a branch chain
+        // is a shape where one arm can silently miss a step.
+        if let size = LocationTracker.intValue(configMap["pendingEventsQueueSize"]) {
             pendingEventsQueueSize = size
+            config?.pendingEventsQueueSize = size
             pendingEventsStore?.shutdown()
             pendingEventsStore = PendingEventsStore(queueSize: size)
-        } else if let sizeDouble = configMap["pendingEventsQueueSize"] as? Double {
-            pendingEventsQueueSize = Int(sizeDouble)
-            pendingEventsStore?.shutdown()
-            pendingEventsStore = PendingEventsStore(queueSize: Int(sizeDouble))
-        } else if let sizeNS = configMap["pendingEventsQueueSize"] as? NSNumber {
-            pendingEventsQueueSize = sizeNS.intValue
-            pendingEventsStore?.shutdown()
-            pendingEventsStore = PendingEventsStore(queueSize: sizeNS.intValue)
         }
 
         // OS wake-fence slot budget. Applied before the toggle below so a
         // single updateConfiguration carrying both lands the new cap on the
         // registrar this call creates.
         var maxRegionsChanged = false
-        if let requested = (configMap["osGeofenceMaxRegions"] as? NSNumber)?.intValue {
-            maxRegionsChanged = requested != osGeofenceMaxRegions
-            osGeofenceMaxRegions = requested
-            config?.osGeofenceMaxRegions = requested
+        if let requested = LocationTracker.intValue(configMap["osGeofenceMaxRegions"]) {
+            // Store the clamped value in memory too. Keeping the raw request
+            // here would make getConfiguration echo a budget that was never
+            // applied, indistinguishable from a genuine cap hit, until the next
+            // process start silently swapped it for the persisted clamp.
+            let effective = PolyfenceConfig.clampOsGeofenceMaxRegions(requested)
+            maxRegionsChanged = effective != osGeofenceMaxRegions
+            osGeofenceMaxRegions = effective
+            config?.osGeofenceMaxRegions = effective
         }
 
         // OS wake-fence toggle (false = off, default). Nothing is registered
@@ -1923,16 +1955,14 @@ extension LocationTracker {
         bridgeAttachedLock.unlock()
     }
 
-    /// True when a geofence event fired right now would reach the consumer
-    /// live. Mirrors the condition the in-process persist-hook uses to decide
-    /// deliver-vs-persist, so the OS wake path can apply the same XOR and
-    /// avoid double-reporting a crossing the polling engine also sees.
-    internal func canDeliverLive() -> Bool {
-        guard trackingEnabled, coreDelegate != nil else { return false }
-        bridgeAttachedLock.lock()
-        defer { bridgeAttachedLock.unlock() }
-        return bridgeAttached
-    }
+    /// True when the in-process polling engine is running and will therefore
+    /// record this crossing itself — either delivering it live or persisting it
+    /// through the same queue the OS wake path writes to.
+    ///
+    /// Deliberately NOT "can deliver live": a detached bridge leaves the engine
+    /// polling and persisting, so gating the OS path on deliverability would let
+    /// both writers record one physical crossing.
+    internal var isEngineRunningForOsGeofence: Bool { return trackingEnabled }
 
     /// Test-only seam for iOS unit tests that need to drive the persist-hook
     /// without wiring a real CLLocationManager fix. Underscore-prefixed and
