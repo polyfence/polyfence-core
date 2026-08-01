@@ -48,6 +48,10 @@ final class OsGeofenceWakeTests: XCTestCase {
         config.osGeofenceWakeEnabled = false
         config.pendingEventsQueueSize = 0
         config.osGeofenceMaxRegions = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
+        // Zone membership persists to the standard defaults suite and outlives
+        // a test case. Left behind, a case asserting "no recovery fired" would
+        // pass off the previous case's state rather than its own.
+        ZonePersistence().clearAllZoneStates()
     }
 
     // MARK: - Fixtures
@@ -869,5 +873,77 @@ final class OsGeofenceWakeTests: XCTestCase {
         // under identical consumer code.
         XCTAssertEqual(OsGeofenceRegistrar.DEBOUNCE_MS, 200)
         XCTAssertEqual(OsGeofenceRegistrar.MOVEMENT_RECALC_METERS, 1000)
+    }
+
+    // MARK: - Membership captured at wake time
+    //
+    // The platform relaunches the app on a region crossing, so unlike Android
+    // there is no service to restart — but the relaunched session still
+    // reconciles against persisted state, and it must not re-report a crossing
+    // the queue already holds. Kotlin mirror: `a wake writes the crossing into
+    // persisted zone state` / `a wake-captured crossing produces no duplicate
+    // RECOVERY event on the resumed session`.
+
+    func testAWakeWritesTheCrossingIntoPersistedZoneState() {
+        let tracker = wakeEnabledTracker()
+        ZonePersistence().mergeZoneStates(["z1": false])
+
+        tracker.locationManager(CLLocationManager(), didEnterRegion: osRegion("z1"))
+
+        XCTAssertEqual(ZonePersistence().loadZoneStates()["z1"], true)
+        // The store is a file shared by every tracker in the process, so a case
+        // that queues without draining hands its event to the next one.
+        XCTAssertEqual(tracker.drainPendingEvents().count, 1)
+    }
+
+    func testAWakeCapturedCrossingProducesNoDuplicateRecoveryOnTheRelaunchedSession() {
+        let tracker = wakeEnabledTracker()
+        tracker.clearAllZones()
+        // The session that died believed the user was outside.
+        ZonePersistence().mergeZoneStates(["z1": false])
+
+        tracker.locationManager(CLLocationManager(), didEnterRegion: osRegion("z1"))
+
+        // What the relaunched process does: rebuild the engine from disk, then
+        // reconcile against the first fix it gets.
+        var fired: [(String, String)] = []
+        let relaunched = GeofenceEngine()
+        relaunched.setEventCallback { zoneId, eventType, _, _ in
+            fired.append((zoneId, eventType))
+        }
+        relaunched.setZonePersistence(ZonePersistence())
+        try? relaunched.addZone(zoneId: "z1", zoneName: "Zone 1", zoneData: [
+            "type": "circle",
+            "center": ["latitude": 51.5, "longitude": -0.1],
+            "radius": 250.0
+        ])
+        relaunched.loadPersistedZoneStates()
+        relaunched.reconcileZoneStates(fixAt(51.5, -0.1))
+
+        XCTAssertFalse(
+            fired.contains { $0.1 == GeofenceEngine.EVENT_RECOVERY_ENTER },
+            "the queued ENTER is the only report of this crossing, but got \(fired)"
+        )
+        XCTAssertEqual(
+            tracker.drainPendingEvents().compactMap { $0["eventType"] as? String },
+            ["ENTER"]
+        )
+        tracker.clearAllZones()
+    }
+
+    func testAWakeWithTheFeatureOffWritesNoZoneState() {
+        let tracker = LocationTracker()
+        tracker.updateConfigurationFromMap([
+            "pendingEventsQueueSize": 10,
+            "osGeofenceWakeEnabled": false
+        ])
+
+        tracker.locationManager(CLLocationManager(), didEnterRegion: osRegion("z1"))
+
+        XCTAssertTrue(
+            ZonePersistence().loadZoneStates().isEmpty,
+            "the flag-off path must touch nothing"
+        )
+        XCTAssertTrue(tracker.drainPendingEvents().isEmpty)
     }
 }

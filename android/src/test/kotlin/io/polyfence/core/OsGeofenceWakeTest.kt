@@ -68,6 +68,13 @@ class OsGeofenceWakeTest {
         tracker = Robolectric.buildService(LocationTracker::class.java).create().get()
         setIsRunning(true)
         LocationTracker.applyClearZonesDirect(tracker)
+        // Both outlive a test case: the throttle is process-global and the
+        // intent flag is on disk. Left over, either would let a case pass for
+        // the previous case's reason.
+        PolyfenceGeofenceBroadcastReceiver.resetResumeThrottleForTest()
+        setTrackingIntent(false)
+        ZonePersistence(context).clearAllZoneStates()
+        drainStartedServices()
     }
 
     @After
@@ -78,6 +85,9 @@ class OsGeofenceWakeTest {
         PolyfenceErrorManager.dispose()
         storeDir.deleteRecursively()
         PolyfenceConfig(context).resetToDefaults()
+        PolyfenceGeofenceBroadcastReceiver.resetResumeThrottleForTest()
+        setTrackingIntent(false)
+        ZonePersistence(context).clearAllZoneStates()
     }
 
     // ---------------------------------------------------------------
@@ -156,8 +166,53 @@ class OsGeofenceWakeTest {
         longitude = lng
     }
 
+    /**
+     * Writes the consumer's tracking intent directly. Cases that care about how
+     * the flag comes to be set drive `startTracking` / `stopTracking` through
+     * [dispatchAction] instead.
+     */
+    private fun setTrackingIntent(active: Boolean) {
+        context.getSharedPreferences("polyfence_tracking", Context.MODE_PRIVATE)
+            .edit().putBoolean("continuous_tracking_active", active).commit()
+    }
+
+    private fun dispatchAction(action: String) {
+        tracker.onStartCommand(
+            android.content.Intent(context, LocationTracker::class.java).apply {
+                this.action = action
+            },
+            0,
+            1
+        )
+    }
+
+    /** Empties Robolectric's started-service log so a case starts from zero. */
+    private fun drainStartedServices() {
+        val app = shadowOf(ApplicationProvider.getApplicationContext<Application>())
+        while (app.nextStartedService != null) { /* discard */ }
+    }
+
+    private fun startedServiceActions(): List<String?> {
+        val app = shadowOf(ApplicationProvider.getApplicationContext<Application>())
+        val actions = mutableListOf<String?>()
+        while (true) {
+            val next = app.nextStartedService ?: break
+            actions.add(next.action)
+        }
+        return actions
+    }
+
     private fun grantAllLocationPermissions() {
         shadowOf(ApplicationProvider.getApplicationContext<Application>()).grantPermissions(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+            android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+        )
+    }
+
+    /** Every location grant gone — the state a user reaches via app settings. */
+    private fun denyAllLocationPermissions() {
+        shadowOf(ApplicationProvider.getApplicationContext<Application>()).denyPermissions(
             android.Manifest.permission.ACCESS_FINE_LOCATION,
             android.Manifest.permission.ACCESS_COARSE_LOCATION,
             android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
@@ -1396,5 +1451,237 @@ class OsGeofenceWakeTest {
         verify(client).removeGeofences(any(PendingIntent::class.java))
         verify(client, never()).addGeofences(any(GeofencingRequest::class.java), any(PendingIntent::class.java))
         assertNull(registrar.health)
+    }
+
+    // ---------------------------------------------------------------
+    // A wake resumes tracking. Without this the OS fences only ever
+    // cover a ring around wherever the process happened to die.
+    // ---------------------------------------------------------------
+
+    @Test
+    fun `wake resumes tracking when the consumer left tracking on`() {
+        grantAllLocationPermissions()
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        setTrackingIntent(true)
+        stopEngine()
+        drainStartedServices()
+
+        val outcome = PolyfenceGeofenceBroadcastReceiver.resumeTrackingIfIntended(context)
+
+        assertEquals(PolyfenceGeofenceBroadcastReceiver.ResumeOutcome.STARTED, outcome)
+        assertEquals(listOf(LocationTracker.ACTION_START_TRACKING), startedServiceActions())
+    }
+
+    @Test
+    fun `wake after an explicit stopTracking does not resume`() {
+        grantAllLocationPermissions()
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        setTrackingIntent(true)
+
+        // The real stop path, not a hand-written flag: what is asserted is that
+        // stopTracking records the consumer's intent durably enough to outlive
+        // the process that received it.
+        dispatchAction(LocationTracker.ACTION_STOP_TRACKING)
+        stopEngine()
+        drainStartedServices()
+
+        val outcome = PolyfenceGeofenceBroadcastReceiver.resumeTrackingIfIntended(context)
+
+        assertEquals(PolyfenceGeofenceBroadcastReceiver.ResumeOutcome.NOT_INTENDED, outcome)
+        assertTrue("a stopped consumer must not be restarted", startedServiceActions().isEmpty())
+    }
+
+    @Test
+    fun `wake while the engine is already running starts no service`() {
+        grantAllLocationPermissions()
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        setTrackingIntent(true)
+        setIsRunning(true)
+        drainStartedServices()
+
+        val outcome = PolyfenceGeofenceBroadcastReceiver.resumeTrackingIfIntended(context)
+
+        assertEquals(PolyfenceGeofenceBroadcastReceiver.ResumeOutcome.ALREADY_RUNNING, outcome)
+        assertTrue(startedServiceActions().isEmpty())
+    }
+
+    @Test
+    fun `a second wake inside the cooldown does not start the service twice`() {
+        grantAllLocationPermissions()
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        setTrackingIntent(true)
+        stopEngine()
+        drainStartedServices()
+
+        // The engine-running check cannot absorb these on its own: the service
+        // is still coming up, so isRunning is false for both wakes.
+        val first = PolyfenceGeofenceBroadcastReceiver.resumeTrackingIfIntended(context, now = 1_000L)
+        val second = PolyfenceGeofenceBroadcastReceiver.resumeTrackingIfIntended(
+            context,
+            now = 1_000L + PolyfenceGeofenceBroadcastReceiver.RESUME_COOLDOWN_MS - 1
+        )
+
+        assertEquals(PolyfenceGeofenceBroadcastReceiver.ResumeOutcome.STARTED, first)
+        assertEquals(PolyfenceGeofenceBroadcastReceiver.ResumeOutcome.ALREADY_REQUESTED, second)
+        assertEquals(listOf(LocationTracker.ACTION_START_TRACKING), startedServiceActions())
+    }
+
+    @Test
+    fun `a wake past the cooldown retries a resume that never took`() {
+        grantAllLocationPermissions()
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        setTrackingIntent(true)
+        stopEngine()
+        drainStartedServices()
+
+        val first = PolyfenceGeofenceBroadcastReceiver.resumeTrackingIfIntended(context, now = 1_000L)
+        val later = PolyfenceGeofenceBroadcastReceiver.resumeTrackingIfIntended(
+            context,
+            now = 1_000L + PolyfenceGeofenceBroadcastReceiver.RESUME_COOLDOWN_MS
+        )
+
+        assertEquals(PolyfenceGeofenceBroadcastReceiver.ResumeOutcome.STARTED, first)
+        assertEquals(PolyfenceGeofenceBroadcastReceiver.ResumeOutcome.STARTED, later)
+        assertEquals(2, startedServiceActions().size)
+    }
+
+    @Test
+    fun `wake with location permission revoked degrades instead of crashing`() {
+        denyAllLocationPermissions()
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        setTrackingIntent(true)
+        stopEngine()
+        drainStartedServices()
+
+        val outcome = PolyfenceGeofenceBroadcastReceiver.resumeTrackingIfIntended(context)
+
+        assertEquals(PolyfenceGeofenceBroadcastReceiver.ResumeOutcome.PERMISSION_DENIED, outcome)
+        assertTrue(startedServiceActions().isEmpty())
+
+        val error = capturedErrors.firstOrNull { it["type"] == "os_geofence_resume_denied" }
+        assertNotNull("a refused resume must surface via onError", error)
+        @Suppress("UNCHECKED_CAST")
+        val ctx = error!!["context"] as Map<String, Any>
+        assertEquals("warning", ctx["severity"])
+        assertEquals("android", ctx["platform"])
+    }
+
+    @Test
+    fun `the crossing is captured even when the resume is refused`() {
+        denyAllLocationPermissions()
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        setTrackingIntent(true)
+        stopEngine()
+
+        PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
+            context = context,
+            eventType = "ENTER",
+            zoneIds = listOf("z1"),
+            triggeringLocation = fixAt(51.5, -0.1)
+        )
+        val outcome = PolyfenceGeofenceBroadcastReceiver.resumeTrackingIfIntended(context)
+
+        assertEquals(PolyfenceGeofenceBroadcastReceiver.ResumeOutcome.PERMISSION_DENIED, outcome)
+        val drained = LocationTracker.drainPendingEvents(context)
+        assertEquals("capture must not depend on the resume", 1, drained.size)
+        assertEquals("z1", drained[0]["zoneId"])
+        assertEquals("ENTER", drained[0]["eventType"])
+    }
+
+    @Test
+    fun `a wake with the feature off resumes nothing`() {
+        grantAllLocationPermissions()
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to false))
+        setTrackingIntent(true)
+        stopEngine()
+        drainStartedServices()
+
+        val outcome = PolyfenceGeofenceBroadcastReceiver.resumeTrackingIfIntended(context)
+
+        assertEquals(PolyfenceGeofenceBroadcastReceiver.ResumeOutcome.FEATURE_DISABLED, outcome)
+        assertTrue(startedServiceActions().isEmpty())
+        assertTrue(ZonePersistence(context).loadZoneStates().isEmpty())
+    }
+
+    // ---------------------------------------------------------------
+    // Membership captured at wake time, so the resumed session's first
+    // reconcile does not re-report a crossing the queue already holds
+    // ---------------------------------------------------------------
+
+    @Test
+    fun `a wake writes the crossing into persisted zone state`() {
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        ZonePersistence(context).mergeZoneStates(mapOf("z1" to false))
+        stopEngine()
+
+        PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
+            context = context,
+            eventType = "ENTER",
+            zoneIds = listOf("z1"),
+            triggeringLocation = fixAt(51.5, -0.1)
+        )
+
+        assertEquals(true, ZonePersistence(context).loadZoneStates()["z1"])
+    }
+
+    @Test
+    fun `a wake-captured crossing produces no duplicate RECOVERY event on the resumed session`() {
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        LocationTracker.applyAddZoneDirect(tracker, "z1", "Zone 1", circleZoneData(51.5, -0.1))
+        // The session that died believed the user was outside.
+        ZonePersistence(context).mergeZoneStates(mapOf("z1" to false))
+        stopEngine()
+
+        PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
+            context = context,
+            eventType = "ENTER",
+            zoneIds = listOf("z1"),
+            triggeringLocation = fixAt(51.5, -0.1)
+        )
+
+        // What the resumed service does: rebuild the engine from disk, then
+        // reconcile against the first fix it gets.
+        val fired = mutableListOf<Pair<String, String>>()
+        val resumed = GeofenceEngine()
+        resumed.setEventCallback { zoneId, eventType, _, _ -> fired.add(zoneId to eventType) }
+        resumed.setZonePersistence(ZonePersistence(context))
+        resumed.addZone("z1", "Zone 1", circleZoneData(51.5, -0.1))
+        resumed.loadPersistedZoneStates()
+        resumed.reconcileZoneStates(fixAt(51.5, -0.1))
+
+        assertTrue(
+            "the queued ENTER is the only report of this crossing, but got $fired",
+            fired.none { it.second == GeofenceEngine.EVENT_RECOVERY_ENTER }
+        )
+        assertEquals(
+            listOf("ENTER"),
+            LocationTracker.drainPendingEvents(context).map { it["eventType"] }
+        )
+    }
+
+    @Test
+    fun `an EXIT wake is not suppressed by the state an earlier ENTER wake left`() {
+        applyConfig(mapOf("pendingEventsQueueSize" to 10, "osGeofenceWakeEnabled" to true))
+        ZonePersistence(context).mergeZoneStates(mapOf("z1" to false))
+        stopEngine()
+
+        PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
+            context = context,
+            eventType = "ENTER",
+            zoneIds = listOf("z1"),
+            triggeringLocation = null
+        )
+        PolyfenceGeofenceBroadcastReceiver.enqueueOsTransition(
+            context = context,
+            eventType = "EXIT",
+            zoneIds = listOf("z1"),
+            triggeringLocation = null
+        )
+
+        assertEquals(
+            listOf("ENTER", "EXIT"),
+            LocationTracker.drainPendingEvents(context).map { it["eventType"] }
+        )
+        assertEquals(false, ZonePersistence(context).loadZoneStates()["z1"])
     }
 }
