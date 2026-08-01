@@ -1596,6 +1596,18 @@ extension LocationTracker: CLLocationManagerDelegate {
         guard !isEngineRunningForOsGeofence else { return }
 
         let zoneId = String(region.identifier.dropFirst(prefix.count))
+
+        // Region monitoring replays the current state for every fence at
+        // registration time, via the requestState call that seeds a newly armed
+        // region. Anything that merely restates believed membership is not a
+        // crossing and must not reach the consumer as one. Android applies the
+        // same rule in its wake receiver; without it here the two platforms
+        // disagree about the same journey.
+        let impliedInside = eventType == "ENTER"
+        if let persisted = zonePersistence?.loadZoneStates()[zoneId],
+           persisted == impliedInside {
+            return
+        }
         // On a wake relaunch the engine has not loaded zones yet, so the live
         // lookup misses and the raw id would reach the consumer as the display
         // name. Disk is the only source that survives the process.

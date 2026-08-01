@@ -347,12 +347,18 @@ internal class OsGeofenceRegistrar(
                 Log.w(TAG, "Failed to retire stale OS geofences: ${e.message}")
             }
         }
-        registeredZoneIds = newIds
+        // What the OS is holding once the retirement above lands but before the
+        // add resolves. A failed add leaves exactly this armed, so it is the
+        // honest bookkeeping for that outcome — assuming the new set would let
+        // the next recalc compute its stale list against fences that were never
+        // registered, and leave them armed for the life of the install.
+        val survivingIds = registeredZoneIds intersect newIds
 
         try {
             geofencingClient.addGeofences(request, pendingIntent)
                 .addOnSuccessListener {
                     if (generation == registrationGeneration) {
+                        registeredZoneIds = newIds
                         health = Health(
                             requested = zones.size,
                             registered = candidates.size,
@@ -365,6 +371,7 @@ internal class OsGeofenceRegistrar(
                     val msg = e.message ?: e::class.java.simpleName
                     Log.w(TAG, "OS geofence registration failed: $msg")
                     if (generation == registrationGeneration) {
+                        registeredZoneIds = survivingIds
                         health = Health(
                             requested = zones.size,
                             registered = 0,

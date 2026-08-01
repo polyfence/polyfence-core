@@ -730,7 +730,7 @@ final class OsGeofenceWakeTests: XCTestCase {
 
     // MARK: - No double-reporting
 
-    func testOsFiredTransitionIsSkippedWhileLiveDeliveryIsPossible() {
+    func testOsFiredTransitionIsSkippedWhileTheEngineIsRunning() {
         PolyfenceConfig().osGeofenceWakeEnabled = true
         let tracker = LocationTracker()
         tracker.updateConfigurationFromMap([
@@ -893,6 +893,49 @@ final class OsGeofenceWakeTests: XCTestCase {
         XCTAssertEqual(ZonePersistence().loadZoneStates()["z1"], true)
         // The store is a file shared by every tracker in the process, so a case
         // that queues without draining hands its event to the next one.
+        XCTAssertEqual(tracker.drainPendingEvents().count, 1)
+    }
+
+    // Region monitoring replays current state for every fence at registration
+    // time, so a newly armed region the user is already inside reports .inside
+    // immediately. That restates what is already believed and is not a
+    // crossing. Kotlin mirror: the persisted-state suppression in the wake
+    // receiver.
+
+    func testAWakeRestatingBelievedMembershipIsNotQueued() {
+        let tracker = wakeEnabledTracker()
+        // The session already knows the user is inside this zone.
+        ZonePersistence().mergeZoneStates(["z1": true])
+
+        tracker.locationManager(CLLocationManager(), didEnterRegion: osRegion("z1"))
+
+        XCTAssertTrue(
+            tracker.drainPendingEvents().isEmpty,
+            "A replay of believed membership must not reach the consumer as a crossing"
+        )
+    }
+
+    func testAWakeThatContradictsBelievedMembershipIsStillQueued() {
+        let tracker = wakeEnabledTracker()
+        // Believed outside; the OS says inside. That is a real crossing.
+        ZonePersistence().mergeZoneStates(["z1": false])
+
+        tracker.locationManager(CLLocationManager(), didEnterRegion: osRegion("z1"))
+
+        XCTAssertEqual(
+            tracker.drainPendingEvents().count, 1,
+            "Suppression must apply only to restatements, never to genuine transitions"
+        )
+    }
+
+    func testAWakeForAZoneWithNoPersistedMembershipIsQueued() {
+        let tracker = wakeEnabledTracker()
+        // Nothing on disk for this zone — absence is not agreement, so the
+        // crossing must be kept rather than suppressed by a nil comparison.
+        ZonePersistence().clearAllZoneStates()
+
+        tracker.locationManager(CLLocationManager(), didEnterRegion: osRegion("z1"))
+
         XCTAssertEqual(tracker.drainPendingEvents().count, 1)
     }
 
