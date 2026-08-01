@@ -414,8 +414,14 @@ public class LocationTracker: NSObject {
             geofenceEngine.setZonePersistence(persistence)
         }
 
-        // Configure validation using config (opt for immediate detection to verify pipeline)
-        geofenceEngine.setValidationConfig(requireConfirmation: false, confirmationPoints: 1)
+        // Confirmation settings come from config so both platforms apply the same
+        // rule to the same journey — hardcoding single-point detection here made
+        // iOS fire on one fix where Android required two, and a consumer's
+        // requireConfirmation had no effect at all.
+        geofenceEngine.setValidationConfig(
+            requireConfirmation: config?.requireConfirmation ?? PolyfenceConfig.DEFAULT_REQUIRE_CONFIRMATION,
+            confirmationPoints: config?.confidencePoints ?? PolyfenceConfig.DEFAULT_CONFIDENCE_POINTS
+        )
 
         // Set GPS accuracy threshold from config (default: 100m for platform parity)
         let accuracyThreshold = config?.gpsAccuracyThreshold ?? PolyfenceConfig.DEFAULT_GPS_ACCURACY_THRESHOLD

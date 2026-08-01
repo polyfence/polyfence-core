@@ -119,6 +119,13 @@ class GeofenceEngine {
         stateRecoveredFromPersistence = value
     }
 
+    /// Test-only reader for the validation settings, so a test can assert that
+    /// the tracker forwarded a consumer's configuration rather than a literal.
+    /// Same seam idiom as above. Do not call from production code.
+    internal func _testValidationConfig() -> (requireConfirmation: Bool, confirmationPoints: Int) {
+        (requireConfirmation, confirmationPoints)
+    }
+
     /**
      * Zone confidence tracking (ported from Android)
      */
