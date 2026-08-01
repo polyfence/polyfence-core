@@ -1066,7 +1066,30 @@ class LocationTracker : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        // START_STICKY hands back a null intent when the platform restarts this
+        // service after the process died — memory pressure, a crash, or the
+        // system reclaiming resources. Without this the restart produces a
+        // foreground service showing a tracking notification that tracks
+        // nothing: no GPS request, no zones loaded, no reconcile. Everything
+        // downstream reads the service as healthy, including the OS-wake
+        // receiver's already-running check, so a wake declines to capture while
+        // the engine it deferred to is inert.
+        //
+        // Resuming is conditional on the consumer's own last instruction, so a
+        // deliberate stopTracking() is never undone by a restart.
+        if (intent == null) {
+            if (isContinuousTrackingIntended(this) && hasCoreTrackingPerms()) {
+                Log.i(TAG, "Service restarted after process death — resuming tracking")
+                startTracking()
+            } else {
+                Log.i(TAG, "Service restarted after process death — tracking was not intended; stopping")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            return START_STICKY
+        }
+
+        when (intent.action) {
             ACTION_START_TRACKING -> {
                 if (!hasCoreTrackingPerms()) {
                     Log.w(TAG, "Missing runtime permissions for location/FGS; not starting tracking")
