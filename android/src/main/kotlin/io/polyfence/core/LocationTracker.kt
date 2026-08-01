@@ -1258,7 +1258,7 @@ class LocationTracker : Service() {
 
         val locationRequest = LocationRequest.Builder(priority, interval)
             .setMinUpdateIntervalMillis(interval / 2)
-            .setMaxUpdateDelayMillis(interval * 2)
+            .setMaxUpdateDelayMillis(batchingWindowFor(interval))
             .setWaitForAccurateLocation(smartConfig.shouldWaitForAccurateLocation())
             .setMinUpdateDistanceMeters(distanceFilter)
             .build()
@@ -2577,6 +2577,18 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     }
 
     /**
+     * Batching window for a location request, saturating instead of overflowing.
+     *
+     * The battery strategy signals "pause GPS" by returning [Long.MAX_VALUE] as the
+     * interval, and [calculateCurrentInterval] takes the longest of the strategies,
+     * so that value reaches here whenever the device is below the critical battery
+     * threshold and away from every zone. Doubling it wraps to a negative number and
+     * `setMaxUpdateDelayMillis` rejects that, taking the tracking service down.
+     */
+    private fun batchingWindowFor(interval: Long): Long =
+        if (interval > Long.MAX_VALUE / 2) Long.MAX_VALUE else interval * 2
+
+    /**
      * Update location request based on current smart configuration
      */
     private fun updateLocationRequest() {
@@ -2588,7 +2600,7 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
 
         val locationRequest = LocationRequest.Builder(priority, interval)
             .setMinUpdateIntervalMillis(interval / 2)
-            .setMaxUpdateDelayMillis(interval * 2)
+            .setMaxUpdateDelayMillis(batchingWindowFor(interval))
             .setWaitForAccurateLocation(smartConfig.shouldWaitForAccurateLocation())
             .setMinUpdateDistanceMeters(distanceFilter)
             .build()
