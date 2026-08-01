@@ -51,6 +51,32 @@ class LocationTracker : Service() {
         var isRunning = false
             private set
 
+        /**
+         * Preferences file holding the consumer's tracking intent across
+         * process death. Distinct from [isRunning], which only describes the
+         * current process.
+         */
+        internal const val TRACKING_PREFS_NAME = "polyfence_tracking"
+
+        /**
+         * True between a `startTracking()` and the matching `stopTracking()`,
+         * written through synchronously so an abrupt process kill cannot lose
+         * the transition. Read by anything that restarts the tracker without a
+         * consumer call — a boot broadcast, an OS wake fence — to distinguish
+         * "the app died while tracking" from "the consumer turned tracking
+         * off".
+         */
+        internal const val TRACKING_ACTIVE_KEY = "continuous_tracking_active"
+
+        /**
+         * Whether the consumer last asked for tracking to be on. Survives
+         * process death, force-stop and reboot; false on a fresh install.
+         */
+        internal fun isContinuousTrackingIntended(context: Context): Boolean =
+            context.applicationContext
+                .getSharedPreferences(TRACKING_PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(TRACKING_ACTIVE_KEY, false)
+
         // Smart GPS Configuration
         private var currentSmartConfig: SmartGpsConfig = SmartGpsConfig()
 
@@ -1135,7 +1161,31 @@ class LocationTracker : Service() {
     private fun startTracking() {
         // Must call startForeground() immediately — Android requires it within ~10s
         // of startForegroundService(). Do this BEFORE any checks that might bail out.
-        startForeground(NOTIFICATION_ID, createTrackingNotification())
+        //
+        // The call itself can be refused. A service started while the process is
+        // backgrounded is subject to the platform's foreground-service start
+        // rules, and on API 34+ the `location` service type additionally
+        // requires the background-location grant at the moment of the call. Both
+        // refusals arrive as exceptions here, and an escaping one would surface
+        // to the user as a crash of the consumer's app rather than as tracking
+        // simply not starting.
+        try {
+            startForeground(NOTIFICATION_ID, createTrackingNotification())
+        } catch (e: Exception) {
+            Log.w(TAG, "Foreground service start refused: ${e.message}")
+            PolyfenceErrorManager.reportError(
+                "foreground_service_start_refused",
+                "The system refused to start the tracking foreground service: " +
+                    (e.message ?: e.javaClass.simpleName),
+                mapOf(
+                    "severity" to "warning",
+                    "platform" to "android",
+                    "timestamp" to System.currentTimeMillis()
+                )
+            )
+            stopSelf()
+            return
+        }
 
         if (!hasCoreTrackingPerms()) {
             Log.e(TAG, "Cannot start tracking - missing permissions")
@@ -1149,9 +1199,13 @@ class LocationTracker : Service() {
         firstLocationAfterRestart = true  // Reset for state reconciliation
         hasReceivedFirstLocation = false  // Reset for distance filter deferral
 
-        // Persist tracking state for restart recovery (used by ScheduleReceiver)
-        getSharedPreferences("polyfence_tracking", Context.MODE_PRIVATE)
-            .edit().putBoolean("continuous_tracking_active", true).apply()
+        // Written through with commit() rather than apply(): this flag is what
+        // an out-of-process restart path reads to decide whether tracking was
+        // wanted, and apply()'s deferred write can be lost to a force-stop or a
+        // low-memory kill in the seconds right after tracking starts — exactly
+        // the window where the flag matters most.
+        getSharedPreferences(TRACKING_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(TRACKING_ACTIVE_KEY, true).commit()
 
         // Acquire wake lock before starting location requests
         acquireWakeLock()
@@ -1255,9 +1309,12 @@ class LocationTracker : Service() {
     }
 
     private fun stopTracking() {
-        // Clear persisted tracking state (used by ScheduleReceiver for restart recovery)
-        getSharedPreferences("polyfence_tracking", Context.MODE_PRIVATE)
-            .edit().putBoolean("continuous_tracking_active", false).apply()
+        // commit(), not apply(): losing this write would leave a consumer who
+        // deliberately stopped tracking looking, to every out-of-process
+        // restart path, exactly like a consumer whose app was killed mid-session
+        // — and tracking would come back on behind them.
+        getSharedPreferences(TRACKING_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(TRACKING_ACTIVE_KEY, false).commit()
 
         isRunning = false
         locationCallback?.let { callback ->

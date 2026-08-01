@@ -1613,6 +1613,16 @@ extension LocationTracker: CLLocationManagerDelegate {
             "source": LocationTracker.EVENT_SOURCE_OS_GEOFENCE
         ]
 
+        // Persisted membership is the record of where the user is; the queue is
+        // only the record of what still needs delivering. Writing both keeps the
+        // two agreeing across a wake, which is what stops the relaunched
+        // session's first reconcile from raising a RECOVERY_* for a crossing
+        // already sitting in the queue — and keeps the crossing reflected in
+        // state even if eviction later drops the queued event.
+        if eventType == "ENTER" || eventType == "EXIT" {
+            zonePersistence?.mergeZoneStates([zoneId: eventType == "ENTER"])
+        }
+
         let evicted = store.append(eventMap)
         if evicted > 0 {
             PolyfenceErrorManager.shared.reportError(

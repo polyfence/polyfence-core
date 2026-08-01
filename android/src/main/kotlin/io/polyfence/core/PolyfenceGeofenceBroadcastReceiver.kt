@@ -1,10 +1,14 @@
 package io.polyfence.core
 
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.location.Location
+import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingEvent
 import io.polyfence.core.utils.PolyfenceConfig
@@ -12,13 +16,38 @@ import io.polyfence.core.utils.PolyfenceConfig
 /**
  * Broadcast receiver for OS-managed geofence transitions registered by
  * [OsGeofenceRegistrar]. Fires when a zone perimeter is crossed while
- * polyfence-core's foreground service is dead — writes the event into the
- * durable [PendingEventsStore] and returns. Delivery to the consumer happens
- * on the tracker's next boot via the same drain path in-process events use.
+ * polyfence-core's foreground service is dead.
  *
- * The receiver deliberately does not restart the tracker service, does not
- * call the delegate, and does not attempt live reconciliation — the tracker's
- * next `startTracking()` picks up whatever is on disk.
+ * Each wake does two things, strictly in that order:
+ *
+ *  1. **Captures the crossing.** The event is written into the durable
+ *     [PendingEventsStore], and the zone's membership is merged into persisted
+ *     zone state so the crossing survives even if the queued event is later
+ *     evicted. Delivery to the consumer happens through the same drain path
+ *     in-process events use.
+ *  2. **Resumes tracking.** The service is restarted so the in-process polling
+ *     engine takes over detection for the rest of the journey.
+ *
+ * Step 2 is what makes the OS registration a *wake source* rather than a
+ * one-shot notifier. The fences the OS holds cover a ring around wherever the
+ * process happened to die; nothing re-selects that ring while the app is dead,
+ * so without resuming, coverage ends at the first crossing and a user who
+ * travels on is invisible. Once the engine is running it owns detection with no
+ * region cap, and re-selects the OS fence set from movement as normal. iOS
+ * needs no equivalent because the platform relaunches the whole app on a region
+ * crossing, which runs `startTracking()` on its own.
+ *
+ * Resumption is conditional and never load-bearing for capture:
+ *  - Skipped unless the consumer's tracking intent is still on, so a deliberate
+ *    `stopTracking()` is not undone behind them.
+ *  - Skipped when the engine is already running, and rate-limited by
+ *    [RESUME_COOLDOWN_MS] so the burst of broadcasts Play Services delivers
+ *    while a journey is under way costs one service start, not one per fence.
+ *  - Skipped, with a report through the normal error channel, when the grants a
+ *    background foreground-service start needs are missing.
+ *  - Degrades to capture-only on any refusal by the platform. The crossing is
+ *    already on disk before a resume is attempted, so a failed resume never
+ *    costs an event.
  */
 class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
 
@@ -66,10 +95,50 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
                 // exception here would surface to the user as a crash of the
                 // consumer's app.
                 Log.w(TAG, "Failed to enqueue OS geofence transition: ${e.message}")
+            }
+            try {
+                // Separately guarded and strictly second: capturing the crossing
+                // must not depend on the resume, and the resume must not be
+                // skipped because an unrelated storage failure threw.
+                resumeTrackingIfIntended(appContext)
+            } catch (e: Throwable) {
+                // Throwable, not Exception: a device without Play Services
+                // raises NoClassDefFoundError out of the geofencing classes this
+                // path touches, and on a bare thread that would crash the
+                // consumer's app rather than degrade to capture-only.
+                Log.w(TAG, "Failed to resume tracking after OS geofence wake: ${e.message}")
             } finally {
                 pendingResult.finish()
             }
         }.start()
+    }
+
+    /**
+     * Why a wake did or did not resume tracking. Returned rather than only
+     * logged so a test can assert which gate a given wake stopped at, and so a
+     * caller can tell "declined" from "attempted and refused".
+     */
+    internal enum class ResumeOutcome {
+        /** The service start was handed to the platform without refusal. */
+        STARTED,
+
+        /** OS wake fences are off; the whole path is inert. */
+        FEATURE_DISABLED,
+
+        /** The in-process engine already owns detection. */
+        ALREADY_RUNNING,
+
+        /** A resume was issued moments ago and the service is still coming up. */
+        ALREADY_REQUESTED,
+
+        /** The consumer's last call was `stopTracking()`. */
+        NOT_INTENDED,
+
+        /** A grant that a background service start requires is missing. */
+        PERMISSION_DENIED,
+
+        /** The platform refused the start. */
+        REFUSED
     }
 
     companion object {
@@ -158,6 +227,7 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
 
             val timestamp = System.currentTimeMillis()
             var evicted = 0
+            val capturedStates = mutableMapOf<String, Boolean>()
             for (zoneId in zoneIds) {
                 // Play Services replays the current state for every fence at
                 // registration time. Anything that merely restates what we
@@ -195,6 +265,23 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
                         "source" to EVENT_SOURCE_OS_GEOFENCE
                     )
                 )
+                capturedStates[zoneId] = impliedInside
+            }
+
+            // Persisted membership is the record of where the user is; the queue
+            // is only the record of what still needs delivering. Writing both
+            // keeps the two agreeing across a wake, which is what stops the
+            // resumed session's first reconcile from raising a RECOVERY_* for a
+            // crossing already sitting in the queue — and keeps the crossing
+            // reflected in state even if eviction later drops the queued event.
+            // Must land before the resume below: the restarted service loads
+            // persisted zone states while starting, and a write that arrived
+            // after that load would be invisible to the reconcile it exists to
+            // inform. mergeZoneStates commits synchronously, so returning from
+            // here is the ordering guarantee.
+            if (capturedStates.isNotEmpty()) {
+                runCatching { persistence.mergeZoneStates(capturedStates) }
+                    .onFailure { Log.w(TAG, "Failed to persist woken zone states: ${it.message}") }
             }
 
             // Only the transient store is ours to close; shutting down the
@@ -215,6 +302,156 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
                 )
             }
             return evicted
+        }
+
+        /**
+         * Minimum gap between service starts issued from a wake. Play Services
+         * delivers a burst of transitions as a moving user crosses the
+         * registered ring, and the engine-running check alone does not absorb
+         * them: the service takes a moment to come up, so every broadcast that
+         * lands in that window would otherwise issue its own start. Sized to
+         * the platform's own foreground-service start budget — past it, a start
+         * that has not produced a running engine has failed, and the next wake
+         * should be free to try again.
+         */
+        internal const val RESUME_COOLDOWN_MS = 10_000L
+
+        private val resumeLock = Any()
+
+        private var lastResumeRequestedAt = 0L
+
+        /** Clears the resume throttle so each test case starts from a cold process. */
+        internal fun resetResumeThrottleForTest() {
+            synchronized(resumeLock) { lastResumeRequestedAt = 0L }
+        }
+
+        /**
+         * Restart the tracker so the in-process engine resumes detection for the
+         * rest of the journey. Called after the crossing has already been
+         * captured, so every early return here costs coverage from this point
+         * on, never the crossing that woke us.
+         *
+         * [now] is injectable so a test can drive the cooldown without sleeping.
+         */
+        internal fun resumeTrackingIfIntended(
+            context: Context,
+            now: Long = System.currentTimeMillis()
+        ): ResumeOutcome {
+            val appContext = context.applicationContext
+
+            // With the flag off, behaviour must be indistinguishable from before
+            // this feature existed — including for fences a previous session
+            // registered that the OS is still holding.
+            if (!PolyfenceConfig(appContext).osGeofenceWakeEnabled) {
+                return ResumeOutcome.FEATURE_DISABLED
+            }
+
+            // The engine already owns detection, so a wake has nothing to add.
+            // This is the steady state once a journey is under way: the fences
+            // stay armed and every further broadcast settles here.
+            if (LocationTracker.currentInstanceForOsGeofence
+                    ?.isEngineRunningForOsGeofence == true
+            ) {
+                return ResumeOutcome.ALREADY_RUNNING
+            }
+
+            // Tracking intent, not tracking state. A consumer who called
+            // stopTracking() must not have it restarted behind them, and the
+            // persisted flag is the only record of that choice that survives the
+            // process the choice was made in.
+            if (!LocationTracker.isContinuousTrackingIntended(appContext)) {
+                return ResumeOutcome.NOT_INTENDED
+            }
+
+            if (!hasBackgroundServiceStartPerms(appContext)) {
+                reportSafely(
+                    type = "os_geofence_resume_denied",
+                    message = "OS wake fence fired but tracking cannot resume: " +
+                        "the grants a background location service start requires are missing",
+                    errorContext = mapOf(
+                        "severity" to "warning",
+                        "platform" to "android",
+                        "source" to EVENT_SOURCE_OS_GEOFENCE
+                    )
+                )
+                return ResumeOutcome.PERMISSION_DENIED
+            }
+
+            synchronized(resumeLock) {
+                val neverRequested = lastResumeRequestedAt == 0L
+                val cooledDown = now - lastResumeRequestedAt >= RESUME_COOLDOWN_MS
+                if (!neverRequested && !cooledDown) return ResumeOutcome.ALREADY_REQUESTED
+                lastResumeRequestedAt = now
+            }
+
+            val intent = Intent(appContext, LocationTracker::class.java).apply {
+                action = LocationTracker.ACTION_START_TRACKING
+            }
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    appContext.startForegroundService(intent)
+                } else {
+                    appContext.startService(intent)
+                }
+                Log.i(TAG, "Resumed tracking from an OS geofence wake")
+                ResumeOutcome.STARTED
+            } catch (e: Exception) {
+                // A geofence transition is on the platform's exemption list for
+                // background foreground-service starts, but the exemption is not
+                // universal across versions and OEM builds, and the location
+                // service type carries its own while-in-use rules on API 34+.
+                // A refusal degrades to capture-only: the crossing is already
+                // persisted, and the next tracker boot drains it as before.
+                Log.w(TAG, "Platform refused the wake-driven service start: ${e.message}")
+                reportSafely(
+                    type = "os_geofence_resume_refused",
+                    message = "The system refused to restart tracking after an OS wake fence: " +
+                        (e.message ?: e.javaClass.simpleName),
+                    errorContext = mapOf(
+                        "severity" to "warning",
+                        "platform" to "android",
+                        "reason" to e.javaClass.simpleName,
+                        "source" to EVENT_SOURCE_OS_GEOFENCE
+                    )
+                )
+                ResumeOutcome.REFUSED
+            }
+        }
+
+        /**
+         * Grants a wake-driven service start needs, which is a strict superset
+         * of what a consumer-driven `startTracking()` needs.
+         *
+         * The extra one is `ACCESS_BACKGROUND_LOCATION`. A `location`-typed
+         * foreground service started while the process is backgrounded is
+         * refused on API 34+ without it, and the refusal arrives as an exception
+         * out of `startForeground` rather than as a degraded service. Checking
+         * here turns that into a reported no-op. It costs nothing in practice:
+         * the registrar already declines to arm fences without the same grant,
+         * so any process reaching this point held it when the fences were armed.
+         */
+        private fun hasBackgroundServiceStartPerms(context: Context): Boolean {
+            fun granted(permission: String) =
+                ContextCompat.checkSelfPermission(context, permission) ==
+                    PackageManager.PERMISSION_GRANTED
+
+            val fine = granted(Manifest.permission.ACCESS_FINE_LOCATION)
+            val coarse = granted(Manifest.permission.ACCESS_COARSE_LOCATION)
+            if (!fine && !coarse) return false
+
+            if (Build.VERSION.SDK_INT >= 34 &&
+                !granted(Manifest.permission.FOREGROUND_SERVICE_LOCATION)
+            ) {
+                return false
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                !granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            ) {
+                return false
+            }
+
+            return true
         }
 
         /**
