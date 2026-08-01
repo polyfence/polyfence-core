@@ -100,7 +100,13 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
                 // Separately guarded and strictly second: capturing the crossing
                 // must not depend on the resume, and the resume must not be
                 // skipped because an unrelated storage failure threw.
-                resumeTrackingIfIntended(appContext)
+                //
+                // The outcome is recorded rather than discarded: most of the
+                // gates decline silently, and a wake that captured nothing and
+                // resumed nothing is otherwise indistinguishable from a wake
+                // that never arrived.
+                val outcome = resumeTrackingIfIntended(appContext)
+                Log.i(TAG, "OS wake resume: $outcome")
             } catch (e: Throwable) {
                 // Throwable, not Exception: a device without Play Services
                 // raises NoClassDefFoundError out of the geofencing classes this
@@ -182,7 +188,10 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
             // With the flag off, behaviour must be indistinguishable from
             // before this feature existed — including for fences a previous
             // session registered that the OS is still holding.
-            if (!config.osGeofenceWakeEnabled) return 0
+            if (!config.osGeofenceWakeEnabled) {
+                Log.i(TAG, "OS wake ignored: the feature is off; the OS still holds fences from a prior session")
+                return 0
+            }
 
             val liveTracker = LocationTracker.currentInstanceForOsGeofence
 
@@ -191,7 +200,10 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
             // bridge leaves the engine polling and persisting into this same
             // queue, so gating on deliverability would let both writers record
             // one physical crossing and hand the consumer a duplicate.
-            if (liveTracker?.isEngineRunningForOsGeofence == true) return 0
+            if (liveTracker?.isEngineRunningForOsGeofence == true) {
+                Log.i(TAG, "OS wake ignored: the in-process engine is running and owns this crossing")
+                return 0
+            }
 
             // A queue-less wake has nowhere to deposit the crossing, so the
             // whole feature is inert. Surface it rather than losing events to a
@@ -228,12 +240,28 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
             val timestamp = System.currentTimeMillis()
             var evicted = 0
             val capturedStates = mutableMapOf<String, Boolean>()
+
+            // A wake happens with no app running and nothing watching, so a
+            // dropped crossing leaves no trace anywhere: the queue simply stays
+            // empty and the next session reconciles as if nothing occurred.
+            // Every decision below is therefore recorded, including the ones
+            // that discard — an empty queue must be distinguishable from a
+            // queue that was never offered anything.
+            Log.i(
+                TAG,
+                "OS wake: type=$eventType zones=${zoneIds.size} " +
+                    "hasFix=${triggeringLocation != null} liveStore=${liveStore != null}"
+            )
+
             for (zoneId in zoneIds) {
                 // Play Services replays the current state for every fence at
                 // registration time. Anything that merely restates what we
                 // already believe is not a crossing and must not reach the
                 // consumer as one.
-                if (persistedStates[zoneId] == impliedInside) continue
+                if (persistedStates[zoneId] == impliedInside) {
+                    Log.i(TAG, "OS wake: $zoneId dropped — restates believed membership ($impliedInside)")
+                    continue
+                }
 
                 // A polygon is registered as a circular cover, so the OS can
                 // wake us for a position inside the cover but outside the
@@ -243,8 +271,11 @@ class PolyfenceGeofenceBroadcastReceiver : BroadcastReceiver() {
                 if (impliedInside && triggeringLocation != null &&
                     isDefinitelyOutside(zoneId, persistedZones, triggeringLocation)
                 ) {
+                    Log.i(TAG, "OS wake: $zoneId dropped — fix lies outside the real geometry")
                     continue
                 }
+
+                Log.i(TAG, "OS wake: $zoneId captured $eventType (believed=${persistedStates[zoneId]})")
 
                 val zoneName = liveTracker?.geofenceEngineForOsGeofence?.getZoneName(zoneId)
                     ?: persistedZones[zoneId]?.second
