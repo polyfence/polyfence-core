@@ -110,6 +110,10 @@ class LocationTracker : Service() {
         @Volatile
         private var pendingEventListenerActive: Boolean? = null
 
+        // Whether this process has already created the service once, so the
+        // first creation is not reported as a restart.
+        private var serviceCreatedOnce = false
+
         /**
          * Store activity settings to be applied when tracking starts
          */
@@ -192,6 +196,15 @@ class LocationTracker : Service() {
             if (runningStore != null) return runningStore.droppedCountValue()
             val store = PendingEventsStore(context.applicationContext, 0)
             return store.droppedCountValue().also { store.shutdown() }
+        }
+
+        /**
+         * Geofence engine of the running service, or null when no service is
+         * running. Lets the debug collector count monitored zones without
+         * holding a reference that would outlive the session it describes.
+         */
+        internal fun currentGeofenceEngine(): GeofenceEngine? {
+            return currentInstance?.geofenceEngine
         }
 
         /**
@@ -953,6 +966,17 @@ class LocationTracker : Service() {
         // Set current instance for static access to zone states
         currentInstance = this
 
+        // A second creation inside one process means the service was torn
+        // down and brought back — by the platform under START_STICKY, or by a
+        // stop/start cycle. The collector's counters live in the same process,
+        // so a restart that followed process death cannot be seen from here
+        // and is not counted.
+        if (serviceCreatedOnce) {
+            PolyfenceDebugCollector.recordRestart()
+        } else {
+            serviceCreatedOnce = true
+        }
+
         // Capture battery snapshot for telemetry drain calculation. Done here
         // so it aligns with TelemetryAggregator's sessionStartTime (set when
         // this LocationTracker was constructed moments earlier). The matching
@@ -1706,6 +1730,15 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         detectionTimeMs = detectionTimeMs
     )
 
+    // A detection time of zero marks an event the engine synthesised outside a
+    // location evaluation — a degraded-GPS exit, a signal-lost or a
+    // signal-restored. Those were never timed, so folding them in would pull
+    // the mean toward zero and count them as detections the engine never
+    // performed.
+    if (detectionTimeMs > 0) {
+        PolyfenceDebugCollector.recordZoneDetection(detectionTimeMs)
+    }
+
     // Send event to delegate with detection metrics, GPS coordinates, and ML context.
     // `timestamp` mirrors the iOS event map (see ios/Classes/LocationTracker.swift:639);
     // without it, polyfence-flutter's bridge can't parse the event and emits a noisy
@@ -2107,6 +2140,13 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 telemetryAggregator.recordGpsUpdate(
                     intervalMs = currentGpsInterval,
                     accuracyM = location.accuracy
+                )
+
+                // Negative when the fix carries no accuracy — the collector
+                // reports it as lastKnownAccuracy, whose absent value is
+                // already a negative sentinel.
+                PolyfenceDebugCollector.recordLocationUpdate(
+                    if (location.hasAccuracy()) location.accuracy.toDouble() else -1.0
                 )
 
                 // Check for unreliable GPS (large accuracy swings, poor accuracy)

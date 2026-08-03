@@ -81,12 +81,16 @@ public class PolyfenceDebugCollector {
     private func collectPerformanceMetrics() -> [String: Any] {
         return syncQueue.sync {
             let uptime = Date().timeIntervalSince(self.sessionStartTime) * 1000
+            let detectionCount = self.performanceMetrics["zoneDetectionCount"] as? Int ?? 0
+            let totalLatency = self.performanceMetrics["totalDetectionLatency"] as? Double ?? 0.0
 
             return [
                 "uptime": Int(uptime),
                 "totalLocationUpdates": self.performanceMetrics["locationUpdateCount"] as? Int ?? 0,
-                "totalZoneDetections": self.performanceMetrics["zoneDetectionCount"] as? Int ?? 0,
-                "averageDetectionLatency": self.performanceMetrics["avgDetectionLatency"] as? Double ?? 0.0,
+                "totalZoneDetections": detectionCount,
+                "averageDetectionLatency": detectionCount > 0
+                    ? totalLatency / Double(detectionCount)
+                    : 0.0,
                 "memoryUsageMB": self.getMemoryUsage(),
                 "cpuUsagePercent": 0.0, // CPU usage is complex to get on iOS
                 "restartCount": self.performanceMetrics["restartCount"] as? Int ?? 0
@@ -164,14 +168,21 @@ public class PolyfenceDebugCollector {
         }
     }
 
-    public func recordZoneDetection(latencyMs: Int64) {
+    /**
+     * Record one geofence detection and the time the engine spent producing it.
+     *
+     * Latency is fractional milliseconds: a point-in-zone evaluation routinely
+     * completes in well under a millisecond, so the sum is kept and the mean
+     * derived at read time rather than rolled per sample.
+     */
+    public func recordZoneDetection(latencyMs: Double) {
         syncQueue.async { [weak self] in
-            let count = (self?.performanceMetrics["zoneDetectionCount"] as? Int) ?? 0
-            self?.performanceMetrics["zoneDetectionCount"] = count + 1
+            guard let self = self else { return }
+            let count = (self.performanceMetrics["zoneDetectionCount"] as? Int) ?? 0
+            self.performanceMetrics["zoneDetectionCount"] = count + 1
 
-            let avgLatency = (self?.performanceMetrics["avgDetectionLatency"] as? Double) ?? 0.0
-            let newAvg = count > 0 ? ((avgLatency * Double(count - 1)) + Double(latencyMs)) / Double(count) : Double(latencyMs)
-            self?.performanceMetrics["avgDetectionLatency"] = newAvg
+            let total = (self.performanceMetrics["totalDetectionLatency"] as? Double) ?? 0.0
+            self.performanceMetrics["totalDetectionLatency"] = total + latencyMs
         }
     }
 

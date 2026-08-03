@@ -404,6 +404,11 @@ public class LocationTracker: NSObject {
     }
 
     private func setupGeofenceEngine() {
+        // The collector reads zone counts straight off the running engine. It
+        // holds the reference weakly, so it empties itself when this tracker
+        // goes away and never reports zones for a torn-down session.
+        PolyfenceDebugCollector.shared.geofenceEngine = geofenceEngine
+
         // Setup geofence engine callback
         geofenceEngine.setEventCallback { [weak self] zoneId, eventType, location, detectionTimeMs in
             self?.handleGeofenceEvent(zoneId: zoneId, eventType: eventType, location: location, detectionTimeMs: detectionTimeMs)
@@ -968,6 +973,15 @@ public class LocationTracker: NSObject {
             detectionTimeMs: detectionTimeMs
         )
 
+        // A detection time of zero marks an event the engine synthesised
+        // outside a location evaluation — a degraded-GPS exit, a signal-lost
+        // or a signal-restored. Those were never timed, so folding them in
+        // would pull the mean toward zero and count them as detections the
+        // engine never performed.
+        if detectionTimeMs > 0 {
+            PolyfenceDebugCollector.shared.recordZoneDetection(latencyMs: detectionTimeMs)
+        }
+
         // Build enriched event dictionary.
         //
         // `dwellDurationMs` is populated only for DWELL events. For
@@ -1396,6 +1410,11 @@ extension LocationTracker: CLLocationManagerDelegate {
             intervalMs: Int64(currentGpsInterval * 1000),
             accuracyM: Float(location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : 999.0)
         )
+
+        // Raw horizontalAccuracy, negative when the fix carries none — the
+        // collector reports it as lastKnownAccuracy, whose absent value is
+        // already a negative sentinel.
+        PolyfenceDebugCollector.shared.recordLocationUpdate(accuracy: location.horizontalAccuracy)
 
         // Reset fallback timer since we received a valid location
         resetFallbackTimer()

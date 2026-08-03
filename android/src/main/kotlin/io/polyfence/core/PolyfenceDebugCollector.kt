@@ -10,7 +10,6 @@ import android.os.Debug
 import androidx.core.app.ActivityCompat
 import android.Manifest
 import java.io.RandomAccessFile
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedDeque
 
 /**
@@ -19,24 +18,26 @@ import java.util.concurrent.ConcurrentLinkedDeque
  */
 class PolyfenceDebugCollector {
     companion object {
-        private val performanceMetrics = ConcurrentHashMap<String, Any>()
         private val errorHistory = ConcurrentLinkedDeque<Map<String, Any>>()
         private var sessionStartTime = System.currentTimeMillis()
+        private var pluginVersion: String? = null // Stored during initialization
+
+        /**
+         * Guards the session counters below. They are written from the
+         * location and geofence callback threads and read from whichever
+         * background thread serves [collectDebugInfo], so every access is
+         * taken under this monitor. Readers snapshot and release before any
+         * blocking work — [getCpuUsage] sleeps for roughly a third of a
+         * second and must never run while the monitor is held, or a GPS fix
+         * would stall behind a debug poll.
+         */
+        private val metricsLock = Any()
         private var lastLocationUpdateTime = 0L
         private var lastKnownAccuracy = -1.0
         private var locationUpdateCount = 0
         private var zoneDetectionCount = 0
-        private var totalDetectionLatency = 0.0
+        private var totalDetectionLatencyMs = 0.0
         private var restartCount = 0
-        private var pluginVersion: String? = null // Stored during initialization
-        private var geofenceEngine: GeofenceEngine? = null
-
-        /**
-         * Set reference to GeofenceEngine for zone status collection
-         */
-        fun setGeofenceEngine(engine: GeofenceEngine) {
-            geofenceEngine = engine
-        }
 
         fun collectDebugInfo(context: Context): Map<String, Any> {
             return mapOf(
@@ -52,14 +53,21 @@ class PolyfenceDebugCollector {
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as AndroidLocationManager
 
+            val accuracy: Double
+            val lastUpdate: Long
+            synchronized(metricsLock) {
+                accuracy = lastKnownAccuracy
+                lastUpdate = lastLocationUpdateTime
+            }
+
             return mapOf(
                 "isLocationPermissionGranted" to hasLocationPermission(context),
                 "isBackgroundLocationEnabled" to hasBackgroundLocationPermission(context),
                 "isBatteryOptimizationDisabled" to powerManager.isIgnoringBatteryOptimizations(context.packageName),
                 "isGpsEnabled" to isGpsEnabled(locationManager),
                 "isWakeLockAcquired" to isWakeLockAcquired(),
-                "lastKnownAccuracy" to lastKnownAccuracy,
-                "lastLocationUpdate" to lastLocationUpdateTime,
+                "lastKnownAccuracy" to accuracy,
+                "lastLocationUpdate" to lastUpdate,
                 "platformVersion" to Build.VERSION.RELEASE,
                 "pluginVersion" to getPluginVersion(),
                 // Null when osGeofenceWakeEnabled = false. Present as a
@@ -76,14 +84,29 @@ class PolyfenceDebugCollector {
             val runtime = Runtime.getRuntime()
             val usedMemory = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024
 
+            val updates: Int
+            val detections: Int
+            val averageLatency: Double
+            val restarts: Int
+            synchronized(metricsLock) {
+                updates = locationUpdateCount
+                detections = zoneDetectionCount
+                averageLatency = if (zoneDetectionCount > 0) {
+                    totalDetectionLatencyMs / zoneDetectionCount
+                } else {
+                    0.0
+                }
+                restarts = restartCount
+            }
+
             return mapOf(
                 "uptime" to (System.currentTimeMillis() - sessionStartTime),
-                "totalLocationUpdates" to locationUpdateCount,
-                "totalZoneDetections" to zoneDetectionCount,
-                "averageDetectionLatency" to if (zoneDetectionCount > 0) totalDetectionLatency / zoneDetectionCount else 0.0,
+                "totalLocationUpdates" to updates,
+                "totalZoneDetections" to detections,
+                "averageDetectionLatency" to averageLatency,
                 "memoryUsageMB" to usedMemory.toInt(),
                 "cpuUsagePercent" to getCpuUsage(),
-                "restartCount" to restartCount
+                "restartCount" to restarts
             )
         }
 
@@ -102,7 +125,11 @@ class PolyfenceDebugCollector {
         }
 
         private fun collectZoneStatus(): Map<String, Any> {
-            val engine = geofenceEngine
+            // Read through the running service rather than holding a
+            // reference: once the service is destroyed there is nothing being
+            // monitored, and a retained engine would keep reporting the zones
+            // of a session that has ended.
+            val engine = LocationTracker.currentGeofenceEngine()
             if (engine == null) {
                 return mapOf(
                     "activeZones" to 0,
@@ -131,14 +158,26 @@ class PolyfenceDebugCollector {
         }
 
         fun recordLocationUpdate(accuracy: Double) {
-            lastKnownAccuracy = accuracy
-            lastLocationUpdateTime = System.currentTimeMillis()
-            locationUpdateCount++
+            synchronized(metricsLock) {
+                lastKnownAccuracy = accuracy
+                lastLocationUpdateTime = System.currentTimeMillis()
+                locationUpdateCount++
+            }
         }
 
-        fun recordZoneDetection(latencyMs: Long) {
-            zoneDetectionCount++
-            totalDetectionLatency += latencyMs
+        /**
+         * Record one geofence detection and the time the engine spent
+         * producing it.
+         *
+         * Latency is fractional milliseconds: a point-in-zone evaluation
+         * routinely completes in well under a millisecond, so the sum is kept
+         * and the mean derived at read time.
+         */
+        fun recordZoneDetection(latencyMs: Double) {
+            synchronized(metricsLock) {
+                zoneDetectionCount++
+                totalDetectionLatencyMs += latencyMs
+            }
         }
 
         fun recordError(errorType: String, message: String, context: Map<String, Any> = emptyMap()) {
@@ -166,8 +205,16 @@ class PolyfenceDebugCollector {
             }
         }
 
+        /**
+         * Record that the tracking service was created again inside a process
+         * that had already created it once. Counting is scoped to the process:
+         * a restart that follows process death takes this state with it, so
+         * the figure reads alongside `uptime`, which has the same scope.
+         */
         fun recordRestart() {
-            restartCount++
+            synchronized(metricsLock) {
+                restartCount++
+            }
         }
 
         fun getErrorHistory(timeRangeMs: Long?, errorTypes: List<String>?): List<Map<String, Any>> {
