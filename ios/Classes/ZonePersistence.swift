@@ -16,12 +16,20 @@ public class ZonePersistence {
     // MARK: - Properties
     private let userDefaults = UserDefaults.standard
 
-    // Synchronization queue for thread-safe read-modify-write operations
-    // Concurrent queue allows parallel reads, barrier flag serializes writes
-    private let persistenceQueue = DispatchQueue(
+    // Serialises the read-modify-write cycles below. Concurrent so reads run in
+    // parallel; writes take the barrier.
+    //
+    // Static because the store it guards is `UserDefaults.standard`, which is
+    // global. A per-instance queue would order each instance against itself and
+    // against nothing else, so a write issued through one instance could still
+    // be invisible to a read issued through another moments later — the queue
+    // would look like protection while providing none across instances.
+    private static let sharedQueue = DispatchQueue(
         label: "io.polyfence.zonePersistence",
         attributes: .concurrent
     )
+
+    private var persistenceQueue: DispatchQueue { ZonePersistence.sharedQueue }
 
     public init() {}
 
