@@ -53,21 +53,21 @@ Consumers who leave `osGeofenceWakeEnabled` at its default `false` need to do no
 
 ## [1.0.13] - 2026-07-20
 
+> **1.0.12 was never published.** It was prepared and then skipped; the changes it
+> described shipped in this release. There is no `1.0.12` on Maven Central, CocoaPods
+> or as a git tag.
+
 ### Added
 - **`signalLost` / `signalRestored` geofence events on both platforms** — GPS signal loss and recovery are now surfaced as first-class geofence events instead of silently freezing zone state. When a fix goes stale or absent, affected zones are held as uncertain (not exited) and resolve on the next valid fix.
 - **`gpsStalenessTimeoutMs` configuration on both platforms** — opt-in staleness timeout in milliseconds that gates degraded-GPS exit handling and the staleness watchdog. Defaults to `0` (disabled), so there is no behaviour change unless a caller sets it.
+- **`LocationTracker.applyAddZoneDirect(context, zoneId, zoneName, zoneData)` / `applyRemoveZoneDirect(context, zoneId)` / `applyClearZonesDirect(context)` on Android** — three companion helpers on the running-Service pattern established by `applyConfigurationDirect` in 1.0.11. Bridges should call these instead of dispatching `ACTION_ADD_ZONE` / `ACTION_REMOVE_ZONE` / `ACTION_CLEAR_ZONES` via `startService` when they want the caller's promise to resolve after the engine and persistence are both updated. Direct-apply routes are synchronous on the running Service instance so `getCurrentZoneStates()` immediately after observes the change; falls back to the Intent transport when the Service isn't running (read-after-write only guaranteed on the direct path).
+
+### Changed
+- **iOS `LocationTracker.addZone` / `removeZone` / `clearAllZones` no longer wrap the engine call in `geofenceQueue.async`.** The `GeofenceEngine` methods already use their own `syncQueue.sync` internally for the `zoneStates` write, so the outer wrapper was redundant — it dispatched the mutation onto a background queue and returned before it ran, so an immediately-following `getCurrentZoneStates()` could still see the old state. `addZone` retains its `DispatchQueue.main.async` block for the CLLocationManager health-check / deferred-GPS-start / reconcile logic (those must run on main).
 
 ### Fixed
 - **Degraded or absent GPS no longer latches zone state.** A low-accuracy or missing fix was previously discarded, freezing the last inside/outside state with no timeout — so a device could remain "inside" a zone indefinitely after losing signal. The engine keeps the accuracy gate on ENTER but now lets a degraded fix fire EXIT when the device is confidently outside (circle: `distance > radius + accuracy`; polygon: outside and nearest edge farther than `accuracy`). The staleness watchdog keys off the last *valid* fix rather than any location callback, so it still fires while signal is lost, and runs on a 60s tick on both platforms.
 - **Geofence alert titles now name the zone.** `DWELL` and `RECOVERY_ENTER` notifications previously rendered as "Exited" for every non-ENTER event; titles now name the zone, and inside-states no longer read as leaving.
-
-## [1.0.12] - 2026-07-15
-
-### Added
-- **`LocationTracker.applyAddZoneDirect(context, zoneId, zoneName, zoneData)` / `applyRemoveZoneDirect(context, zoneId)` / `applyClearZonesDirect(context)` on Android** — three companion helpers on the running-Service pattern established by `applyConfigurationDirect` in 1.0.11. Bridges should call these instead of dispatching `ACTION_ADD_ZONE` / `ACTION_REMOVE_ZONE` / `ACTION_CLEAR_ZONES` via `startService` when they want the caller's promise to resolve after the engine and persistence are both updated. Direct-apply routes are synchronous on the running Service instance so `getCurrentZoneStates()` immediately after observes the change; falls back to the Intent transport when the Service isn't running (read-after-write only guaranteed on the direct path). Bug-021.
-
-### Changed
-- **iOS `LocationTracker.addZone` / `removeZone` / `clearAllZones` no longer wrap the engine call in `geofenceQueue.async`.** The `GeofenceEngine` methods already use their own `syncQueue.sync` internally for the `zoneStates` write, so the outer wrapper was redundant — it dispatched the mutation onto a background queue and returned before it ran, so an immediately-following `getCurrentZoneStates()` could still see the old state. `addZone` retains its `DispatchQueue.main.async` block for the CLLocationManager health-check / deferred-GPS-start / reconcile logic (those must run on main). Bug-021.
 
 ## [1.0.11] - 2026-07-08
 
