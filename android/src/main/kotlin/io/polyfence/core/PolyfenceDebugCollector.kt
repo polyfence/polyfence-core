@@ -9,7 +9,6 @@ import android.os.Process
 import android.os.Debug
 import androidx.core.app.ActivityCompat
 import android.Manifest
-import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentLinkedDeque
 
 /**
@@ -17,6 +16,22 @@ import java.util.concurrent.ConcurrentLinkedDeque
  * Integrates with existing analytics and error systems
  */
 class PolyfenceDebugCollector {
+
+    /**
+     * Names of the payload entries that are read back by name elsewhere in
+     * the library rather than only handed to a consumer.
+     *
+     * A reader that spells one of these differently gets null and falls back
+     * to a default — and for the scored metrics the default is the *best*
+     * possible value, so a typo raises the health score instead of breaking
+     * it. Sharing the constant makes the two sides impossible to drift apart.
+     */
+    object Key {
+        const val PERFORMANCE = "performance"
+        const val RECENT_ERRORS = "recentErrors"
+        const val AVERAGE_DETECTION_LATENCY = "averageDetectionLatency"
+    }
+
     companion object {
         private val errorHistory = ConcurrentLinkedDeque<Map<String, Any>>()
         private var sessionStartTime = System.currentTimeMillis()
@@ -26,10 +41,9 @@ class PolyfenceDebugCollector {
          * Guards the session counters below. They are written from the
          * location and geofence callback threads and read from whichever
          * background thread serves [collectDebugInfo], so every access is
-         * taken under this monitor. Readers snapshot and release before any
-         * blocking work — [getCpuUsage] sleeps for roughly a third of a
-         * second and must never run while the monitor is held, or a GPS fix
-         * would stall behind a debug poll.
+         * taken under this monitor. Readers snapshot the values and release
+         * before doing anything else with them, so a debug poll can never
+         * hold the monitor across work that would stall an incoming GPS fix.
          */
         private val metricsLock = Any()
         private var lastLocationUpdateTime = 0L
@@ -42,10 +56,10 @@ class PolyfenceDebugCollector {
         fun collectDebugInfo(context: Context): Map<String, Any> {
             return mapOf(
                 "systemStatus" to collectSystemStatus(context),
-                "performance" to collectPerformanceMetrics(),
+                Key.PERFORMANCE to collectPerformanceMetrics(),
                 "battery" to collectBatteryMetrics(context),
                 "zones" to collectZoneStatus(),
-                "recentErrors" to getRecentErrors()
+                Key.RECENT_ERRORS to getRecentErrors()
             )
         }
 
@@ -103,9 +117,10 @@ class PolyfenceDebugCollector {
                 "uptime" to (System.currentTimeMillis() - sessionStartTime),
                 "totalLocationUpdates" to updates,
                 "totalZoneDetections" to detections,
-                "averageDetectionLatency" to averageLatency,
+                Key.AVERAGE_DETECTION_LATENCY to averageLatency,
+                // Java heap only. iOS reports whole-process resident size, so
+                // the two are not comparable across platforms.
                 "memoryUsageMB" to usedMemory.toInt(),
-                "cpuUsagePercent" to getCpuUsage(),
                 "restartCount" to restarts
             )
         }
@@ -115,9 +130,6 @@ class PolyfenceDebugCollector {
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
 
             return mapOf(
-                "estimatedHourlyDrain" to estimateBatteryDrain(),
-                "gpsActiveTimePercent" to calculateGpsActiveTimePercent(),
-                "wakeUpCount" to getWakeUpCount(),
                 "isCharging" to isCharging(batteryManager),
                 "batteryLevel" to getBatteryLevel(batteryManager),
                 "totalActiveTime" to (System.currentTimeMillis() - sessionStartTime)
@@ -134,9 +146,7 @@ class PolyfenceDebugCollector {
                 return mapOf(
                     "activeZones" to 0,
                     "circleZones" to 0,
-                    "polygonZones" to 0,
-                    "lastZoneUpdate" to System.currentTimeMillis(),
-                    "zoneEventCounts" to emptyMap<String, Int>()
+                    "polygonZones" to 0
                 )
             }
 
@@ -147,9 +157,7 @@ class PolyfenceDebugCollector {
             return mapOf(
                 "activeZones" to zones.size,
                 "circleZones" to circleCount,
-                "polygonZones" to polygonCount,
-                "lastZoneUpdate" to System.currentTimeMillis(),
-                "zoneEventCounts" to emptyMap<String, Int>()
+                "polygonZones" to polygonCount
             )
         }
 
@@ -286,53 +294,6 @@ class PolyfenceDebugCollector {
          * Must be called from a background thread — blocks for ~360ms to measure CPU usage.
          * Do not call from the main thread.
          */
-        private fun getCpuUsage(): Double {
-            require(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
-                "getCpuUsage() blocks for ~360ms and must not be called on the main thread"
-            }
-            return try {
-                val reader = RandomAccessFile("/proc/stat", "r")
-                val load = reader.readLine()
-                reader.close()
-
-                val toks = load.split(" ".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
-                val idle1 = toks[4].toLong()
-                val cpu1 = toks[1].toLong() + toks[2].toLong() + toks[3].toLong() + toks[5].toLong() + toks[6].toLong() + toks[7].toLong() + toks[8].toLong()
-
-                Thread.sleep(360)
-
-                val reader2 = RandomAccessFile("/proc/stat", "r")
-                val load2 = reader2.readLine()
-                reader2.close()
-
-                val toks2 = load2.split(" ".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
-                val idle2 = toks2[4].toLong()
-                val cpu2 = toks2[1].toLong() + toks2[2].toLong() + toks2[3].toLong() + toks2[5].toLong() + toks2[6].toLong() + toks2[7].toLong() + toks2[8].toLong()
-
-                val cpuUsage = (cpu2 - cpu1).toDouble() / ((cpu2 + idle2) - (cpu1 + idle1)) * 100.0
-                cpuUsage.coerceIn(0.0, 100.0)
-            } catch (e: Exception) {
-                0.0
-            }
-        }
-
-        private fun estimateBatteryDrain(): Double {
-            // Simple estimation based on GPS usage
-            val gpsActiveTime = (System.currentTimeMillis() - sessionStartTime) / 1000.0 / 3600.0 // hours
-            return gpsActiveTime * 5.0 // Estimated 5% per hour for GPS
-        }
-
-        private fun calculateGpsActiveTimePercent(): Int {
-            val totalTime = System.currentTimeMillis() - sessionStartTime
-            val gpsActiveTime = totalTime // Assume GPS is always active when tracking
-            return ((gpsActiveTime.toDouble() / totalTime) * 100).toInt()
-        }
-
-        private fun getWakeUpCount(): Int {
-            // This would track wake-up events
-            return 0
-        }
-
         private fun isCharging(batteryManager: android.os.BatteryManager): Boolean {
             return batteryManager.isCharging
         }

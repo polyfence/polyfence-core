@@ -624,17 +624,17 @@ public class LocationTracker: NSObject {
         let telemetry = telemetryAggregator.getSessionTelemetry()
 
         let gpsGoodRatio = (telemetry["gps_ok_ratio"] as? NSNumber)?.doubleValue ?? 0.0
-        let batteryMetrics = debugInfo["battery"] as? [String: Any]
-        let batteryDrain = (batteryMetrics?["estimatedHourlyDrainPercent"] as? NSNumber)?.doubleValue ?? 0.0
-        let perfMetrics = debugInfo["performance"] as? [String: Any]
-        let avgLatency = (perfMetrics?["averageDetectionLatencyMs"] as? NSNumber)?.doubleValue ?? 0.0
-        let errorCount = (debugInfo["recentErrors"] as? [[String: Any]])?.count ?? 0
+        let perfMetrics = debugInfo[PolyfenceDebugCollector.Key.performance] as? [String: Any]
+        // Key must match what the collector emits. A miss here is silent: the
+        // lookup yields 0, and 0 is the best possible latency, so a broken
+        // name awards full marks for a dimension nobody measured.
+        let avgLatency = (perfMetrics?[PolyfenceDebugCollector.Key.averageDetectionLatency] as? NSNumber)?.doubleValue ?? 0.0
+        let errorCount = (debugInfo[PolyfenceDebugCollector.Key.recentErrors] as? [[String: Any]])?.count ?? 0
         let falseRatio = (telemetry["false_event_ratio"] as? NSNumber)?.doubleValue ?? 0.0
         let zoneCount = geofenceEngine.getZoneCount()
 
         let result = HealthScoreCalculator.calculate(
             gpsGoodRatio: gpsGoodRatio,
-            batteryDrainPctPerHr: batteryDrain,
             avgDetectionLatencyMs: avgLatency,
             errorCountRecent: errorCount,
             falseEventRatio: falseRatio,
@@ -1246,36 +1246,6 @@ public class LocationTracker: NSObject {
         UIDevice.current.isBatteryMonitoringEnabled = true
         let batteryLevel = UIDevice.current.batteryLevel
         return batteryLevel >= 0 ? Double(batteryLevel * 100) : 100.0
-    }
-
-    /**
-     * Get CPU usage (mock implementation)
-     */
-    private func getCpuUsage() -> Double {
-        // System-wide CPU usage based on host CPU load counters
-        var size = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info_data_t>.size / MemoryLayout<integer_t>.size)
-        var cpuLoad = host_cpu_load_info()
-        let result = withUnsafeMutablePointer(to: &cpuLoad) { ptr -> kern_return_t in
-            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { intPtr in
-                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, intPtr, &size)
-            }
-        }
-        guard result == KERN_SUCCESS else { return 0.0 }
-        let user = cpuLoad.cpu_ticks.0
-        let nice = cpuLoad.cpu_ticks.1
-        let system = cpuLoad.cpu_ticks.2
-        let idle = cpuLoad.cpu_ticks.3
-        let idleAll = idle
-        let total = user &+ nice &+ system &+ idleAll
-        let totald = total &- prevCpuTotal
-        let idled = idleAll &- prevCpuIdle
-        prevCpuTotal = total
-        prevCpuIdle = idleAll
-        if totald > 0 {
-            let usage = Double(totald &- idled) / Double(totald) * 100.0
-            return Double(round(10 * usage) / 10)
-        }
-        return 0.0
     }
 
     /**

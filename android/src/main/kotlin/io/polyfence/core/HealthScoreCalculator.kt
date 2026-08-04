@@ -22,8 +22,11 @@ object HealthScoreCalculator {
     /**
      * Calculate health score from current metrics.
      *
+     * Every input must be a measurement. A dimension that cannot be measured
+     * is left out rather than defaulted, because a default scores as though
+     * the device were performing perfectly on it and inflates the result.
+     *
      * @param gpsGoodRatio Ratio of GPS readings with accuracy <= 100m (0.0–1.0)
-     * @param batteryDrainPctPerHr Estimated battery drain percent per hour
      * @param avgDetectionLatencyMs Average detection latency in milliseconds
      * @param errorCountRecent Number of errors in recent window
      * @param falseEventRatio Ratio of false events to total events (0.0–1.0)
@@ -32,7 +35,6 @@ object HealthScoreCalculator {
      */
     fun calculate(
         gpsGoodRatio: Double,
-        batteryDrainPctPerHr: Double,
         avgDetectionLatencyMs: Double,
         errorCountRecent: Int,
         falseEventRatio: Double,
@@ -43,7 +45,8 @@ object HealthScoreCalculator {
             return HealthScore(score = 0, topIssue = "Tracking is not active")
         }
 
-        // Each dimension scores 0-20, total 0-100
+        // Each dimension scores 0-20; the four are rescaled to 0-100 at the
+        // end so the published bands keep their meaning.
         val penalties = mutableListOf<Pair<Int, String>>()
 
         // GPS accuracy (0-20 points)
@@ -56,18 +59,6 @@ object HealthScoreCalculator {
         }
         if (gpsScore < 15) {
             penalties.add(Pair(20 - gpsScore, "GPS accuracy is poor (${(gpsGoodRatio * 100).toInt()}% good readings)"))
-        }
-
-        // Battery drain (0-20 points)
-        val batteryScore = when {
-            batteryDrainPctPerHr <= 2.0 -> 20
-            batteryDrainPctPerHr <= 5.0 -> 15
-            batteryDrainPctPerHr <= 10.0 -> 10
-            batteryDrainPctPerHr <= 20.0 -> 5
-            else -> 0
-        }
-        if (batteryScore < 15) {
-            penalties.add(Pair(20 - batteryScore, "Battery drain is high (${batteryDrainPctPerHr.toInt()}%/hr)"))
         }
 
         // Detection latency (0-20 points)
@@ -106,8 +97,8 @@ object HealthScoreCalculator {
             penalties.add(Pair(20 - falseEventScore, "False event rate is high (${(falseEventRatio * 100).toInt()}%)"))
         }
 
-        val totalScore = (gpsScore + batteryScore + latencyScore + errorScore + falseEventScore)
-            .coerceIn(0, 100)
+        val dimensionTotal = gpsScore + latencyScore + errorScore + falseEventScore
+        val totalScore = Math.round(dimensionTotal / 80.0 * 100.0).toInt().coerceIn(0, 100)
 
         // Top issue is the one with the highest penalty
         val topIssue = if (totalScore >= 90) null

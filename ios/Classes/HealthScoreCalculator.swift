@@ -19,9 +19,12 @@ public enum HealthScoreCalculator {
 
     /// Calculate health score from current metrics.
     ///
+    /// Every input must be a measurement. A dimension that cannot be measured
+    /// is left out rather than defaulted, because a default scores as though
+    /// the device were performing perfectly on it and inflates the result.
+    ///
     /// - Parameters:
     ///   - gpsGoodRatio: Ratio of GPS readings with accuracy <= 100m (0.0–1.0)
-    ///   - batteryDrainPctPerHr: Estimated battery drain percent per hour
     ///   - avgDetectionLatencyMs: Average detection latency in milliseconds
     ///   - errorCountRecent: Number of errors in recent window
     ///   - falseEventRatio: Ratio of false events to total events (0.0–1.0)
@@ -29,7 +32,6 @@ public enum HealthScoreCalculator {
     ///   - activeZoneCount: Number of active zones
     public static func calculate(
         gpsGoodRatio: Double,
-        batteryDrainPctPerHr: Double,
         avgDetectionLatencyMs: Double,
         errorCountRecent: Int,
         falseEventRatio: Double,
@@ -40,7 +42,8 @@ public enum HealthScoreCalculator {
             return HealthScore(score: 0, topIssue: "Tracking is not active")
         }
 
-        // Each dimension scores 0-20, total 0-100
+        // Each dimension scores 0-20; the four are rescaled to 0-100 at the
+        // end so the published bands keep their meaning.
         var penalties: [(Int, String)] = []
 
         // GPS accuracy (0-20 points)
@@ -54,19 +57,6 @@ public enum HealthScoreCalculator {
         }
         if gpsScore < 15 {
             penalties.append((20 - gpsScore, "GPS accuracy is poor (\(Int(gpsGoodRatio * 100))% good readings)"))
-        }
-
-        // Battery drain (0-20 points)
-        let batteryScore: Int
-        switch batteryDrainPctPerHr {
-        case ...2.0: batteryScore = 20
-        case ...5.0: batteryScore = 15
-        case ...10.0: batteryScore = 10
-        case ...20.0: batteryScore = 5
-        default: batteryScore = 0
-        }
-        if batteryScore < 15 {
-            penalties.append((20 - batteryScore, "Battery drain is high (\(Int(batteryDrainPctPerHr))%/hr)"))
         }
 
         // Detection latency (0-20 points)
@@ -108,7 +98,8 @@ public enum HealthScoreCalculator {
             penalties.append((20 - falseEventScore, "False event rate is high (\(Int(falseEventRatio * 100))%)"))
         }
 
-        let totalScore = min(max(gpsScore + batteryScore + latencyScore + errorScore + falseEventScore, 0), 100)
+        let dimensionTotal = gpsScore + latencyScore + errorScore + falseEventScore
+        let totalScore = min(max(Int((Double(dimensionTotal) / 80.0 * 100.0).rounded()), 0), 100)
 
         let topIssue: String?
         if totalScore >= 90 {

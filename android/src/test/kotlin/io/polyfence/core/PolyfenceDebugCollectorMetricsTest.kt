@@ -18,10 +18,10 @@ import org.robolectric.android.controller.ServiceController
  * accumulate for the lifetime of the test JVM. Every assertion here is
  * written against the delta across an action rather than an absolute value.
  *
- * [PolyfenceDebugCollector.collectDebugInfo] measures CPU by sleeping, and
- * refuses to run on the main thread for that reason. Robolectric runs test
- * bodies on the main looper, so every collect below is taken on a worker
- * thread — the same arrangement both bridges use in production.
+ * Collection happens on a worker thread here because that is where both
+ * bridges call it from in production, and the counters are written from the
+ * location and geofence callback threads — so a same-thread read would not
+ * exercise the monitor that guards them.
  */
 @RunWith(RobolectricTestRunner::class)
 class PolyfenceDebugCollectorMetricsTest {

@@ -27,13 +27,28 @@ public class PolyfenceDebugCollector {
         pluginVersion = version
     }
 
+    /**
+     * Names of the payload entries that are read back by name elsewhere in
+     * the library rather than only handed to a consumer.
+     *
+     * A reader that spells one of these differently gets nil and falls back
+     * to a default — and for the scored metrics the default is the *best*
+     * possible value, so a typo raises the health score instead of breaking
+     * it. Sharing the constant makes the two sides impossible to drift apart.
+     */
+    public enum Key {
+        public static let performance = "performance"
+        public static let recentErrors = "recentErrors"
+        public static let averageDetectionLatency = "averageDetectionLatency"
+    }
+
     public func collectDebugInfo() -> [String: Any] {
         return [
             "systemStatus": collectSystemStatus(),
-            "performance": collectPerformanceMetrics(),
+            Key.performance: collectPerformanceMetrics(),
             "battery": collectBatteryMetrics(),
             "zones": collectZoneStatus(),
-            "recentErrors": getRecentErrors()
+            Key.recentErrors: getRecentErrors()
         ]
     }
 
@@ -58,9 +73,15 @@ public class PolyfenceDebugCollector {
                     return mgr.authorizationStatus == .authorizedAlways || mgr.authorizationStatus == .authorizedWhenInUse
                 }(),
                 "isBackgroundLocationEnabled": CLLocationManager().authorizationStatus == .authorizedAlways,
-                "isBatteryOptimizationDisabled": true, // iOS doesn't have battery optimization like Android
+                // Null rather than a value: iOS has no battery-optimisation
+                // exemption and no wake locks, so there is nothing to report.
+                // A `false` here would be read as "the app is subject to
+                // optimisation" / "no wake lock is held", both of which are
+                // claims about a mechanism that does not exist on this
+                // platform. Android returns real values for both.
+                "isBatteryOptimizationDisabled": NSNull(),
                 "isGpsEnabled": CLLocationManager.locationServicesEnabled(),
-                "isWakeLockAcquired": false, // iOS doesn't use wake locks
+                "isWakeLockAcquired": NSNull(),
                 "lastKnownAccuracy": self.performanceMetrics["lastAccuracy"] as? Double ?? -1.0,
                 "lastLocationUpdate": (self.performanceMetrics["lastLocationUpdate"] as? Date ?? Date()).timeIntervalSince1970 * 1000,
                 "platformVersion": UIDevice.current.systemVersion,
@@ -88,12 +109,15 @@ public class PolyfenceDebugCollector {
                 "uptime": Int(uptime),
                 "totalLocationUpdates": self.performanceMetrics["locationUpdateCount"] as? Int ?? 0,
                 "totalZoneDetections": detectionCount,
-                "averageDetectionLatency": detectionCount > 0
+                Key.averageDetectionLatency: detectionCount > 0
                     ? totalLatency / Double(detectionCount)
                     : 0.0,
+                // Process resident size. Android's counterpart reports Java
+                // heap only, so the two are not comparable across platforms.
                 "memoryUsageMB": self.getMemoryUsage(),
-                "cpuUsagePercent": 0.0, // CPU usage is complex to get on iOS
-                "restartCount": self.performanceMetrics["restartCount"] as? Int ?? 0
+                // Null rather than 0: restarts are a property of Android's
+                // foreground service, and iOS has no equivalent to count.
+                "restartCount": NSNull()
             ]
         }
     }
@@ -101,12 +125,15 @@ public class PolyfenceDebugCollector {
     private func collectBatteryMetrics() -> [String: Any] {
         UIDevice.current.isBatteryMonitoringEnabled = true
 
+        // Negative means the OS has not populated the level yet, and always
+        // means it in the Simulator, which has no battery. Reporting the raw
+        // value would surface -100; coercing it to a plausible number would
+        // report a charge the device never had.
+        let rawLevel = UIDevice.current.batteryLevel
+
         return [
-            "estimatedHourlyDrain": 0.0,
-            "gpsActiveTimePercent": 0,
-            "wakeUpCount": 0,
             "isCharging": UIDevice.current.batteryState == .charging,
-            "batteryLevel": Int(UIDevice.current.batteryLevel * 100),
+            "batteryLevel": rawLevel >= 0 ? Int(rawLevel * 100) : NSNull(),
             "totalActiveTime": Int(Date().timeIntervalSince(sessionStartTime) * 1000)
         ]
     }
@@ -119,9 +146,7 @@ public class PolyfenceDebugCollector {
         return [
             "activeZones": zones.count,
             "circleZones": circleCount,
-            "polygonZones": polygonCount,
-            "lastZoneUpdate": Date().timeIntervalSince1970 * 1000,
-            "zoneEventCounts": [String: Int]()
+            "polygonZones": polygonCount
         ]
     }
 
