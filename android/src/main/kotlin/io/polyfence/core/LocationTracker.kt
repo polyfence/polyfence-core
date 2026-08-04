@@ -1475,8 +1475,7 @@ class LocationTracker : Service() {
                     healthScoreTickCount = 0
                     // Collection touches counters written from the location
                     // and geofence callback threads, so it is taken off the
-                    // main looper rather than run inline here.
-                    // without violating the main-looper guard. Once per 5
+                    // main looper rather than run inline here. Once per five
                     // minutes; lifecycle is trivial — no shared executor
                     // needed.
                     Thread {

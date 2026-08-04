@@ -119,9 +119,10 @@ public class PolyfenceDebugCollector {
                 // mean spans every crossing, which it cannot when the engine
                 // synthesises one outside a timed evaluation.
                 "timedZoneDetections": timedCount,
-                // Absent until a crossing has been detected. Zero is the
-                // best possible latency, so reporting it for "no samples"
-                // makes an unmeasured device look like a perfect one.
+                // Absent until a crossing has been *timed*: a synthesised
+                // one raises totalZoneDetections without contributing a
+                // sample. Zero is the best possible latency, so reporting it
+                // for "no samples" makes an unmeasured device look perfect.
                 Key.averageDetectionLatency: timedCount > 0
                     ? totalLatency / Double(timedCount)
                     : NSNull(),

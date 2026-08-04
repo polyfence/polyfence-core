@@ -107,9 +107,10 @@ class PolyfenceDebugCollector {
             synchronized(metricsLock) {
                 updates = locationUpdateCount
                 detections = zoneDetectionCount
-                // Absent until a crossing has been detected. Zero is the best
-                // possible latency, so reporting it for "no samples" makes an
-                // unmeasured device look like a perfect one.
+                // Absent until a crossing has been *timed*: a synthesised
+                // one raises totalZoneDetections without contributing a
+                // sample. Zero is the best possible latency, so reporting it
+                // for "no samples" makes an unmeasured device look perfect.
                 timed = timedDetectionCount
                 averageLatency = if (timedDetectionCount > 0) {
                     totalDetectionLatencyMs / timedDetectionCount
