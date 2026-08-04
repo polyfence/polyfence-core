@@ -1958,6 +1958,16 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
+
+        // The subscription is held by the fused client, not by this Service,
+        // so destroying the Service does not end it. Every other resource
+        // acquired here is released below; this was the one that outlived it,
+        // and a process that survives the Service would go on sampling GPS
+        // with nothing left to receive it.
+        locationCallback?.let { callback ->
+            fusedLocationClient?.removeLocationUpdates(callback)
+        }
+
         errorRecovery.stopMonitoring()
         healthCheckHandler?.removeCallbacksAndMessages(null)
         // Stop activity recognition and unregister receiver
@@ -2684,16 +2694,22 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             .setMinUpdateDistanceMeters(distanceFilter)
             .build()
 
-        // Stop current location updates
-        locationCallback?.let { callback ->
-            fusedLocationClient?.removeLocationUpdates(callback)
+        // The same instance must be cancelled that was registered — the fused
+        // client matches by identity, so a callback the tracker cannot name
+        // can never be removed and would outlive stopTracking().
+        val callback = locationCallback ?: run {
+            Log.e(TAG, "LocationCallback is null - cannot update location request")
+            return
         }
+
+        // Stop current location updates
+        fusedLocationClient?.removeLocationUpdates(callback)
 
         // Start new location updates with new configuration
         try {
             fusedLocationClient?.requestLocationUpdates(
                 locationRequest,
-                locationCallback ?: createLocationCallback(),
+                callback,
                 Looper.getMainLooper()
             )
 
@@ -3112,61 +3128,6 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         // fixes keep arriving. Both location callbacks funnel through here.
         if (geofenceEngine.isValidFix(location)) {
             lastValidFixTime = currentTime
-        }
-    }
-
-    /**
-     * Create location callback for smart GPS configuration
-     */
-    private fun createLocationCallback(): LocationCallback {
-        return object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult) {
-                locationResult.lastLocation?.let { location ->
-                    // Guard clause: only process if tracking is active
-                    if (!isRunning) {
-                        return
-                    }
-
-                    // Update movement state for smart GPS
-                    updateMovementState(location)
-
-                    // Same recording as the primary callback, telemetry
-                    // included. A fix that arrives here and is not counted
-                    // makes the session counters under-report with nothing to
-                    // indicate it, and leaves telemetry disagreeing with them.
-                    telemetryAggregator.recordGpsUpdate(
-                        intervalMs = currentGpsInterval,
-                        accuracyM = location.accuracy
-                    )
-                    PolyfenceDebugCollector.recordLocationUpdate(
-                        if (location.hasAccuracy()) location.accuracy.toDouble() else -1.0
-                    )
-
-                    // Update health tracking
-                    lastLocationTime = System.currentTimeMillis()
-                    consecutiveGpsFailures = 0
-
-                    // Process location with geofence engine
-                    geofenceEngine.checkLocation(location)
-
-                    // Send location update to delegate
-                    sendLocationToDelegate(location)
-
-                    // Emit status periodically
-                    emitRuntimeStatus()
-                }
-            }
-
-            override fun onLocationAvailability(locationAvailability: LocationAvailability) {
-                if (!locationAvailability.isLocationAvailable) {
-                    Log.w(TAG, "Location availability lost")
-                    consecutiveGpsFailures++
-
-                    if (consecutiveGpsFailures >= 3) {
-                        errorRecovery.handleGpsFailure()
-                    }
-                }
-            }
         }
     }
 
