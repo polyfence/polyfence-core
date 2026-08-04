@@ -55,8 +55,9 @@ class PolyfenceDebugCollectorMetricsTests: XCTestCase {
         return performance()["totalZoneDetections"] as! Int
     }
 
+    /// Absent until a crossing has been detected, so no samples reads as 0.
     private func averageLatency() -> Double {
-        return performance()["averageDetectionLatency"] as! Double
+        return performance()["averageDetectionLatency"] as? Double ?? 0.0
     }
 
     private func circleZone(

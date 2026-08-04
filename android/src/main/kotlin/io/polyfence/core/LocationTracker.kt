@@ -3122,9 +3122,14 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                     // Update movement state for smart GPS
                     updateMovementState(location)
 
-                    // Same recording as the primary callback. A fix that
-                    // arrives here and is not counted makes the session
-                    // counters under-report with nothing to indicate it.
+                    // Same recording as the primary callback, telemetry
+                    // included. A fix that arrives here and is not counted
+                    // makes the session counters under-report with nothing to
+                    // indicate it, and leaves telemetry disagreeing with them.
+                    telemetryAggregator.recordGpsUpdate(
+                        intervalMs = currentGpsInterval,
+                        accuracyM = location.accuracy
+                    )
                     PolyfenceDebugCollector.recordLocationUpdate(
                         if (location.hasAccuracy()) location.accuracy.toDouble() else -1.0
                     )

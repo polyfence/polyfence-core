@@ -86,7 +86,9 @@ class PolyfenceDebugCollectorMetricsTest {
 
     private fun detectionCount(): Int = performance()["totalZoneDetections"] as Int
 
-    private fun averageLatency(): Double = performance()["averageDetectionLatency"] as Double
+    /** Absent until a crossing has been detected, so no samples reads as 0.0. */
+    private fun averageLatency(): Double =
+        (performance()["averageDetectionLatency"] as? Double) ?: 0.0
 
     private fun restartCount(): Int = performance()["restartCount"] as Int
 
