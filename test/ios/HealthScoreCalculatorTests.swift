@@ -91,8 +91,11 @@ final class HealthScoreCalculatorTests: XCTestCase {
     func testLatencyIsReadUnderTheNameTheCollectorPublishes() {
         let performance = PolyfenceDebugCollector.shared
             .collectDebugInfo()["performance"] as? [String: Any]
-        XCTAssertNotNil(
-            performance?["averageDetectionLatency"],
+        // Presence, not value: the entry is null until a crossing has been
+        // detected, and null is exactly what tells the score to leave the
+        // dimension out rather than award it full marks.
+        XCTAssertTrue(
+            performance?.keys.contains("averageDetectionLatency") == true,
             "the tracker reads this key to score latency; a rename here scores a dimension nobody measured"
         )
     }

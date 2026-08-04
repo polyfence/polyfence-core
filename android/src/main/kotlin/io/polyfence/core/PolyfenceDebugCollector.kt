@@ -94,21 +94,24 @@ class PolyfenceDebugCollector {
             )
         }
 
-        private fun collectPerformanceMetrics(): Map<String, Any> {
+        private fun collectPerformanceMetrics(): Map<String, Any?> {
             val runtime = Runtime.getRuntime()
             val usedMemory = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024
 
             val updates: Int
             val detections: Int
-            val averageLatency: Double
+            val averageLatency: Double?
             val restarts: Int
             synchronized(metricsLock) {
                 updates = locationUpdateCount
                 detections = zoneDetectionCount
+                // Absent until a crossing has been detected. Zero is the best
+                // possible latency, so reporting it for "no samples" makes an
+                // unmeasured device look like a perfect one.
                 averageLatency = if (zoneDetectionCount > 0) {
                     totalDetectionLatencyMs / zoneDetectionCount
                 } else {
-                    0.0
+                    null
                 }
                 restarts = restartCount
             }

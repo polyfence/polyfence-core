@@ -1525,13 +1525,10 @@ class LocationTracker : Service() {
             val telemetry = telemetryAggregator.getSessionTelemetry()
 
             val gpsGoodRatio = (telemetry["gps_ok_ratio"] as? Number)?.toDouble() ?: 0.0
-            // Absent until a crossing has actually been detected. Passing 0
-            // for "no samples yet" would score the best possible latency band
-            // for a dimension nobody measured.
-            val detectionCount = (perfMetrics?.get("totalZoneDetections") as? Number)?.toInt() ?: 0
-            val avgLatency: Double? = if (detectionCount > 0) {
-                (perfMetrics?.get(PolyfenceDebugCollector.Key.AVERAGE_DETECTION_LATENCY) as? Number)?.toDouble()
-            } else null
+            // Null when the collector had nothing to average, which the
+            // score treats as an unmeasured dimension rather than a perfect
+            // one.
+            val avgLatency = (perfMetrics?.get(PolyfenceDebugCollector.Key.AVERAGE_DETECTION_LATENCY) as? Number)?.toDouble()
             val errorCount = (debugInfo[PolyfenceDebugCollector.Key.RECENT_ERRORS] as? List<*>)?.size ?: 0
             val falseRatio = (telemetry["false_event_ratio"] as? Number)?.toDouble() ?: 0.0
             val zoneCount = geofenceEngine.getZoneCount()

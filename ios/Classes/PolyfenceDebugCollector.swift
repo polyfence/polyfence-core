@@ -109,9 +109,12 @@ public class PolyfenceDebugCollector {
                 "uptime": Int(uptime),
                 "totalLocationUpdates": self.performanceMetrics["locationUpdateCount"] as? Int ?? 0,
                 "totalZoneDetections": detectionCount,
+                // Absent until a crossing has been detected. Zero is the
+                // best possible latency, so reporting it for "no samples"
+                // makes an unmeasured device look like a perfect one.
                 Key.averageDetectionLatency: detectionCount > 0
                     ? totalLatency / Double(detectionCount)
-                    : 0.0,
+                    : NSNull(),
                 // Process resident size. Android's counterpart reports Java
                 // heap only, so the two are not comparable across platforms.
                 "memoryUsageMB": self.getMemoryUsage(),

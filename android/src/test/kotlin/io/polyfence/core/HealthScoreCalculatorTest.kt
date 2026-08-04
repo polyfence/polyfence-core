@@ -117,9 +117,12 @@ class HealthScoreCalculatorTest {
         worker.join()
 
         val performance = info!!["performance"] as Map<*, *>
-        assertNotNull(
+        // Presence, not value: the entry is null until a crossing has been
+        // detected, and null is exactly what tells the score to leave the
+        // dimension out rather than award it full marks.
+        assertTrue(
             "the tracker reads this key to score latency; a rename here scores a dimension nobody measured",
-            performance["averageDetectionLatency"]
+            performance.containsKey("averageDetectionLatency")
         )
     }
 }

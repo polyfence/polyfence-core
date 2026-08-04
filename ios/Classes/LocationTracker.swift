@@ -74,9 +74,6 @@ public class LocationTracker: NSObject {
     // Throttle delegate callbacks when stationary
     private var lastDelegateCallbackTime: TimeInterval = 0
     private let stationaryDelegateCallbackInterval: TimeInterval = 30.0  // 30s when stationary
-    // CPU usage tracking state
-    private var prevCpuTotal: UInt32 = 0
-    private var prevCpuIdle: UInt32 = 0
 
     // Notification properties
     private var notificationCenter: UNUserNotificationCenter?
@@ -625,13 +622,9 @@ public class LocationTracker: NSObject {
 
         let gpsGoodRatio = (telemetry["gps_ok_ratio"] as? NSNumber)?.doubleValue ?? 0.0
         let perfMetrics = debugInfo[PolyfenceDebugCollector.Key.performance] as? [String: Any]
-        // Absent until a crossing has actually been detected. Passing 0 for
-        // "no samples yet" would score the best possible latency band for a
-        // dimension nobody measured.
-        let detectionCount = (perfMetrics?["totalZoneDetections"] as? NSNumber)?.intValue ?? 0
-        let avgLatency: Double? = detectionCount > 0
-            ? (perfMetrics?[PolyfenceDebugCollector.Key.averageDetectionLatency] as? NSNumber)?.doubleValue
-            : nil
+        // Nil when the collector had nothing to average, which the score
+        // treats as an unmeasured dimension rather than a perfect one.
+        let avgLatency = (perfMetrics?[PolyfenceDebugCollector.Key.averageDetectionLatency] as? NSNumber)?.doubleValue
         let errorCount = (debugInfo[PolyfenceDebugCollector.Key.recentErrors] as? [[String: Any]])?.count ?? 0
         let falseRatio = (telemetry["false_event_ratio"] as? NSNumber)?.doubleValue ?? 0.0
         let zoneCount = geofenceEngine.getZoneCount()
