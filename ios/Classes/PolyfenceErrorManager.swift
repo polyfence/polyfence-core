@@ -44,7 +44,7 @@ public class PolyfenceErrorManager {
         //
         // Same errorData is passed to both paths so correlationId +
         // timestamp match between the live onError delivery and the
-        // persisted entry. BUG-016.
+        // persisted entry.
         PolyfenceDebugCollector.shared.addErrorToHistory(errorData)
 
         errorCallback?(errorData)

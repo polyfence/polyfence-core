@@ -223,7 +223,7 @@ class PolyfenceDebugCollector {
          * PolyfenceErrorManager uses this to preserve correlationId and
          * share the exact timestamp between the real-time callback and
          * the persisted entry — matching iOS's addErrorToHistory
-         * semantics. BUG-016 parity nit.
+         * semantics.
          */
         fun recordError(errorEntry: Map<String, Any>) {
             errorHistory.addLast(errorEntry)

@@ -313,7 +313,7 @@ class GeofenceEngineTest {
     fun `self-intersecting polygon is accepted with warning`() {
         // Bowtie shape: vertices create self-intersecting edges.
         //
-        // Pre-1.0.6 behaviour (iOS) / pre-BUG-005 fix (Android): throw and
+        // Earlier behaviour on both platforms: throw and
         // refuse the zone. Post-fix: log a warning and accept. Real-world
         // geocoded boundaries trip the self-intersection test for benign
         // reasons (closure seams, duplicate vertices) far more often than
@@ -338,9 +338,9 @@ class GeofenceEngineTest {
     }
 
     @Test
-    fun `closed polygon with explicit closing vertex is accepted (BUG-005)`() {
+    fun `closed polygon with explicit closing vertex is accepted`() {
         // GeoJSON convention: the first coordinate is repeated at the end to
-        // close the ring. Real-world example from QA's BUG-005 RCA — Qatar
+        // close the ring. Real-world example — Qatar
         // boundary imported from the geo-boundaries-world-110m dataset. The
         // polygon is geometrically valid (a convex country outline) but the
         // pre-fix isPolygonSelfIntersecting() flagged it because edges 0 and
