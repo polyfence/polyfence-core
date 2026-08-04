@@ -1346,6 +1346,14 @@ class LocationTracker : Service() {
                         if (location != null && firstLocationAfterRestart && isRunning) {
                             Log.d(TAG, "Seeding initial location from lastLocation cache")
                             lastLocationTime = System.currentTimeMillis()
+                            // A seed is a real fix: it reaches the consumer and
+                            // drives a reconcile that can raise crossings. Not
+                            // counting it leaves the counters short on exactly
+                            // the stationary cold start where it may be the
+                            // only fix for some time.
+                            PolyfenceDebugCollector.recordLocationUpdate(
+                                if (location.hasAccuracy()) location.accuracy.toDouble() else -1.0
+                            )
                             sendLocationToDelegate(location)
                             firstLocationAfterRestart = false
                             geofenceEngine.reconcileZoneStates(location)
@@ -1740,6 +1748,14 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     // Boundary crossings only: dwell and the signal-lost/restored pair are
     // state changes, not crossings, and counting them would inflate a figure
     // consumers read as "how many times did the user cross a zone".
+    //
+    // Counts what this engine detected in this process. A crossing captured
+    // by an OS wake fence while the process was dead is delivered on drain
+    // without passing through here, so it reaches the consumer uncounted —
+    // counting it at capture would attribute it to whichever process the
+    // broadcast woke, and counting it at drain risks doubling with the
+    // reconcile that follows. Both need deciding together rather than
+    // patching one side.
     //
     // A detection time of zero marks a crossing the engine synthesised
     // outside a location evaluation — a degraded-GPS exit. The consumer

@@ -139,7 +139,6 @@ class PolyfenceDebugCollector {
 
         private fun collectBatteryMetrics(context: Context): Map<String, Any> {
             val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
-            val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
 
             return mapOf(
                 "isCharging" to isCharging(batteryManager),
