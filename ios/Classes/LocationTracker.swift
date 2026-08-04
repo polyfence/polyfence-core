@@ -625,10 +625,13 @@ public class LocationTracker: NSObject {
 
         let gpsGoodRatio = (telemetry["gps_ok_ratio"] as? NSNumber)?.doubleValue ?? 0.0
         let perfMetrics = debugInfo[PolyfenceDebugCollector.Key.performance] as? [String: Any]
-        // Key must match what the collector emits. A miss here is silent: the
-        // lookup yields 0, and 0 is the best possible latency, so a broken
-        // name awards full marks for a dimension nobody measured.
-        let avgLatency = (perfMetrics?[PolyfenceDebugCollector.Key.averageDetectionLatency] as? NSNumber)?.doubleValue ?? 0.0
+        // Absent until a crossing has actually been detected. Passing 0 for
+        // "no samples yet" would score the best possible latency band for a
+        // dimension nobody measured.
+        let detectionCount = (perfMetrics?["totalZoneDetections"] as? NSNumber)?.intValue ?? 0
+        let avgLatency: Double? = detectionCount > 0
+            ? (perfMetrics?[PolyfenceDebugCollector.Key.averageDetectionLatency] as? NSNumber)?.doubleValue
+            : nil
         let errorCount = (debugInfo[PolyfenceDebugCollector.Key.recentErrors] as? [[String: Any]])?.count ?? 0
         let falseRatio = (telemetry["false_event_ratio"] as? NSNumber)?.doubleValue ?? 0.0
         let zoneCount = geofenceEngine.getZoneCount()

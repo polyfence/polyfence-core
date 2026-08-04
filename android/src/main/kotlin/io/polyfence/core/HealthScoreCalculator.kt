@@ -27,7 +27,9 @@ object HealthScoreCalculator {
      * the device were performing perfectly on it and inflates the result.
      *
      * @param gpsGoodRatio Ratio of GPS readings with accuracy <= 100m (0.0–1.0)
-     * @param avgDetectionLatencyMs Average detection latency in milliseconds
+     * @param avgDetectionLatencyMs Average detection latency in milliseconds,
+     *   or null when no crossing has been detected yet and there is therefore
+     *   nothing to average
      * @param errorCountRecent Number of errors in recent window
      * @param falseEventRatio Ratio of false events to total events (0.0–1.0)
      * @param isTracking Whether tracking is currently active
@@ -35,7 +37,7 @@ object HealthScoreCalculator {
      */
     fun calculate(
         gpsGoodRatio: Double,
-        avgDetectionLatencyMs: Double,
+        avgDetectionLatencyMs: Double?,
         errorCountRecent: Int,
         falseEventRatio: Double,
         isTracking: Boolean,
@@ -45,8 +47,9 @@ object HealthScoreCalculator {
             return HealthScore(score = 0, topIssue = "Tracking is not active")
         }
 
-        // Each dimension scores 0-20; the four are rescaled to 0-100 at the
-        // end so the published bands keep their meaning.
+        // Each dimension scores 0-20; whichever could be measured are
+        // rescaled to 0-100 at the end so the published bands keep their
+        // meaning however many that was.
         val penalties = mutableListOf<Pair<Int, String>>()
 
         // GPS accuracy (0-20 points)
@@ -61,16 +64,22 @@ object HealthScoreCalculator {
             penalties.add(Pair(20 - gpsScore, "GPS accuracy is poor (${(gpsGoodRatio * 100).toInt()}% good readings)"))
         }
 
-        // Detection latency (0-20 points)
-        val latencyScore = when {
-            avgDetectionLatencyMs <= 100.0 -> 20
-            avgDetectionLatencyMs <= 500.0 -> 15
-            avgDetectionLatencyMs <= 1000.0 -> 10
-            avgDetectionLatencyMs <= 3000.0 -> 5
-            else -> 0
-        }
-        if (latencyScore < 15) {
-            penalties.add(Pair(20 - latencyScore, "Detection latency is high (${avgDetectionLatencyMs.toInt()}ms)"))
+        // Detection latency (0-20 points). Scored only once a crossing has
+        // been detected: with no samples there is no latency to judge, and
+        // scoring the absence would award the best possible band for a
+        // dimension nobody measured.
+        val latencyScore: Int? = avgDetectionLatencyMs?.let { latency ->
+            val scored = when {
+                latency <= 100.0 -> 20
+                latency <= 500.0 -> 15
+                latency <= 1000.0 -> 10
+                latency <= 3000.0 -> 5
+                else -> 0
+            }
+            if (scored < 15) {
+                penalties.add(Pair(20 - scored, "Detection latency is high (${latency.toInt()}ms)"))
+            }
+            scored
         }
 
         // Error rate (0-20 points)
@@ -97,8 +106,13 @@ object HealthScoreCalculator {
             penalties.add(Pair(20 - falseEventScore, "False event rate is high (${(falseEventRatio * 100).toInt()}%)"))
         }
 
-        val dimensionTotal = gpsScore + latencyScore + errorScore + falseEventScore
-        val totalScore = Math.round(dimensionTotal / 80.0 * 100.0).toInt().coerceIn(0, 100)
+        // Rescale over the dimensions actually scored, so an unmeasurable
+        // one lowers neither the score nor its ceiling.
+        val measured = listOfNotNull(gpsScore, latencyScore, errorScore, falseEventScore)
+        val dimensionTotal = measured.sum()
+        val available = measured.size * 20
+        val totalScore = if (available == 0) 0
+            else Math.round(dimensionTotal / available.toDouble() * 100.0).toInt().coerceIn(0, 100)
 
         // Top issue is the one with the highest penalty
         val topIssue = if (totalScore >= 90) null

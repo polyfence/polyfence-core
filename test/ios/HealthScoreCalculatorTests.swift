@@ -17,7 +17,7 @@ final class HealthScoreCalculatorTests: XCTestCase {
 
     private func score(
         gps: Double = 1.0,
-        latencyMs: Double = 0.0,
+        latencyMs: Double? = 0.0,
         errors: Int = 0,
         falseEvents: Double = 0.0
     ) -> HealthScore {
@@ -50,6 +50,22 @@ final class HealthScoreCalculatorTests: XCTestCase {
         XCTAssertEqual(score(latencyMs: 9_000).score, 75)
         XCTAssertEqual(score(errors: 50).score, 75)
         XCTAssertEqual(score(falseEvents: 0.9).score, 75)
+    }
+
+    func testAnUnmeasuredDimensionIsExcludedRatherThanScoredPerfect() {
+        // No crossing detected yet: latency has no samples. Excluding it
+        // leaves three dimensions, so a device perfect on those still reads
+        // 100 — but a device *bad* on them cannot hide behind a free 25.
+        XCTAssertEqual(score(latencyMs: nil).score, 100)
+        XCTAssertEqual(score(gps: 0.0, latencyMs: nil).score, 67)
+    }
+
+    func testTheRescaleRoundsHalvesUp() {
+        // Dimension totals that land on .5 once rescaled. Pinned because the
+        // two platforms round through different standard-library calls and
+        // must agree.
+        XCTAssertEqual(score(gps: 0.5, latencyMs: 9_000, errors: 50, falseEvents: 0.9).score, 13)
+        XCTAssertEqual(score(gps: 1.0, latencyMs: 400, errors: 4, falseEvents: 0.3).score, 63)
     }
 
     func testNotTrackingScoresZeroRegardlessOfEverythingElse() {

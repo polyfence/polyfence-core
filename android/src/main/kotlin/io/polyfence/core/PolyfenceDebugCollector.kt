@@ -79,7 +79,7 @@ class PolyfenceDebugCollector {
                 "isBackgroundLocationEnabled" to hasBackgroundLocationPermission(context),
                 "isBatteryOptimizationDisabled" to powerManager.isIgnoringBatteryOptimizations(context.packageName),
                 "isGpsEnabled" to isGpsEnabled(locationManager),
-                "isWakeLockAcquired" to isWakeLockAcquired(),
+                "isWakeLockAcquired" to LocationTracker.currentWakeLockHeld(),
                 "lastKnownAccuracy" to accuracy,
                 "lastLocationUpdate" to lastUpdate,
                 "platformVersion" to Build.VERSION.RELEASE,
@@ -272,12 +272,6 @@ class PolyfenceDebugCollector {
                    locationManager.isProviderEnabled(AndroidLocationManager.NETWORK_PROVIDER)
         }
 
-        private fun isWakeLockAcquired(): Boolean {
-            // This would check if our wake lock is currently held
-            // For now, return false as we don't have direct access to the wake lock instance
-            return false
-        }
-
         /**
          * Set plugin version (called during initialization)
          */
@@ -289,11 +283,6 @@ class PolyfenceDebugCollector {
             return pluginVersion ?: "unknown"
         }
 
-        /**
-         * Measures CPU usage by reading /proc/stat before and after a 360ms interval.
-         * Must be called from a background thread — blocks for ~360ms to measure CPU usage.
-         * Do not call from the main thread.
-         */
         private fun isCharging(batteryManager: android.os.BatteryManager): Boolean {
             return batteryManager.isCharging
         }

@@ -26,7 +26,7 @@ class HealthScoreCalculatorTest {
 
     private fun score(
         gps: Double = 1.0,
-        latencyMs: Double = 0.0,
+        latencyMs: Double? = 0.0,
         errors: Int = 0,
         falseEvents: Double = 0.0
     ) = HealthScoreCalculator.calculate(
@@ -62,6 +62,27 @@ class HealthScoreCalculatorTest {
         assertEquals(75, score(latencyMs = 9_000.0).score)
         assertEquals(75, score(errors = 50).score)
         assertEquals(75, score(falseEvents = 0.9).score)
+    }
+
+    /**
+     * No crossing detected yet: latency has no samples. Excluding it leaves
+     * three dimensions, so a device perfect on those still reads 100 — but a
+     * device bad on them cannot hide behind a free 25.
+     */
+    @Test
+    fun `an unmeasured dimension is excluded rather than scored perfect`() {
+        assertEquals(100, score(latencyMs = null).score)
+        assertEquals(67, score(gps = 0.0, latencyMs = null).score)
+    }
+
+    /**
+     * Dimension totals that land on .5 once rescaled. Pinned because the two
+     * platforms round through different standard-library calls and must agree.
+     */
+    @Test
+    fun `the rescale rounds halves up`() {
+        assertEquals(13, score(gps = 0.5, latencyMs = 9_000.0, errors = 50, falseEvents = 0.9).score)
+        assertEquals(63, score(gps = 1.0, latencyMs = 400.0, errors = 4, falseEvents = 0.3).score)
     }
 
     @Test

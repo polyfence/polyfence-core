@@ -208,6 +208,19 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Whether a wake lock is held right now, or null when no service is
+         * running and therefore nothing could be holding one.
+         *
+         * Reads the lock itself rather than the bookkeeping flag beside it:
+         * the OS releases a lock on its own timeout, which leaves the flag
+         * set and the lock gone.
+         */
+        internal fun currentWakeLockHeld(): Boolean? {
+            val instance = currentInstance ?: return null
+            return instance.wakeLock?.isHeld == true
+        }
+
+        /**
          * Get current smart GPS configuration
          */
         fun getCurrentSmartConfiguration(): SmartGpsConfig {
@@ -1460,14 +1473,9 @@ class LocationTracker : Service() {
                 healthScoreTickCount++
                 if (healthScoreTickCount >= healthScoreEmitEveryNTicks) {
                     healthScoreTickCount = 0
-                    // emitHealthScore -> collectDebugInfo -> getCpuUsage reads
-                    // /proc/stat with a 360ms sleep and require()s it isn't
-                    // running on the main looper. This runnable IS scheduled
-                    // on Looper.getMainLooper() (see combinedHealthCheckHandler
-                    // init below), so calling emitHealthScore inline throws
-                    // IllegalArgumentException — the outer try/catch swallows
-                    // it and onHealthScore consumers never receive an event.
-                    // Spawn a background thread so the CPU read can block
+                    // Collection touches counters written from the location
+                    // and geofence callback threads, so it is taken off the
+                    // main looper rather than run inline here.
                     // without violating the main-looper guard. Once per 5
                     // minutes; lifecycle is trivial — no shared executor
                     // needed.
@@ -1517,10 +1525,13 @@ class LocationTracker : Service() {
             val telemetry = telemetryAggregator.getSessionTelemetry()
 
             val gpsGoodRatio = (telemetry["gps_ok_ratio"] as? Number)?.toDouble() ?: 0.0
-            // Key must match what the collector emits. A miss here is silent:
-            // the lookup yields 0, and 0 is the best possible latency, so a
-            // broken name awards full marks for a dimension nobody measured.
-            val avgLatency = (perfMetrics?.get(PolyfenceDebugCollector.Key.AVERAGE_DETECTION_LATENCY) as? Number)?.toDouble() ?: 0.0
+            // Absent until a crossing has actually been detected. Passing 0
+            // for "no samples yet" would score the best possible latency band
+            // for a dimension nobody measured.
+            val detectionCount = (perfMetrics?.get("totalZoneDetections") as? Number)?.toInt() ?: 0
+            val avgLatency: Double? = if (detectionCount > 0) {
+                (perfMetrics?.get(PolyfenceDebugCollector.Key.AVERAGE_DETECTION_LATENCY) as? Number)?.toDouble()
+            } else null
             val errorCount = (debugInfo[PolyfenceDebugCollector.Key.RECENT_ERRORS] as? List<*>)?.size ?: 0
             val falseRatio = (telemetry["false_event_ratio"] as? Number)?.toDouble() ?: 0.0
             val zoneCount = geofenceEngine.getZoneCount()
@@ -3113,6 +3124,13 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
 
                     // Update movement state for smart GPS
                     updateMovementState(location)
+
+                    // Same recording as the primary callback. A fix that
+                    // arrives here and is not counted makes the session
+                    // counters under-report with nothing to indicate it.
+                    PolyfenceDebugCollector.recordLocationUpdate(
+                        if (location.hasAccuracy()) location.accuracy.toDouble() else -1.0
+                    )
 
                     // Update health tracking
                     lastLocationTime = System.currentTimeMillis()

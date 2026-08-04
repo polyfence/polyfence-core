@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 
 /**
@@ -18,9 +19,9 @@ import org.robolectric.RobolectricTestRunner
  * addition all fail here first.
  *
  * A field belongs in this payload only if it carries a real measurement.
- * The three fields iOS reports as null are present here with real values,
- * because Android can measure all three — that asymmetry is deliberate and
- * is what the iOS counterpart of this test pins from the other side.
+ * Fields iOS reports as null are present here with real values wherever
+ * Android can measure them — that asymmetry is deliberate, and the iOS
+ * counterpart of this test pins it from the other side.
  */
 @RunWith(RobolectricTestRunner::class)
 class PolyfenceDebugCollectorShapeTest {
@@ -106,17 +107,37 @@ class PolyfenceDebugCollectorShapeTest {
     }
 
     /**
-     * The counterpart of the iOS assertion that these three are null. Android
-     * can measure all three, so a null here would mean the measurement broke
-     * rather than that the platform lacks the concept.
+     * The counterpart of the iOS assertion that these are null. Android can
+     * measure them, so a null here would mean the measurement broke rather
+     * than that the platform lacks the concept.
      */
     @Test
     fun `fields with no ios equivalent carry real values on android`() {
         val status = debugInfo()["systemStatus"] as Map<*, *>
         assertTrue(status["isBatteryOptimizationDisabled"] is Boolean)
-        assertTrue(status["isWakeLockAcquired"] is Boolean)
 
         val performance = debugInfo()["performance"] as Map<*, *>
         assertTrue(performance["restartCount"] is Int)
+    }
+
+    /**
+     * Wake-lock state is a property of the running service. With no service
+     * there is nothing that could be holding a lock, and `false` would be a
+     * claim about a lock that does not exist — so the honest answer is
+     * nothing at all. Once the service is up the answer is a real reading
+     * taken from the lock itself.
+     */
+    @Test
+    fun `wake lock state is absent without a service and real with one`() {
+        val withoutService = debugInfo()["systemStatus"] as Map<*, *>
+        assertNull(withoutService["isWakeLockAcquired"])
+
+        val controller = Robolectric.buildService(LocationTracker::class.java).create()
+        try {
+            val withService = debugInfo()["systemStatus"] as Map<*, *>
+            assertTrue(withService["isWakeLockAcquired"] is Boolean)
+        } finally {
+            controller.destroy()
+        }
     }
 }
