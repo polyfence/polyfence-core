@@ -57,6 +57,7 @@ final class PolyfenceDebugCollectorShapeTests: XCTestCase {
             "uptime",
             "totalLocationUpdates",
             "totalZoneDetections",
+            "timedZoneDetections",
             "averageDetectionLatency",
             "memoryUsageMB",
             "restartCount",

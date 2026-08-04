@@ -83,7 +83,11 @@ public class PolyfenceDebugCollector {
                 "isGpsEnabled": CLLocationManager.locationServicesEnabled(),
                 "isWakeLockAcquired": NSNull(),
                 "lastKnownAccuracy": self.performanceMetrics["lastAccuracy"] as? Double ?? -1.0,
-                "lastLocationUpdate": (self.performanceMetrics["lastLocationUpdate"] as? Date ?? Date()).timeIntervalSince1970 * 1000,
+                // Zero until a fix has arrived, matching Android. Falling back
+                // to the current time would report a location update at the
+                // moment of asking, for a session that has had none.
+                "lastLocationUpdate": (self.performanceMetrics["lastLocationUpdate"] as? Date)
+                    .map { $0.timeIntervalSince1970 * 1000 } ?? 0,
                 "platformVersion": UIDevice.current.systemVersion,
                 "pluginVersion": self.pluginVersion ?? "unknown"
             ]
@@ -103,17 +107,23 @@ public class PolyfenceDebugCollector {
         return syncQueue.sync {
             let uptime = Date().timeIntervalSince(self.sessionStartTime) * 1000
             let detectionCount = self.performanceMetrics["zoneDetectionCount"] as? Int ?? 0
+            let timedCount = self.performanceMetrics["timedDetectionCount"] as? Int ?? 0
             let totalLatency = self.performanceMetrics["totalDetectionLatency"] as? Double ?? 0.0
 
             return [
                 "uptime": Int(uptime),
                 "totalLocationUpdates": self.performanceMetrics["locationUpdateCount"] as? Int ?? 0,
                 "totalZoneDetections": detectionCount,
+                // How many of those were timed, and so how many samples the
+                // mean below covers. Without it a consumer would assume the
+                // mean spans every crossing, which it cannot when the engine
+                // synthesises one outside a timed evaluation.
+                "timedZoneDetections": timedCount,
                 // Absent until a crossing has been detected. Zero is the
                 // best possible latency, so reporting it for "no samples"
                 // makes an unmeasured device look like a perfect one.
-                Key.averageDetectionLatency: detectionCount > 0
-                    ? totalLatency / Double(detectionCount)
+                Key.averageDetectionLatency: timedCount > 0
+                    ? totalLatency / Double(timedCount)
                     : NSNull(),
                 // Process resident size. Android's counterpart reports Java
                 // heap only, so the two are not comparable across platforms.
@@ -197,17 +207,28 @@ public class PolyfenceDebugCollector {
     }
 
     /**
-     * Record one geofence detection and the time the engine spent producing it.
+     * Record one zone crossing, and the time the engine spent producing it
+     * where that was measured.
+     *
+     * A nil latency means the crossing was real but never timed — the engine
+     * synthesises some outside a location evaluation. Those still count as
+     * crossings, because the consumer received them; they are simply left out
+     * of the mean rather than folded in as zero, which would drag it toward a
+     * speed nothing achieved.
      *
      * Latency is fractional milliseconds: a point-in-zone evaluation routinely
      * completes in well under a millisecond, so the sum is kept and the mean
      * derived at read time rather than rolled per sample.
      */
-    public func recordZoneDetection(latencyMs: Double) {
+    public func recordZoneDetection(latencyMs: Double?) {
         syncQueue.async { [weak self] in
             guard let self = self else { return }
             let count = (self.performanceMetrics["zoneDetectionCount"] as? Int) ?? 0
             self.performanceMetrics["zoneDetectionCount"] = count + 1
+
+            guard let latencyMs = latencyMs else { return }
+            let timed = (self.performanceMetrics["timedDetectionCount"] as? Int) ?? 0
+            self.performanceMetrics["timedDetectionCount"] = timed + 1
 
             let total = (self.performanceMetrics["totalDetectionLatency"] as? Double) ?? 0.0
             self.performanceMetrics["totalDetectionLatency"] = total + latencyMs

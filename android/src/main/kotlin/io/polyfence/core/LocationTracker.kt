@@ -1738,13 +1738,22 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         detectionTimeMs = detectionTimeMs
     )
 
-    // A detection time of zero marks an event the engine synthesised outside a
-    // location evaluation — a degraded-GPS exit, a signal-lost or a
-    // signal-restored. Those were never timed, so folding them in would pull
-    // the mean toward zero and count them as detections the engine never
-    // performed.
-    if (detectionTimeMs > 0) {
-        PolyfenceDebugCollector.recordZoneDetection(detectionTimeMs)
+    // Boundary crossings only: dwell and the signal-lost/restored pair are
+    // state changes, not crossings, and counting them would inflate a figure
+    // consumers read as "how many times did the user cross a zone".
+    //
+    // A detection time of zero marks a crossing the engine synthesised
+    // outside a location evaluation — a degraded-GPS exit. The consumer
+    // receives it like any other, so it counts; it was never timed, so it is
+    // passed as absent rather than as zero, which would drag the mean toward
+    // a speed nothing achieved.
+    if (eventType == "ENTER" || eventType == "EXIT" ||
+        eventType == GeofenceEngine.EVENT_RECOVERY_ENTER ||
+        eventType == GeofenceEngine.EVENT_RECOVERY_EXIT
+    ) {
+        PolyfenceDebugCollector.recordZoneDetection(
+            if (detectionTimeMs > 0) detectionTimeMs else null
+        )
     }
 
     // Send event to delegate with detection metrics, GPS coordinates, and ML context.

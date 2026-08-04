@@ -50,6 +50,7 @@ class PolyfenceDebugCollector {
         private var lastKnownAccuracy = -1.0
         private var locationUpdateCount = 0
         private var zoneDetectionCount = 0
+        private var timedDetectionCount = 0
         private var totalDetectionLatencyMs = 0.0
         private var restartCount = 0
 
@@ -101,6 +102,7 @@ class PolyfenceDebugCollector {
             val updates: Int
             val detections: Int
             val averageLatency: Double?
+            val timed: Int
             val restarts: Int
             synchronized(metricsLock) {
                 updates = locationUpdateCount
@@ -108,8 +110,9 @@ class PolyfenceDebugCollector {
                 // Absent until a crossing has been detected. Zero is the best
                 // possible latency, so reporting it for "no samples" makes an
                 // unmeasured device look like a perfect one.
-                averageLatency = if (zoneDetectionCount > 0) {
-                    totalDetectionLatencyMs / zoneDetectionCount
+                timed = timedDetectionCount
+                averageLatency = if (timedDetectionCount > 0) {
+                    totalDetectionLatencyMs / timedDetectionCount
                 } else {
                     null
                 }
@@ -120,6 +123,11 @@ class PolyfenceDebugCollector {
                 "uptime" to (System.currentTimeMillis() - sessionStartTime),
                 "totalLocationUpdates" to updates,
                 "totalZoneDetections" to detections,
+                // How many of those were timed, and so how many samples the
+                // mean below covers. Without it a consumer would assume the
+                // mean spans every crossing, which it cannot when the engine
+                // synthesises one outside a timed evaluation.
+                "timedZoneDetections" to timed,
                 Key.AVERAGE_DETECTION_LATENCY to averageLatency,
                 // Java heap only. iOS reports whole-process resident size, so
                 // the two are not comparable across platforms.
@@ -177,17 +185,26 @@ class PolyfenceDebugCollector {
         }
 
         /**
-         * Record one geofence detection and the time the engine spent
-         * producing it.
+         * Record one zone crossing, and the time the engine spent producing
+         * it where that was measured.
+         *
+         * A null latency means the crossing was real but never timed — the
+         * engine synthesises some outside a location evaluation. Those still
+         * count as crossings, because the consumer received them; they are
+         * simply left out of the mean rather than folded in as zero, which
+         * would drag it toward a speed nothing achieved.
          *
          * Latency is fractional milliseconds: a point-in-zone evaluation
          * routinely completes in well under a millisecond, so the sum is kept
          * and the mean derived at read time.
          */
-        fun recordZoneDetection(latencyMs: Double) {
+        fun recordZoneDetection(latencyMs: Double?) {
             synchronized(metricsLock) {
                 zoneDetectionCount++
-                totalDetectionLatencyMs += latencyMs
+                if (latencyMs != null) {
+                    timedDetectionCount++
+                    totalDetectionLatencyMs += latencyMs
+                }
             }
         }
 

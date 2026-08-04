@@ -51,6 +51,12 @@ class PolyfenceDebugCollectorMetricsTests: XCTestCase {
         return performance()["totalLocationUpdates"] as! Int
     }
 
+    /// Samples behind the mean — not every crossing is timed, so this is the
+    /// count the average is over.
+    private func timedCount() -> Int {
+        return performance()["timedZoneDetections"] as? Int ?? 0
+    }
+
     private func detectionCount() -> Int {
         return performance()["totalZoneDetections"] as! Int
     }
@@ -141,29 +147,48 @@ class PolyfenceDebugCollectorMetricsTests: XCTestCase {
 
     func testAverageDetectionLatencyIsTheMeanOfEverySampleRecorded() {
         let countBefore = detectionCount()
-        let sumBefore = averageLatency() * Double(countBefore)
+        let timedCountBefore = timedCount()
+        let sumBefore = averageLatency() * Double(timedCountBefore)
 
         PolyfenceDebugCollector.shared.recordZoneDetection(latencyMs: 10.0)
         PolyfenceDebugCollector.shared.recordZoneDetection(latencyMs: 20.0)
 
-        let expected = (sumBefore + 30.0) / Double(countBefore + 2)
+        let expected = (sumBefore + 30.0) / Double(timedCountBefore + 2)
         XCTAssertEqual(averageLatency(), expected, accuracy: 0.0001)
+    }
+
+    /// A degraded-GPS exit is a crossing the consumer receives, but the
+    /// engine synthesises it outside a timed evaluation. It must still be
+    /// counted — under-reporting real crossings is worse than a thinner
+    /// latency sample — while staying out of the mean, which would otherwise
+    /// be dragged toward a speed nothing achieved.
+    func testAnUntimedCrossingCountsButDoesNotEnterTheAverage() {
+        PolyfenceDebugCollector.shared.recordZoneDetection(latencyMs: 10.0)
+        let countBefore = detectionCount()
+        let averageBefore = averageLatency()
+
+        PolyfenceDebugCollector.shared.recordZoneDetection(latencyMs: nil)
+
+        XCTAssertEqual(detectionCount(), countBefore + 1)
+        XCTAssertEqual(averageLatency(), averageBefore, accuracy: 0.0001)
     }
 
     func testSubMillisecondLatencyContributesToTheAverage() {
         let countBefore = detectionCount()
-        let sumBefore = averageLatency() * Double(countBefore)
+        let timedCountBefore = timedCount()
+        let sumBefore = averageLatency() * Double(timedCountBefore)
 
         PolyfenceDebugCollector.shared.recordZoneDetection(latencyMs: 0.4)
         PolyfenceDebugCollector.shared.recordZoneDetection(latencyMs: 0.4)
 
-        let sumAfter = averageLatency() * Double(detectionCount())
+        let sumAfter = averageLatency() * Double(timedCount())
         XCTAssertEqual(sumAfter - sumBefore, 0.8, accuracy: 0.0001)
     }
 
     func testAZoneCrossingReachesTheCollectorThroughTheTracker() {
         let countBefore = detectionCount()
-        let sumBefore = averageLatency() * Double(countBefore)
+        let timedCountBefore = timedCount()
+        let sumBefore = averageLatency() * Double(timedCountBefore)
 
         let crossed = expectation(description: "geofence event delivered")
         tracker.setGeofenceCallback { _ in crossed.fulfill() }
@@ -186,7 +211,7 @@ class PolyfenceDebugCollectorMetricsTests: XCTestCase {
         tracker.stopTracking()
 
         XCTAssertGreaterThan(detectionCount(), countBefore)
-        let sumAfter = averageLatency() * Double(detectionCount())
+        let sumAfter = averageLatency() * Double(timedCount())
         XCTAssertGreaterThan(sumAfter, sumBefore, "the crossing must contribute a measured latency")
     }
 

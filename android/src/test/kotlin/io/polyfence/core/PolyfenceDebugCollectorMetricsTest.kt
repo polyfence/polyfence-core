@@ -86,6 +86,9 @@ class PolyfenceDebugCollectorMetricsTest {
 
     private fun detectionCount(): Int = performance()["totalZoneDetections"] as Int
 
+    /** Samples behind the mean — not every crossing is timed. */
+    private fun timedCount(): Int = performance()["timedZoneDetections"] as Int
+
     /** Absent until a crossing has been detected, so no samples reads as 0.0. */
     private fun averageLatency(): Double =
         (performance()["averageDetectionLatency"] as? Double) ?: 0.0
@@ -162,31 +165,53 @@ class PolyfenceDebugCollectorMetricsTest {
     @Test
     fun `averageDetectionLatency is the mean of every sample recorded`() {
         val countBefore = detectionCount()
-        val sumBefore = averageLatency() * countBefore
+        val timedCountBefore = timedCount()
+        val sumBefore = averageLatency() * timedCountBefore
 
         PolyfenceDebugCollector.recordZoneDetection(10.0)
         PolyfenceDebugCollector.recordZoneDetection(20.0)
 
-        val expected = (sumBefore + 30.0) / (countBefore + 2)
+        val expected = (sumBefore + 30.0) / (timedCountBefore + 2)
         assertEquals(expected, averageLatency(), 0.0001)
+    }
+
+    /**
+     * A degraded-GPS exit is a crossing the consumer receives, but the engine
+     * synthesises it outside a timed evaluation. It must still be counted —
+     * under-reporting real crossings is worse than a thinner latency sample —
+     * while staying out of the mean, which would otherwise be dragged toward
+     * a speed nothing achieved.
+     */
+    @Test
+    fun `an untimed crossing counts but does not enter the average`() {
+        PolyfenceDebugCollector.recordZoneDetection(10.0)
+        val countBefore = detectionCount()
+        val averageBefore = averageLatency()
+
+        PolyfenceDebugCollector.recordZoneDetection(null)
+
+        assertEquals(countBefore + 1, detectionCount())
+        assertEquals(averageBefore, averageLatency(), 0.0001)
     }
 
     @Test
     fun `sub-millisecond latency contributes to the average`() {
         val countBefore = detectionCount()
-        val sumBefore = averageLatency() * countBefore
+        val timedCountBefore = timedCount()
+        val sumBefore = averageLatency() * timedCountBefore
 
         PolyfenceDebugCollector.recordZoneDetection(0.4)
         PolyfenceDebugCollector.recordZoneDetection(0.4)
 
-        val sumAfter = averageLatency() * detectionCount()
+        val sumAfter = averageLatency() * timedCount()
         assertEquals(0.8, sumAfter - sumBefore, 0.0001)
     }
 
     @Test
     fun `a zone crossing reaches the collector through the tracker`() {
         val countBefore = detectionCount()
-        val sumBefore = averageLatency() * countBefore
+        val timedCountBefore = timedCount()
+        val sumBefore = averageLatency() * timedCountBefore
 
         LocationTracker.applyAddZoneDirect(tracker, "office", "Office", circleZone())
         deliverLocation(lat = 40.7128, lng = -74.0060)
@@ -195,7 +220,7 @@ class PolyfenceDebugCollectorMetricsTest {
             "expected a detection beyond the $countBefore already recorded",
             detectionCount() > countBefore
         )
-        val sumAfter = averageLatency() * detectionCount()
+        val sumAfter = averageLatency() * timedCount()
         assertTrue(
             "the crossing must contribute a measured latency",
             sumAfter > sumBefore

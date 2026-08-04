@@ -82,6 +82,7 @@ class PolyfenceDebugCollectorShapeTest {
                 "uptime",
                 "totalLocationUpdates",
                 "totalZoneDetections",
+                "timedZoneDetections",
                 "averageDetectionLatency",
                 "memoryUsageMB",
                 "restartCount"
