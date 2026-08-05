@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.0.0] - 2026-08-05
 
 ### Added
 - **Queued crossings are now delivered automatically the moment a consumer starts listening.** Previously the durable queue filled correctly and then sat on disk until something called `drainPendingEvents()` — a queue that captured a drive's worth of crossings across a killed app delivered none of them if the integration never made that call, and the startup reconcile could paper over an undrained crossing with a timestamp-less `RECOVERY_EXIT`. Delivery now happens through the **normal event callback** (`PolyfenceCoreDelegate.onGeofenceEvent`), the same path live events take — no separate channel, no new event type. Replayed events carry `deliveredLate: true`, `capturedTs` (the crossing's own detection timestamp) and `queuedDurationMs`, so consumers can still branch on replay-versus-live. `drainPendingEvents()` remains public and unchanged for consumers who want manual control, and `pendingEventsAutoDrainEnabled = false` turns the automatic path off entirely.

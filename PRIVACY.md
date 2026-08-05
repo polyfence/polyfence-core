@@ -1,7 +1,7 @@
 # PolyfenceCore — Privacy Policy
 
-**Effective Date:** March 26, 2026
-**Last Updated:** March 26, 2026
+**Effective Date:** August 5, 2026
+**Last Updated:** August 5, 2026
 **Applies to:** PolyfenceCore native library (Kotlin + Swift)
 
 ---
