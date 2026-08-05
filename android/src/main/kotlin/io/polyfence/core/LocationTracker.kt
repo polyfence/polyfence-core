@@ -1350,7 +1350,13 @@ class LocationTracker : Service() {
                             // drives a reconcile that can raise crossings. Not
                             // counting it leaves the counters short on exactly
                             // the stationary cold start where it may be the
-                            // only fix for some time.
+                            // only fix for some time — and leaves the health
+                            // score reading no GPS samples at all, which it
+                            // treats as a GPS that is failing to deliver.
+                            telemetryAggregator.recordGpsUpdate(
+                                intervalMs = currentGpsInterval,
+                                accuracyM = location.accuracy
+                            )
                             PolyfenceDebugCollector.recordLocationUpdate(
                                 if (location.hasAccuracy()) location.accuracy.toDouble() else -1.0
                             )

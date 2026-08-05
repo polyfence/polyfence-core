@@ -857,7 +857,13 @@ public class LocationTracker: NSObject {
             // A seed is a real fix: it reaches the consumer and drives a
             // reconcile that can raise crossings. Not counting it leaves the
             // counters short on exactly the stationary cold start where it may
-            // be the only fix for some time. Android records the same seed.
+            // be the only fix for some time — and leaves the health score
+            // reading no GPS samples at all, which it treats as a GPS that is
+            // failing to deliver. Android records the same seed.
+            telemetryAggregator.recordGpsUpdate(
+                intervalMs: Int64(currentGpsInterval * 1000),
+                accuracyM: Float(lastKnown.horizontalAccuracy >= 0 ? lastKnown.horizontalAccuracy : 999.0)
+            )
             PolyfenceDebugCollector.shared.recordLocationUpdate(
                 accuracy: lastKnown.horizontalAccuracy
             )
