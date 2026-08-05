@@ -48,7 +48,7 @@ class PolyfenceErrorManager {
             //
             // Same errorMap is passed to both paths so correlationId +
             // timestamp match between the live onError delivery and
-            // the persisted entry. BUG-016.
+            // the persisted entry.
             PolyfenceDebugCollector.recordError(errorMap)
 
             // Send to developer error stream

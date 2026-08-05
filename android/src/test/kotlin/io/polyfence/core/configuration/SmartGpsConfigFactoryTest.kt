@@ -5,11 +5,11 @@ import org.junit.Test
 
 /**
  * Unit tests for SmartGpsConfigFactory — the read/write shapes and the
- * BUG-015 merge behaviour.
+ * merge behaviour.
  */
 class SmartGpsConfigFactoryTest {
 
-    // -------- toMap (BUG-014b: full 6-key display shape) --------
+    // -------- toMap (full 6-key display shape) --------
 
     @Test
     fun `toMap on a default config emits all six top-level keys`() {
@@ -34,7 +34,7 @@ class SmartGpsConfigFactoryTest {
         assertTrue(map["batterySettings"] is Map<*, *>)
     }
 
-    // -------- toMergeBaseMap (BUG-015: sparse merge base) --------
+    // -------- toMergeBaseMap (sparse merge base) --------
 
     @Test
     fun `toMergeBaseMap omits null nested settings on a default config`() {
@@ -57,12 +57,12 @@ class SmartGpsConfigFactoryTest {
         assertFalse("null nested block must NOT appear", map.containsKey("batterySettings"))
     }
 
-    // -------- fromMap round-trip via toMergeBaseMap (BUG-015 merge simulation) --------
+    // -------- fromMap round-trip via toMergeBaseMap (merge simulation) --------
 
     @Test
     fun `partial update preserves the prior updateStrategy when only enableDebugLogging changes`() {
         // Reviewer's specific ask on 61cd2ac — the primary regression
-        // scenario for BUG-015.
+        // scenario for a partial configuration merge.
         val current = SmartGpsConfig(
             accuracyProfile = SmartGpsConfig.AccuracyProfile.MAX_ACCURACY,
             updateStrategy = SmartGpsConfig.UpdateStrategy.INTELLIGENT

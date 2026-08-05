@@ -110,6 +110,10 @@ class LocationTracker : Service() {
         @Volatile
         private var pendingEventListenerActive: Boolean? = null
 
+        // Whether this process has already created the service once, so the
+        // first creation is not reported as a restart.
+        private var serviceCreatedOnce = false
+
         /**
          * Store activity settings to be applied when tracking starts
          */
@@ -192,6 +196,28 @@ class LocationTracker : Service() {
             if (runningStore != null) return runningStore.droppedCountValue()
             val store = PendingEventsStore(context.applicationContext, 0)
             return store.droppedCountValue().also { store.shutdown() }
+        }
+
+        /**
+         * Geofence engine of the running service, or null when no service is
+         * running. Lets the debug collector count monitored zones without
+         * holding a reference that would outlive the session it describes.
+         */
+        internal fun currentGeofenceEngine(): GeofenceEngine? {
+            return currentInstance?.geofenceEngine
+        }
+
+        /**
+         * Whether a wake lock is held right now, or null when no service is
+         * running and therefore nothing could be holding one.
+         *
+         * Reads the lock itself rather than the bookkeeping flag beside it:
+         * the OS releases a lock on its own timeout, which leaves the flag
+         * set and the lock gone.
+         */
+        internal fun currentWakeLockHeld(): Boolean? {
+            val instance = currentInstance ?: return null
+            return instance.wakeLock?.isHeld == true
         }
 
         /**
@@ -953,6 +979,17 @@ class LocationTracker : Service() {
         // Set current instance for static access to zone states
         currentInstance = this
 
+        // A second creation inside one process means the service was torn
+        // down and brought back — by the platform under START_STICKY, or by a
+        // stop/start cycle. The collector's counters live in the same process,
+        // so a restart that followed process death cannot be seen from here
+        // and is not counted.
+        if (serviceCreatedOnce) {
+            PolyfenceDebugCollector.recordRestart()
+        } else {
+            serviceCreatedOnce = true
+        }
+
         // Capture battery snapshot for telemetry drain calculation. Done here
         // so it aligns with TelemetryAggregator's sessionStartTime (set when
         // this LocationTracker was constructed moments earlier). The matching
@@ -1309,6 +1346,20 @@ class LocationTracker : Service() {
                         if (location != null && firstLocationAfterRestart && isRunning) {
                             Log.d(TAG, "Seeding initial location from lastLocation cache")
                             lastLocationTime = System.currentTimeMillis()
+                            // A seed is a real fix: it reaches the consumer and
+                            // drives a reconcile that can raise crossings. Not
+                            // counting it leaves the counters short on exactly
+                            // the stationary cold start where it may be the
+                            // only fix for some time — and leaves the health
+                            // score reading no GPS samples at all, which it
+                            // treats as a GPS that is failing to deliver.
+                            telemetryAggregator.recordGpsUpdate(
+                                intervalMs = currentGpsInterval,
+                                accuracyM = location.accuracy
+                            )
+                            PolyfenceDebugCollector.recordLocationUpdate(
+                                if (location.hasAccuracy()) location.accuracy.toDouble() else -1.0
+                            )
                             sendLocationToDelegate(location)
                             firstLocationAfterRestart = false
                             geofenceEngine.reconcileZoneStates(location)
@@ -1436,15 +1487,9 @@ class LocationTracker : Service() {
                 healthScoreTickCount++
                 if (healthScoreTickCount >= healthScoreEmitEveryNTicks) {
                     healthScoreTickCount = 0
-                    // emitHealthScore -> collectDebugInfo -> getCpuUsage reads
-                    // /proc/stat with a 360ms sleep and require()s it isn't
-                    // running on the main looper. This runnable IS scheduled
-                    // on Looper.getMainLooper() (see combinedHealthCheckHandler
-                    // init below), so calling emitHealthScore inline throws
-                    // IllegalArgumentException — the outer try/catch swallows
-                    // it and onHealthScore consumers never receive an event.
-                    // Spawn a background thread so the CPU read can block
-                    // without violating the main-looper guard. Once per 5
+                    // Collection touches counters written from the location
+                    // and geofence callback threads, so it is taken off the
+                    // main looper rather than run inline here. Once per five
                     // minutes; lifecycle is trivial — no shared executor
                     // needed.
                     Thread {
@@ -1489,20 +1534,27 @@ class LocationTracker : Service() {
         if (!isRunning) return
         try {
             val debugInfo = PolyfenceDebugCollector.collectDebugInfo(applicationContext)
-            val perfMetrics = debugInfo["performance"] as? Map<*, *>
+            val perfMetrics = debugInfo[PolyfenceDebugCollector.Key.PERFORMANCE] as? Map<*, *>
             val telemetry = telemetryAggregator.getSessionTelemetry()
 
             val gpsGoodRatio = (telemetry["gps_ok_ratio"] as? Number)?.toDouble() ?: 0.0
-            val batteryMetrics = debugInfo["battery"] as? Map<*, *>
-            val batteryDrain = (batteryMetrics?.get("estimatedHourlyDrainPercent") as? Number)?.toDouble() ?: 0.0
-            val avgLatency = (perfMetrics?.get("averageDetectionLatencyMs") as? Number)?.toDouble() ?: 0.0
-            val errorCount = (debugInfo["recentErrors"] as? List<*>)?.size ?: 0
-            val falseRatio = (telemetry["false_event_ratio"] as? Number)?.toDouble() ?: 0.0
+            // Null when the collector had nothing to average, which the
+            // score treats as an unmeasured dimension rather than a perfect
+            // one.
+            val avgLatency = (perfMetrics?.get(PolyfenceDebugCollector.Key.AVERAGE_DETECTION_LATENCY) as? Number)?.toDouble()
+            val errorCount = (debugInfo[PolyfenceDebugCollector.Key.RECENT_ERRORS] as? List<*>)?.size ?: 0
+            // detections_total is the ratio's own denominator. The nearby
+            // boundary_events_count is not: it counts only detections within
+            // the boundary threshold, so gating on it would discard a ratio
+            // measured over detections further out.
+            val detections = (telemetry["detections_total"] as? Number)?.toInt() ?: 0
+            val falseRatio = if (detections > 0) {
+                (telemetry["false_event_ratio"] as? Number)?.toDouble()
+            } else null
             val zoneCount = geofenceEngine.getZoneCount()
 
             val result = HealthScoreCalculator.calculate(
                 gpsGoodRatio = gpsGoodRatio,
-                batteryDrainPctPerHr = batteryDrain,
                 avgDetectionLatencyMs = avgLatency,
                 errorCountRecent = errorCount,
                 falseEventRatio = falseRatio,
@@ -1705,6 +1757,32 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         accuracyM = gpsAccuracy,
         detectionTimeMs = detectionTimeMs
     )
+
+    // Boundary crossings only: dwell and the signal-lost/restored pair are
+    // state changes, not crossings, and counting them would inflate a figure
+    // consumers read as "how many times did the user cross a zone".
+    //
+    // Counts what this engine detected in this process. A crossing captured
+    // by an OS wake fence while the process was dead is delivered on drain
+    // without passing through here, so it reaches the consumer uncounted —
+    // counting it at capture would attribute it to whichever process the
+    // broadcast woke, and counting it at drain risks doubling with the
+    // reconcile that follows. Both need deciding together rather than
+    // patching one side.
+    //
+    // A detection time of zero marks a crossing the engine synthesised
+    // outside a location evaluation — a degraded-GPS exit. The consumer
+    // receives it like any other, so it counts; it was never timed, so it is
+    // passed as absent rather than as zero, which would drag the mean toward
+    // a speed nothing achieved.
+    if (eventType == "ENTER" || eventType == "EXIT" ||
+        eventType == GeofenceEngine.EVENT_RECOVERY_ENTER ||
+        eventType == GeofenceEngine.EVENT_RECOVERY_EXIT
+    ) {
+        PolyfenceDebugCollector.recordZoneDetection(
+            if (detectionTimeMs > 0) detectionTimeMs else null
+        )
+    }
 
     // Send event to delegate with detection metrics, GPS coordinates, and ML context.
     // `timestamp` mirrors the iOS event map (see ios/Classes/LocationTracker.swift:639);
@@ -1909,6 +1987,16 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
+
+        // The subscription is held by the fused client, not by this Service,
+        // so destroying the Service does not end it. Every other resource
+        // acquired here is released below; this was the one that outlived it,
+        // and a process that survives the Service would go on sampling GPS
+        // with nothing left to receive it.
+        locationCallback?.let { callback ->
+            fusedLocationClient?.removeLocationUpdates(callback)
+        }
+
         errorRecovery.stopMonitoring()
         healthCheckHandler?.removeCallbacksAndMessages(null)
         // Stop activity recognition and unregister receiver
@@ -2107,6 +2195,13 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 telemetryAggregator.recordGpsUpdate(
                     intervalMs = currentGpsInterval,
                     accuracyM = location.accuracy
+                )
+
+                // Negative when the fix carries no accuracy — the collector
+                // reports it as lastKnownAccuracy, whose absent value is
+                // already a negative sentinel.
+                PolyfenceDebugCollector.recordLocationUpdate(
+                    if (location.hasAccuracy()) location.accuracy.toDouble() else -1.0
                 )
 
                 // Check for unreliable GPS (large accuracy swings, poor accuracy)
@@ -2628,16 +2723,22 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             .setMinUpdateDistanceMeters(distanceFilter)
             .build()
 
-        // Stop current location updates
-        locationCallback?.let { callback ->
-            fusedLocationClient?.removeLocationUpdates(callback)
+        // The same instance must be cancelled that was registered — the fused
+        // client matches by identity, so a callback the tracker cannot name
+        // can never be removed and would outlive stopTracking().
+        val callback = locationCallback ?: run {
+            Log.e(TAG, "LocationCallback is null - cannot update location request")
+            return
         }
+
+        // Stop current location updates
+        fusedLocationClient?.removeLocationUpdates(callback)
 
         // Start new location updates with new configuration
         try {
             fusedLocationClient?.requestLocationUpdates(
                 locationRequest,
-                locationCallback ?: createLocationCallback(),
+                callback,
                 Looper.getMainLooper()
             )
 
@@ -3056,49 +3157,6 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         // fixes keep arriving. Both location callbacks funnel through here.
         if (geofenceEngine.isValidFix(location)) {
             lastValidFixTime = currentTime
-        }
-    }
-
-    /**
-     * Create location callback for smart GPS configuration
-     */
-    private fun createLocationCallback(): LocationCallback {
-        return object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult) {
-                locationResult.lastLocation?.let { location ->
-                    // Guard clause: only process if tracking is active
-                    if (!isRunning) {
-                        return
-                    }
-
-                    // Update movement state for smart GPS
-                    updateMovementState(location)
-
-                    // Update health tracking
-                    lastLocationTime = System.currentTimeMillis()
-                    consecutiveGpsFailures = 0
-
-                    // Process location with geofence engine
-                    geofenceEngine.checkLocation(location)
-
-                    // Send location update to delegate
-                    sendLocationToDelegate(location)
-
-                    // Emit status periodically
-                    emitRuntimeStatus()
-                }
-            }
-
-            override fun onLocationAvailability(locationAvailability: LocationAvailability) {
-                if (!locationAvailability.isLocationAvailable) {
-                    Log.w(TAG, "Location availability lost")
-                    consecutiveGpsFailures++
-
-                    if (consecutiveGpsFailures >= 3) {
-                        errorRecovery.handleGpsFailure()
-                    }
-                }
-            }
         }
     }
 

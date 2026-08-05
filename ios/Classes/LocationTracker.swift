@@ -74,9 +74,6 @@ public class LocationTracker: NSObject {
     // Throttle delegate callbacks when stationary
     private var lastDelegateCallbackTime: TimeInterval = 0
     private let stationaryDelegateCallbackInterval: TimeInterval = 30.0  // 30s when stationary
-    // CPU usage tracking state
-    private var prevCpuTotal: UInt32 = 0
-    private var prevCpuIdle: UInt32 = 0
 
     // Notification properties
     private var notificationCenter: UNUserNotificationCenter?
@@ -404,6 +401,11 @@ public class LocationTracker: NSObject {
     }
 
     private func setupGeofenceEngine() {
+        // The collector reads zone counts straight off the running engine. It
+        // holds the reference weakly, so it empties itself when this tracker
+        // goes away and never reports zones for a torn-down session.
+        PolyfenceDebugCollector.shared.geofenceEngine = geofenceEngine
+
         // Setup geofence engine callback
         geofenceEngine.setEventCallback { [weak self] zoneId, eventType, location, detectionTimeMs in
             self?.handleGeofenceEvent(zoneId: zoneId, eventType: eventType, location: location, detectionTimeMs: detectionTimeMs)
@@ -619,17 +621,23 @@ public class LocationTracker: NSObject {
         let telemetry = telemetryAggregator.getSessionTelemetry()
 
         let gpsGoodRatio = (telemetry["gps_ok_ratio"] as? NSNumber)?.doubleValue ?? 0.0
-        let batteryMetrics = debugInfo["battery"] as? [String: Any]
-        let batteryDrain = (batteryMetrics?["estimatedHourlyDrainPercent"] as? NSNumber)?.doubleValue ?? 0.0
-        let perfMetrics = debugInfo["performance"] as? [String: Any]
-        let avgLatency = (perfMetrics?["averageDetectionLatencyMs"] as? NSNumber)?.doubleValue ?? 0.0
-        let errorCount = (debugInfo["recentErrors"] as? [[String: Any]])?.count ?? 0
-        let falseRatio = (telemetry["false_event_ratio"] as? NSNumber)?.doubleValue ?? 0.0
+        let perfMetrics = debugInfo[PolyfenceDebugCollector.Key.performance] as? [String: Any]
+        // Nil when the collector had nothing to average, which the score
+        // treats as an unmeasured dimension rather than a perfect one.
+        let avgLatency = (perfMetrics?[PolyfenceDebugCollector.Key.averageDetectionLatency] as? NSNumber)?.doubleValue
+        let errorCount = (debugInfo[PolyfenceDebugCollector.Key.recentErrors] as? [[String: Any]])?.count ?? 0
+        // detections_total is the ratio's own denominator. The nearby
+        // boundary_events_count is not: it counts only detections within the
+        // boundary threshold, so gating on it would discard a ratio measured
+        // over detections further out.
+        let detections = (telemetry["detections_total"] as? NSNumber)?.intValue ?? 0
+        let falseRatio: Double? = detections > 0
+            ? (telemetry["false_event_ratio"] as? NSNumber)?.doubleValue
+            : nil
         let zoneCount = geofenceEngine.getZoneCount()
 
         let result = HealthScoreCalculator.calculate(
             gpsGoodRatio: gpsGoodRatio,
-            batteryDrainPctPerHr: batteryDrain,
             avgDetectionLatencyMs: avgLatency,
             errorCountRecent: errorCount,
             falseEventRatio: falseRatio,
@@ -846,6 +854,19 @@ public class LocationTracker: NSObject {
         locationManager.requestLocation()
         if let lastKnown = locationManager.location {
             self.lastLocationTime = Date().timeIntervalSince1970
+            // A seed is a real fix: it reaches the consumer and drives a
+            // reconcile that can raise crossings. Not counting it leaves the
+            // counters short on exactly the stationary cold start where it may
+            // be the only fix for some time — and leaves the health score
+            // reading no GPS samples at all, which it treats as a GPS that is
+            // failing to deliver. Android records the same seed.
+            telemetryAggregator.recordGpsUpdate(
+                intervalMs: Int64(currentGpsInterval * 1000),
+                accuracyM: Float(lastKnown.horizontalAccuracy >= 0 ? lastKnown.horizontalAccuracy : 999.0)
+            )
+            PolyfenceDebugCollector.shared.recordLocationUpdate(
+                accuracy: lastKnown.horizontalAccuracy
+            )
             self.sendLocationToDelegate(location: lastKnown)
 
             // Fire initial zone reconciliation against the cached location so
@@ -967,6 +988,23 @@ public class LocationTracker: NSObject {
             accuracyM: gpsAccuracy,
             detectionTimeMs: detectionTimeMs
         )
+
+        // Boundary crossings only: dwell and the signal-lost/restored pair
+        // are state changes, not crossings, and counting them would inflate a
+        // figure consumers read as "how many times did the user cross a zone".
+        //
+        // A detection time of zero marks a crossing the engine synthesised
+        // outside a location evaluation — a degraded-GPS exit. The consumer
+        // receives it like any other, so it counts; it was never timed, so it
+        // is passed as absent rather than as zero, which would drag the mean
+        // toward a speed nothing achieved.
+        if eventType == "ENTER" || eventType == "EXIT"
+            || eventType == GeofenceEngine.EVENT_RECOVERY_ENTER
+            || eventType == GeofenceEngine.EVENT_RECOVERY_EXIT {
+            PolyfenceDebugCollector.shared.recordZoneDetection(
+                latencyMs: detectionTimeMs > 0 ? detectionTimeMs : nil
+            )
+        }
 
         // Build enriched event dictionary.
         //
@@ -1235,36 +1273,6 @@ public class LocationTracker: NSObject {
     }
 
     /**
-     * Get CPU usage (mock implementation)
-     */
-    private func getCpuUsage() -> Double {
-        // System-wide CPU usage based on host CPU load counters
-        var size = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info_data_t>.size / MemoryLayout<integer_t>.size)
-        var cpuLoad = host_cpu_load_info()
-        let result = withUnsafeMutablePointer(to: &cpuLoad) { ptr -> kern_return_t in
-            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { intPtr in
-                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, intPtr, &size)
-            }
-        }
-        guard result == KERN_SUCCESS else { return 0.0 }
-        let user = cpuLoad.cpu_ticks.0
-        let nice = cpuLoad.cpu_ticks.1
-        let system = cpuLoad.cpu_ticks.2
-        let idle = cpuLoad.cpu_ticks.3
-        let idleAll = idle
-        let total = user &+ nice &+ system &+ idleAll
-        let totald = total &- prevCpuTotal
-        let idled = idleAll &- prevCpuIdle
-        prevCpuTotal = total
-        prevCpuIdle = idleAll
-        if totald > 0 {
-            let usage = Double(totald &- idled) / Double(totald) * 100.0
-            return Double(round(10 * usage) / 10)
-        }
-        return 0.0
-    }
-
-    /**
      * Handle GPS restart (error recovery)
      */
     private func handleGpsRestart() {
@@ -1396,6 +1404,11 @@ extension LocationTracker: CLLocationManagerDelegate {
             intervalMs: Int64(currentGpsInterval * 1000),
             accuracyM: Float(location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : 999.0)
         )
+
+        // Raw horizontalAccuracy, negative when the fix carries none — the
+        // collector reports it as lastKnownAccuracy, whose absent value is
+        // already a negative sentinel.
+        PolyfenceDebugCollector.shared.recordLocationUpdate(accuracy: location.horizontalAccuracy)
 
         // Reset fallback timer since we received a valid location
         resetFallbackTimer()

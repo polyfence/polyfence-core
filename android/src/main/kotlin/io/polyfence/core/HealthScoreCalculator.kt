@@ -22,20 +22,25 @@ object HealthScoreCalculator {
     /**
      * Calculate health score from current metrics.
      *
+     * Every input must be a measurement. A dimension that cannot be measured
+     * is left out rather than defaulted, because a default scores as though
+     * the device were performing perfectly on it and inflates the result.
+     *
      * @param gpsGoodRatio Ratio of GPS readings with accuracy <= 100m (0.0–1.0)
-     * @param batteryDrainPctPerHr Estimated battery drain percent per hour
-     * @param avgDetectionLatencyMs Average detection latency in milliseconds
+     * @param avgDetectionLatencyMs Average detection latency in milliseconds,
+     *   or null when no crossing has been detected yet and there is therefore
+     *   nothing to average
      * @param errorCountRecent Number of errors in recent window
-     * @param falseEventRatio Ratio of false events to total events (0.0–1.0)
+     * @param falseEventRatio Ratio of false events to total events (0.0–1.0),
+     *   or null when no boundary event has occurred yet
      * @param isTracking Whether tracking is currently active
      * @param activeZoneCount Number of active zones
      */
     fun calculate(
         gpsGoodRatio: Double,
-        batteryDrainPctPerHr: Double,
-        avgDetectionLatencyMs: Double,
+        avgDetectionLatencyMs: Double?,
         errorCountRecent: Int,
-        falseEventRatio: Double,
+        falseEventRatio: Double?,
         isTracking: Boolean,
         activeZoneCount: Int
     ): HealthScore {
@@ -43,10 +48,15 @@ object HealthScoreCalculator {
             return HealthScore(score = 0, topIssue = "Tracking is not active")
         }
 
-        // Each dimension scores 0-20, total 0-100
+        // Each dimension scores 0-20; whichever could be measured are
+        // rescaled to 0-100 at the end so the published bands keep their
+        // meaning however many that was.
         val penalties = mutableListOf<Pair<Int, String>>()
 
-        // GPS accuracy (0-20 points)
+        // GPS accuracy (0-20 points). Always scored, unlike the two below:
+        // this figure is only ever read from a scheduled emission minutes into
+        // an active session, so no samples by then is a GPS that is failing to
+        // deliver, not one that has yet to start.
         val gpsScore = when {
             gpsGoodRatio >= 0.9 -> 20
             gpsGoodRatio >= 0.7 -> 15
@@ -58,28 +68,22 @@ object HealthScoreCalculator {
             penalties.add(Pair(20 - gpsScore, "GPS accuracy is poor (${(gpsGoodRatio * 100).toInt()}% good readings)"))
         }
 
-        // Battery drain (0-20 points)
-        val batteryScore = when {
-            batteryDrainPctPerHr <= 2.0 -> 20
-            batteryDrainPctPerHr <= 5.0 -> 15
-            batteryDrainPctPerHr <= 10.0 -> 10
-            batteryDrainPctPerHr <= 20.0 -> 5
-            else -> 0
-        }
-        if (batteryScore < 15) {
-            penalties.add(Pair(20 - batteryScore, "Battery drain is high (${batteryDrainPctPerHr.toInt()}%/hr)"))
-        }
-
-        // Detection latency (0-20 points)
-        val latencyScore = when {
-            avgDetectionLatencyMs <= 100.0 -> 20
-            avgDetectionLatencyMs <= 500.0 -> 15
-            avgDetectionLatencyMs <= 1000.0 -> 10
-            avgDetectionLatencyMs <= 3000.0 -> 5
-            else -> 0
-        }
-        if (latencyScore < 15) {
-            penalties.add(Pair(20 - latencyScore, "Detection latency is high (${avgDetectionLatencyMs.toInt()}ms)"))
+        // Detection latency (0-20 points). Scored only once a crossing has
+        // been detected: with no samples there is no latency to judge, and
+        // scoring the absence would award the best possible band for a
+        // dimension nobody measured.
+        val latencyScore: Int? = avgDetectionLatencyMs?.let { latency ->
+            val scored = when {
+                latency <= 100.0 -> 20
+                latency <= 500.0 -> 15
+                latency <= 1000.0 -> 10
+                latency <= 3000.0 -> 5
+                else -> 0
+            }
+            if (scored < 15) {
+                penalties.add(Pair(20 - scored, "Detection latency is high (${latency.toInt()}ms)"))
+            }
+            scored
         }
 
         // Error rate (0-20 points)
@@ -94,20 +98,31 @@ object HealthScoreCalculator {
             penalties.add(Pair(20 - errorScore, "Error rate is elevated ($errorCountRecent recent errors)"))
         }
 
-        // False event ratio (0-20 points)
-        val falseEventScore = when {
-            falseEventRatio <= 0.05 -> 20
-            falseEventRatio <= 0.10 -> 15
-            falseEventRatio <= 0.20 -> 10
-            falseEventRatio <= 0.40 -> 5
-            else -> 0
-        }
-        if (falseEventScore < 15) {
-            penalties.add(Pair(20 - falseEventScore, "False event rate is high (${(falseEventRatio * 100).toInt()}%)"))
+        // False event ratio (0-20 points). Scored only once a boundary event
+        // has occurred: with none, the ratio reads 0, which is the *best*
+        // band, so an idle device would collect full marks for accuracy it
+        // never demonstrated.
+        val falseEventScore: Int? = falseEventRatio?.let { ratio ->
+            val scored = when {
+                ratio <= 0.05 -> 20
+                ratio <= 0.10 -> 15
+                ratio <= 0.20 -> 10
+                ratio <= 0.40 -> 5
+                else -> 0
+            }
+            if (scored < 15) {
+                penalties.add(Pair(20 - scored, "False event rate is high (${(ratio * 100).toInt()}%)"))
+            }
+            scored
         }
 
-        val totalScore = (gpsScore + batteryScore + latencyScore + errorScore + falseEventScore)
-            .coerceIn(0, 100)
+        // Rescale over the dimensions actually scored, so an unmeasurable
+        // one lowers neither the score nor its ceiling.
+        val measured = listOfNotNull(gpsScore, latencyScore, errorScore, falseEventScore)
+        val dimensionTotal = measured.sum()
+        val available = measured.size * 20
+        val totalScore = if (available == 0) 0
+            else Math.round(dimensionTotal / available.toDouble() * 100.0).toInt().coerceIn(0, 100)
 
         // Top issue is the one with the highest penalty
         val topIssue = if (totalScore >= 90) null

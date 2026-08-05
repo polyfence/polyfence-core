@@ -2,7 +2,7 @@ import XCTest
 @testable import PolyfenceCore
 
 /**
- * Regression coverage for BUG-016: PolyfenceErrorManager.reportError
+ * Regression coverage: PolyfenceErrorManager.reportError
  * must persist the error to PolyfenceDebugCollector's history in
  * addition to invoking the real-time onError callback. Pre-fix the
  * two systems were separate and errorHistory() always returned []

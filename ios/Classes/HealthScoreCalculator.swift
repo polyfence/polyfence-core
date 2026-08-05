@@ -19,20 +19,25 @@ public enum HealthScoreCalculator {
 
     /// Calculate health score from current metrics.
     ///
+    /// Every input must be a measurement. A dimension that cannot be measured
+    /// is left out rather than defaulted, because a default scores as though
+    /// the device were performing perfectly on it and inflates the result.
+    ///
     /// - Parameters:
     ///   - gpsGoodRatio: Ratio of GPS readings with accuracy <= 100m (0.0–1.0)
-    ///   - batteryDrainPctPerHr: Estimated battery drain percent per hour
-    ///   - avgDetectionLatencyMs: Average detection latency in milliseconds
+    ///   - avgDetectionLatencyMs: Average detection latency in milliseconds,
+    ///     or nil when no crossing has been detected yet and there is
+    ///     therefore nothing to average
     ///   - errorCountRecent: Number of errors in recent window
-    ///   - falseEventRatio: Ratio of false events to total events (0.0–1.0)
+    ///   - falseEventRatio: Ratio of false events to total events (0.0–1.0),
+    ///     or nil when no boundary event has occurred yet
     ///   - isTracking: Whether tracking is currently active
     ///   - activeZoneCount: Number of active zones
     public static func calculate(
         gpsGoodRatio: Double,
-        batteryDrainPctPerHr: Double,
-        avgDetectionLatencyMs: Double,
+        avgDetectionLatencyMs: Double?,
         errorCountRecent: Int,
-        falseEventRatio: Double,
+        falseEventRatio: Double?,
         isTracking: Bool,
         activeZoneCount: Int
     ) -> HealthScore {
@@ -40,10 +45,15 @@ public enum HealthScoreCalculator {
             return HealthScore(score: 0, topIssue: "Tracking is not active")
         }
 
-        // Each dimension scores 0-20, total 0-100
+        // Each dimension scores 0-20; whichever could be measured are
+        // rescaled to 0-100 at the end so the published bands keep their
+        // meaning however many that was.
         var penalties: [(Int, String)] = []
 
-        // GPS accuracy (0-20 points)
+        // GPS accuracy (0-20 points). Always scored, unlike the two below:
+        // this figure is only ever read from a scheduled emission minutes into
+        // an active session, so no samples by then is a GPS that is failing to
+        // deliver, not one that has yet to start.
         let gpsScore: Int
         switch gpsGoodRatio {
         case 0.9...: gpsScore = 20
@@ -56,30 +66,24 @@ public enum HealthScoreCalculator {
             penalties.append((20 - gpsScore, "GPS accuracy is poor (\(Int(gpsGoodRatio * 100))% good readings)"))
         }
 
-        // Battery drain (0-20 points)
-        let batteryScore: Int
-        switch batteryDrainPctPerHr {
-        case ...2.0: batteryScore = 20
-        case ...5.0: batteryScore = 15
-        case ...10.0: batteryScore = 10
-        case ...20.0: batteryScore = 5
-        default: batteryScore = 0
-        }
-        if batteryScore < 15 {
-            penalties.append((20 - batteryScore, "Battery drain is high (\(Int(batteryDrainPctPerHr))%/hr)"))
-        }
-
-        // Detection latency (0-20 points)
-        let latencyScore: Int
-        switch avgDetectionLatencyMs {
-        case ...100.0: latencyScore = 20
-        case ...500.0: latencyScore = 15
-        case ...1000.0: latencyScore = 10
-        case ...3000.0: latencyScore = 5
-        default: latencyScore = 0
-        }
-        if latencyScore < 15 {
-            penalties.append((20 - latencyScore, "Detection latency is high (\(Int(avgDetectionLatencyMs))ms)"))
+        // Detection latency (0-20 points). Scored only once a crossing has
+        // been detected: with no samples there is no latency to judge, and
+        // scoring the absence would award the best possible band for a
+        // dimension nobody measured.
+        var latencyScore: Int? = nil
+        if let latency = avgDetectionLatencyMs {
+            let scored: Int
+            switch latency {
+            case ...100.0: scored = 20
+            case ...500.0: scored = 15
+            case ...1000.0: scored = 10
+            case ...3000.0: scored = 5
+            default: scored = 0
+            }
+            latencyScore = scored
+            if scored < 15 {
+                penalties.append((20 - scored, "Detection latency is high (\(Int(latency))ms)"))
+            }
         }
 
         // Error rate (0-20 points)
@@ -95,20 +99,34 @@ public enum HealthScoreCalculator {
             penalties.append((20 - errorScore, "Error rate is elevated (\(errorCountRecent) recent errors)"))
         }
 
-        // False event ratio (0-20 points)
-        let falseEventScore: Int
-        switch falseEventRatio {
-        case ...0.05: falseEventScore = 20
-        case ...0.10: falseEventScore = 15
-        case ...0.20: falseEventScore = 10
-        case ...0.40: falseEventScore = 5
-        default: falseEventScore = 0
-        }
-        if falseEventScore < 15 {
-            penalties.append((20 - falseEventScore, "False event rate is high (\(Int(falseEventRatio * 100))%)"))
+        // False event ratio (0-20 points). Scored only once a boundary event
+        // has occurred: with none, the ratio reads 0, which is the *best*
+        // band, so an idle device would collect full marks for accuracy it
+        // never demonstrated.
+        var falseEventScore: Int? = nil
+        if let ratio = falseEventRatio {
+            let scored: Int
+            switch ratio {
+            case ...0.05: scored = 20
+            case ...0.10: scored = 15
+            case ...0.20: scored = 10
+            case ...0.40: scored = 5
+            default: scored = 0
+            }
+            falseEventScore = scored
+            if scored < 15 {
+                penalties.append((20 - scored, "False event rate is high (\(Int(ratio * 100))%)"))
+            }
         }
 
-        let totalScore = min(max(gpsScore + batteryScore + latencyScore + errorScore + falseEventScore, 0), 100)
+        // Rescale over the dimensions actually scored, so an unmeasurable
+        // one lowers neither the score nor its ceiling.
+        let measured = [gpsScore, latencyScore, errorScore, falseEventScore].compactMap { $0 }
+        let dimensionTotal = measured.reduce(0, +)
+        let available = measured.count * 20
+        let totalScore = available == 0
+            ? 0
+            : min(max(Int((Double(dimensionTotal) / Double(available) * 100.0).rounded()), 0), 100)
 
         let topIssue: String?
         if totalScore >= 90 {
