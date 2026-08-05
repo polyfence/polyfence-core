@@ -633,8 +633,12 @@ public class LocationTracker: NSObject {
         // treats as an unmeasured dimension rather than a perfect one.
         let avgLatency = (perfMetrics?[PolyfenceDebugCollector.Key.averageDetectionLatency] as? NSNumber)?.doubleValue
         let errorCount = (debugInfo[PolyfenceDebugCollector.Key.recentErrors] as? [[String: Any]])?.count ?? 0
-        let boundaryEvents = (telemetry["boundary_events_count"] as? NSNumber)?.intValue ?? 0
-        let falseRatio: Double? = boundaryEvents > 0
+        // detections_total is the ratio's own denominator. The nearby
+        // boundary_events_count is not: it counts only detections within the
+        // boundary threshold, so gating on it would discard a ratio measured
+        // over detections further out.
+        let detections = (telemetry["detections_total"] as? NSNumber)?.intValue ?? 0
+        let falseRatio: Double? = detections > 0
             ? (telemetry["false_event_ratio"] as? NSNumber)?.doubleValue
             : nil
         let zoneCount = geofenceEngine.getZoneCount()

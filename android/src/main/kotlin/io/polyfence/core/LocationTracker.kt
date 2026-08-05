@@ -1544,8 +1544,12 @@ class LocationTracker : Service() {
             // one.
             val avgLatency = (perfMetrics?.get(PolyfenceDebugCollector.Key.AVERAGE_DETECTION_LATENCY) as? Number)?.toDouble()
             val errorCount = (debugInfo[PolyfenceDebugCollector.Key.RECENT_ERRORS] as? List<*>)?.size ?: 0
-            val boundaryEvents = (telemetry["boundary_events_count"] as? Number)?.toInt() ?: 0
-            val falseRatio = if (boundaryEvents > 0) {
+            // detections_total is the ratio's own denominator. The nearby
+            // boundary_events_count is not: it counts only detections within
+            // the boundary threshold, so gating on it would discard a ratio
+            // measured over detections further out.
+            val detections = (telemetry["detections_total"] as? Number)?.toInt() ?: 0
+            val falseRatio = if (detections > 0) {
                 (telemetry["false_event_ratio"] as? Number)?.toDouble()
             } else null
             val zoneCount = geofenceEngine.getZoneCount()
