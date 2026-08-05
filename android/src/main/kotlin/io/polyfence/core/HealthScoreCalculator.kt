@@ -26,20 +26,22 @@ object HealthScoreCalculator {
      * is left out rather than defaulted, because a default scores as though
      * the device were performing perfectly on it and inflates the result.
      *
-     * @param gpsGoodRatio Ratio of GPS readings with accuracy <= 100m (0.0–1.0)
+     * @param gpsGoodRatio Ratio of GPS readings with accuracy <= 100m (0.0–1.0),
+     *   or null when no fix has been sampled yet
      * @param avgDetectionLatencyMs Average detection latency in milliseconds,
      *   or null when no crossing has been detected yet and there is therefore
      *   nothing to average
      * @param errorCountRecent Number of errors in recent window
-     * @param falseEventRatio Ratio of false events to total events (0.0–1.0)
+     * @param falseEventRatio Ratio of false events to total events (0.0–1.0),
+     *   or null when no boundary event has occurred yet
      * @param isTracking Whether tracking is currently active
      * @param activeZoneCount Number of active zones
      */
     fun calculate(
-        gpsGoodRatio: Double,
+        gpsGoodRatio: Double?,
         avgDetectionLatencyMs: Double?,
         errorCountRecent: Int,
-        falseEventRatio: Double,
+        falseEventRatio: Double?,
         isTracking: Boolean,
         activeZoneCount: Int
     ): HealthScore {
@@ -52,16 +54,22 @@ object HealthScoreCalculator {
         // meaning however many that was.
         val penalties = mutableListOf<Pair<Int, String>>()
 
-        // GPS accuracy (0-20 points)
-        val gpsScore = when {
-            gpsGoodRatio >= 0.9 -> 20
-            gpsGoodRatio >= 0.7 -> 15
-            gpsGoodRatio >= 0.5 -> 10
-            gpsGoodRatio >= 0.3 -> 5
-            else -> 0
-        }
-        if (gpsScore < 15) {
-            penalties.add(Pair(20 - gpsScore, "GPS accuracy is poor (${(gpsGoodRatio * 100).toInt()}% good readings)"))
+        // GPS accuracy (0-20 points). Scored only once a fix has been
+        // sampled: with no samples the ratio reads 0, which is the *worst*
+        // band, so a device that has simply not started yet would be
+        // condemned for a measurement nobody took.
+        val gpsScore: Int? = gpsGoodRatio?.let { ratio ->
+            val scored = when {
+                ratio >= 0.9 -> 20
+                ratio >= 0.7 -> 15
+                ratio >= 0.5 -> 10
+                ratio >= 0.3 -> 5
+                else -> 0
+            }
+            if (scored < 15) {
+                penalties.add(Pair(20 - scored, "GPS accuracy is poor (${(ratio * 100).toInt()}% good readings)"))
+            }
+            scored
         }
 
         // Detection latency (0-20 points). Scored only once a crossing has
@@ -94,16 +102,22 @@ object HealthScoreCalculator {
             penalties.add(Pair(20 - errorScore, "Error rate is elevated ($errorCountRecent recent errors)"))
         }
 
-        // False event ratio (0-20 points)
-        val falseEventScore = when {
-            falseEventRatio <= 0.05 -> 20
-            falseEventRatio <= 0.10 -> 15
-            falseEventRatio <= 0.20 -> 10
-            falseEventRatio <= 0.40 -> 5
-            else -> 0
-        }
-        if (falseEventScore < 15) {
-            penalties.add(Pair(20 - falseEventScore, "False event rate is high (${(falseEventRatio * 100).toInt()}%)"))
+        // False event ratio (0-20 points). Scored only once a boundary event
+        // has occurred: with none, the ratio reads 0, which is the *best*
+        // band, so an idle device would collect full marks for accuracy it
+        // never demonstrated.
+        val falseEventScore: Int? = falseEventRatio?.let { ratio ->
+            val scored = when {
+                ratio <= 0.05 -> 20
+                ratio <= 0.10 -> 15
+                ratio <= 0.20 -> 10
+                ratio <= 0.40 -> 5
+                else -> 0
+            }
+            if (scored < 15) {
+                penalties.add(Pair(20 - scored, "False event rate is high (${(ratio * 100).toInt()}%)"))
+            }
+            scored
         }
 
         // Rescale over the dimensions actually scored, so an unmeasurable

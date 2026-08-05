@@ -620,13 +620,23 @@ public class LocationTracker: NSObject {
         let debugInfo = PolyfenceDebugCollector.shared.collectDebugInfo()
         let telemetry = telemetryAggregator.getSessionTelemetry()
 
-        let gpsGoodRatio = (telemetry["gps_ok_ratio"] as? NSNumber)?.doubleValue ?? 0.0
+        // Both ratios read 0 before anything has been sampled, and 0 sits at
+        // opposite ends of their two scales — worst for GPS, best for false
+        // events. Their own sample counts say whether the number means
+        // anything yet.
+        let gpsSamples = (telemetry["sample_events"] as? NSNumber)?.intValue ?? 0
+        let gpsGoodRatio: Double? = gpsSamples > 0
+            ? (telemetry["gps_ok_ratio"] as? NSNumber)?.doubleValue
+            : nil
         let perfMetrics = debugInfo[PolyfenceDebugCollector.Key.performance] as? [String: Any]
         // Nil when the collector had nothing to average, which the score
         // treats as an unmeasured dimension rather than a perfect one.
         let avgLatency = (perfMetrics?[PolyfenceDebugCollector.Key.averageDetectionLatency] as? NSNumber)?.doubleValue
         let errorCount = (debugInfo[PolyfenceDebugCollector.Key.recentErrors] as? [[String: Any]])?.count ?? 0
-        let falseRatio = (telemetry["false_event_ratio"] as? NSNumber)?.doubleValue ?? 0.0
+        let boundaryEvents = (telemetry["boundary_events_count"] as? NSNumber)?.intValue ?? 0
+        let falseRatio: Double? = boundaryEvents > 0
+            ? (telemetry["false_event_ratio"] as? NSNumber)?.doubleValue
+            : nil
         let zoneCount = geofenceEngine.getZoneCount()
 
         let result = HealthScoreCalculator.calculate(

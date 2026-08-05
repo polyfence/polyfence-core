@@ -24,19 +24,21 @@ public enum HealthScoreCalculator {
     /// the device were performing perfectly on it and inflates the result.
     ///
     /// - Parameters:
-    ///   - gpsGoodRatio: Ratio of GPS readings with accuracy <= 100m (0.0–1.0)
+    ///   - gpsGoodRatio: Ratio of GPS readings with accuracy <= 100m (0.0–1.0),
+    ///     or nil when no fix has been sampled yet
     ///   - avgDetectionLatencyMs: Average detection latency in milliseconds,
     ///     or nil when no crossing has been detected yet and there is
     ///     therefore nothing to average
     ///   - errorCountRecent: Number of errors in recent window
-    ///   - falseEventRatio: Ratio of false events to total events (0.0–1.0)
+    ///   - falseEventRatio: Ratio of false events to total events (0.0–1.0),
+    ///     or nil when no boundary event has occurred yet
     ///   - isTracking: Whether tracking is currently active
     ///   - activeZoneCount: Number of active zones
     public static func calculate(
-        gpsGoodRatio: Double,
+        gpsGoodRatio: Double?,
         avgDetectionLatencyMs: Double?,
         errorCountRecent: Int,
-        falseEventRatio: Double,
+        falseEventRatio: Double?,
         isTracking: Bool,
         activeZoneCount: Int
     ) -> HealthScore {
@@ -49,17 +51,24 @@ public enum HealthScoreCalculator {
         // meaning however many that was.
         var penalties: [(Int, String)] = []
 
-        // GPS accuracy (0-20 points)
-        let gpsScore: Int
-        switch gpsGoodRatio {
-        case 0.9...: gpsScore = 20
-        case 0.7...: gpsScore = 15
-        case 0.5...: gpsScore = 10
-        case 0.3...: gpsScore = 5
-        default: gpsScore = 0
-        }
-        if gpsScore < 15 {
-            penalties.append((20 - gpsScore, "GPS accuracy is poor (\(Int(gpsGoodRatio * 100))% good readings)"))
+        // GPS accuracy (0-20 points). Scored only once a fix has been
+        // sampled: with no samples the ratio reads 0, which is the *worst*
+        // band, so a device that has simply not started yet would be
+        // condemned for a measurement nobody took.
+        var gpsScore: Int? = nil
+        if let ratio = gpsGoodRatio {
+            let scored: Int
+            switch ratio {
+            case 0.9...: scored = 20
+            case 0.7...: scored = 15
+            case 0.5...: scored = 10
+            case 0.3...: scored = 5
+            default: scored = 0
+            }
+            gpsScore = scored
+            if scored < 15 {
+                penalties.append((20 - scored, "GPS accuracy is poor (\(Int(ratio * 100))% good readings)"))
+            }
         }
 
         // Detection latency (0-20 points). Scored only once a crossing has
@@ -95,17 +104,24 @@ public enum HealthScoreCalculator {
             penalties.append((20 - errorScore, "Error rate is elevated (\(errorCountRecent) recent errors)"))
         }
 
-        // False event ratio (0-20 points)
-        let falseEventScore: Int
-        switch falseEventRatio {
-        case ...0.05: falseEventScore = 20
-        case ...0.10: falseEventScore = 15
-        case ...0.20: falseEventScore = 10
-        case ...0.40: falseEventScore = 5
-        default: falseEventScore = 0
-        }
-        if falseEventScore < 15 {
-            penalties.append((20 - falseEventScore, "False event rate is high (\(Int(falseEventRatio * 100))%)"))
+        // False event ratio (0-20 points). Scored only once a boundary event
+        // has occurred: with none, the ratio reads 0, which is the *best*
+        // band, so an idle device would collect full marks for accuracy it
+        // never demonstrated.
+        var falseEventScore: Int? = nil
+        if let ratio = falseEventRatio {
+            let scored: Int
+            switch ratio {
+            case ...0.05: scored = 20
+            case ...0.10: scored = 15
+            case ...0.20: scored = 10
+            case ...0.40: scored = 5
+            default: scored = 0
+            }
+            falseEventScore = scored
+            if scored < 15 {
+                penalties.append((20 - scored, "False event rate is high (\(Int(ratio * 100))%)"))
+            }
         }
 
         // Rescale over the dimensions actually scored, so an unmeasurable

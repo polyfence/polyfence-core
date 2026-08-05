@@ -231,10 +231,6 @@ class LocationCallbackRegistrationTest {
     }
 
     /**
-     * Declining to register at all satisfies this too — the invariant is about
-     * what happens when a registration does occur, not that one must.
-     */
-    /**
      * With no callback stored there is nothing that could later be cancelled,
      * so the method must do nothing at all rather than register a subscription
      * it cannot name. The fused client matches by identity: a handle the
