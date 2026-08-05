@@ -861,6 +861,13 @@ public class LocationTracker: NSObject {
         locationManager.requestLocation()
         if let lastKnown = locationManager.location {
             self.lastLocationTime = Date().timeIntervalSince1970
+            // A seed is a real fix: it reaches the consumer and drives a
+            // reconcile that can raise crossings. Not counting it leaves the
+            // counters short on exactly the stationary cold start where it may
+            // be the only fix for some time. Android records the same seed.
+            PolyfenceDebugCollector.shared.recordLocationUpdate(
+                accuracy: lastKnown.horizontalAccuracy
+            )
             self.sendLocationToDelegate(location: lastKnown)
 
             // Fire initial zone reconciliation against the cached location so
