@@ -25,7 +25,7 @@ class HealthScoreCalculatorTest {
     private val context: Context get() = ApplicationProvider.getApplicationContext()
 
     private fun score(
-        gps: Double? = 1.0,
+        gps: Double = 1.0,
         latencyMs: Double? = 0.0,
         errors: Int = 0,
         falseEvents: Double? = 0.0
@@ -76,20 +76,15 @@ class HealthScoreCalculatorTest {
     }
 
     /**
-     * Zero means opposite things on the two ratio scales, so defaulting them
-     * fails in both directions at once: an unsampled GPS ratio reads as the
-     * worst possible signal, and an unsampled false-event ratio as the best
-     * possible accuracy. Neither is a reading.
+     * A false-event ratio with no detections behind it reads as the best
+     * possible accuracy, so it sits out. GPS does not: this score is only
+     * computed minutes into a session, by which point no fixes is a failure
+     * rather than a device still warming up.
      */
     @Test
-    fun `an unsampled ratio is excluded rather than scored at either extreme`() {
-        // GPS absent: three dimensions remain, all perfect.
-        assertEquals(100, score(gps = null).score)
-        // False events absent: no free marks for accuracy never shown.
+    fun `an unsampled false event ratio sits out but gps does not`() {
         assertEquals(100, score(falseEvents = null).score)
-        // A device that has only errored, with nothing else sampled yet, is
-        // judged on the one thing that was measured.
-        assertEquals(0, score(gps = null, latencyMs = null, errors = 50, falseEvents = null).score)
+        assertEquals(67, score(gps = 0.0, falseEvents = null).score)
     }
 
     /**

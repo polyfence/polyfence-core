@@ -1531,14 +1531,7 @@ class LocationTracker : Service() {
             val perfMetrics = debugInfo[PolyfenceDebugCollector.Key.PERFORMANCE] as? Map<*, *>
             val telemetry = telemetryAggregator.getSessionTelemetry()
 
-            // Both ratios read 0 before anything has been sampled, and 0 sits
-            // at opposite ends of their two scales — worst for GPS, best for
-            // false events. Their own sample counts say whether the number
-            // means anything yet.
-            val gpsSamples = (telemetry["sample_events"] as? Number)?.toInt() ?: 0
-            val gpsGoodRatio = if (gpsSamples > 0) {
-                (telemetry["gps_ok_ratio"] as? Number)?.toDouble()
-            } else null
+            val gpsGoodRatio = (telemetry["gps_ok_ratio"] as? Number)?.toDouble() ?: 0.0
             // Null when the collector had nothing to average, which the
             // score treats as an unmeasured dimension rather than a perfect
             // one.

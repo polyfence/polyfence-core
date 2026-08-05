@@ -26,8 +26,7 @@ object HealthScoreCalculator {
      * is left out rather than defaulted, because a default scores as though
      * the device were performing perfectly on it and inflates the result.
      *
-     * @param gpsGoodRatio Ratio of GPS readings with accuracy <= 100m (0.0–1.0),
-     *   or null when no fix has been sampled yet
+     * @param gpsGoodRatio Ratio of GPS readings with accuracy <= 100m (0.0–1.0)
      * @param avgDetectionLatencyMs Average detection latency in milliseconds,
      *   or null when no crossing has been detected yet and there is therefore
      *   nothing to average
@@ -38,7 +37,7 @@ object HealthScoreCalculator {
      * @param activeZoneCount Number of active zones
      */
     fun calculate(
-        gpsGoodRatio: Double?,
+        gpsGoodRatio: Double,
         avgDetectionLatencyMs: Double?,
         errorCountRecent: Int,
         falseEventRatio: Double?,
@@ -54,22 +53,19 @@ object HealthScoreCalculator {
         // meaning however many that was.
         val penalties = mutableListOf<Pair<Int, String>>()
 
-        // GPS accuracy (0-20 points). Scored only once a fix has been
-        // sampled: with no samples the ratio reads 0, which is the *worst*
-        // band, so a device that has simply not started yet would be
-        // condemned for a measurement nobody took.
-        val gpsScore: Int? = gpsGoodRatio?.let { ratio ->
-            val scored = when {
-                ratio >= 0.9 -> 20
-                ratio >= 0.7 -> 15
-                ratio >= 0.5 -> 10
-                ratio >= 0.3 -> 5
-                else -> 0
-            }
-            if (scored < 15) {
-                penalties.add(Pair(20 - scored, "GPS accuracy is poor (${(ratio * 100).toInt()}% good readings)"))
-            }
-            scored
+        // GPS accuracy (0-20 points). Always scored, unlike the two below:
+        // this figure is only ever read from a scheduled emission minutes into
+        // an active session, so no samples by then is a GPS that is failing to
+        // deliver, not one that has yet to start.
+        val gpsScore = when {
+            gpsGoodRatio >= 0.9 -> 20
+            gpsGoodRatio >= 0.7 -> 15
+            gpsGoodRatio >= 0.5 -> 10
+            gpsGoodRatio >= 0.3 -> 5
+            else -> 0
+        }
+        if (gpsScore < 15) {
+            penalties.add(Pair(20 - gpsScore, "GPS accuracy is poor (${(gpsGoodRatio * 100).toInt()}% good readings)"))
         }
 
         // Detection latency (0-20 points). Scored only once a crossing has

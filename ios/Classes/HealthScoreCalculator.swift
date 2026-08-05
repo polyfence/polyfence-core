@@ -24,8 +24,7 @@ public enum HealthScoreCalculator {
     /// the device were performing perfectly on it and inflates the result.
     ///
     /// - Parameters:
-    ///   - gpsGoodRatio: Ratio of GPS readings with accuracy <= 100m (0.0–1.0),
-    ///     or nil when no fix has been sampled yet
+    ///   - gpsGoodRatio: Ratio of GPS readings with accuracy <= 100m (0.0–1.0)
     ///   - avgDetectionLatencyMs: Average detection latency in milliseconds,
     ///     or nil when no crossing has been detected yet and there is
     ///     therefore nothing to average
@@ -35,7 +34,7 @@ public enum HealthScoreCalculator {
     ///   - isTracking: Whether tracking is currently active
     ///   - activeZoneCount: Number of active zones
     public static func calculate(
-        gpsGoodRatio: Double?,
+        gpsGoodRatio: Double,
         avgDetectionLatencyMs: Double?,
         errorCountRecent: Int,
         falseEventRatio: Double?,
@@ -51,24 +50,20 @@ public enum HealthScoreCalculator {
         // meaning however many that was.
         var penalties: [(Int, String)] = []
 
-        // GPS accuracy (0-20 points). Scored only once a fix has been
-        // sampled: with no samples the ratio reads 0, which is the *worst*
-        // band, so a device that has simply not started yet would be
-        // condemned for a measurement nobody took.
-        var gpsScore: Int? = nil
-        if let ratio = gpsGoodRatio {
-            let scored: Int
-            switch ratio {
-            case 0.9...: scored = 20
-            case 0.7...: scored = 15
-            case 0.5...: scored = 10
-            case 0.3...: scored = 5
-            default: scored = 0
-            }
-            gpsScore = scored
-            if scored < 15 {
-                penalties.append((20 - scored, "GPS accuracy is poor (\(Int(ratio * 100))% good readings)"))
-            }
+        // GPS accuracy (0-20 points). Always scored, unlike the two below:
+        // this figure is only ever read from a scheduled emission minutes into
+        // an active session, so no samples by then is a GPS that is failing to
+        // deliver, not one that has yet to start.
+        let gpsScore: Int
+        switch gpsGoodRatio {
+        case 0.9...: gpsScore = 20
+        case 0.7...: gpsScore = 15
+        case 0.5...: gpsScore = 10
+        case 0.3...: gpsScore = 5
+        default: gpsScore = 0
+        }
+        if gpsScore < 15 {
+            penalties.append((20 - gpsScore, "GPS accuracy is poor (\(Int(gpsGoodRatio * 100))% good readings)"))
         }
 
         // Detection latency (0-20 points). Scored only once a crossing has

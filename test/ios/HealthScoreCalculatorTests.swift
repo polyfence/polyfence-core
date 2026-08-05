@@ -16,7 +16,7 @@ import XCTest
 final class HealthScoreCalculatorTests: XCTestCase {
 
     private func score(
-        gps: Double? = 1.0,
+        gps: Double = 1.0,
         latencyMs: Double? = 0.0,
         errors: Int = 0,
         falseEvents: Double? = 0.0
@@ -60,17 +60,13 @@ final class HealthScoreCalculatorTests: XCTestCase {
         XCTAssertEqual(score(gps: 0.0, latencyMs: nil).score, 67)
     }
 
-    func testAnUnsampledRatioIsExcludedRatherThanScoredAtEitherExtreme() {
-        // Zero means opposite things on the two ratio scales, so defaulting
-        // them fails in both directions at once: an unsampled GPS ratio reads
-        // as the worst possible signal, an unsampled false-event ratio as the
-        // best possible accuracy. Neither is a reading.
-        XCTAssertEqual(score(gps: nil).score, 100)
+    func testAnUnsampledFalseEventRatioSitsOutButGpsDoesNot() {
+        // A false-event ratio with no detections behind it reads as the best
+        // possible accuracy, so it sits out. GPS does not: this score is only
+        // computed minutes into a session, by which point no fixes is a
+        // failure rather than a device still warming up.
         XCTAssertEqual(score(falseEvents: nil).score, 100)
-        XCTAssertEqual(
-            score(gps: nil, latencyMs: nil, errors: 50, falseEvents: nil).score,
-            0
-        )
+        XCTAssertEqual(score(gps: 0.0, falseEvents: nil).score, 67)
     }
 
     func testTheRescaleRoundsHalvesUp() {
