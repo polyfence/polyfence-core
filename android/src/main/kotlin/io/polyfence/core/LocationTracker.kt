@@ -1025,16 +1025,20 @@ class LocationTracker : Service() {
         pendingEventsAutoDrainEnabled = config.pendingEventsAutoDrainEnabled
         pendingEventsStore = PendingEventsStore(applicationContext, pendingEventsQueueSize)
 
-        // Applied after the store exists, for the same reason the listener
-        // apply below is. Routed through setCoreDelegate rather than assigning
-        // the field, so a direct Kotlin consumer still gets its "I am
-        // receiving" moment: registering a delegate is the only subscribe
-        // signal such a consumer has, and live delivery is gated on it.
-        // Raising that signal before the store is built makes the replay it
-        // triggers return against a queue size of zero, above the zone-state
-        // check that would otherwise defer it, leaving a queue full of
-        // crossings that is never handed over. A bridge stages a listener value
-        // before the service exists, which suppresses the shortcut here.
+        // Both applies below must stay under the store construction above.
+        // Each can raise the listener-live signal, and the replay a raise
+        // triggers returns on the queue-size check, which sits above the
+        // zone-state check that would otherwise defer it. Raised too early,
+        // the deferred flag is never armed and a queue full of crossings is
+        // never handed over, while live delivery of new ones keeps working:
+        // the loss is silent.
+        //
+        // A delegate reaches setCoreDelegate rather than the field so a direct
+        // Kotlin consumer gets its "I am receiving" moment; registering a
+        // delegate is the only subscribe signal such a consumer has, and live
+        // delivery is gated on it. Bridges are expected to stage a listener
+        // value before the service exists, which routes them through the apply
+        // below instead of that shortcut.
         pendingCoreDelegate?.let { delegate ->
             setCoreDelegate(delegate)
         }

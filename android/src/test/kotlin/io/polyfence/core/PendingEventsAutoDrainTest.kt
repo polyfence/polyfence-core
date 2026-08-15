@@ -206,8 +206,7 @@ class PendingEventsAutoDrainTest {
     }
 
     /**
-     * The staged half of the case below: a direct consumer that registers
-     * before the Service exists. `onCreate` applies that delegate, which raises
+     * A direct consumer that registers before the Service exists. `onCreate` applies that delegate, which raises
      * the subscribe signal, and the replay it triggers must reach the queue.
      *
      * Ordering-sensitive. Raising the signal before `pendingEventsStore` is
@@ -231,6 +230,10 @@ class PendingEventsAutoDrainTest {
         LocationTracker.setPendingCoreDelegate(collector)
 
         val staged = Robolectric.buildService(LocationTracker::class.java).create().get()
+        // Restore is driven on `staged` directly rather than through the class
+        // helper, which targets the tracker from setUp. Staging a delegate also
+        // live-applies it to the existing instance, so both are holding this
+        // collector; restoring on both would drain one file through two stores.
         LocationTracker::class.java
             .getDeclaredMethod("restoreZonesFromStorage")
             .apply { isAccessible = true }
