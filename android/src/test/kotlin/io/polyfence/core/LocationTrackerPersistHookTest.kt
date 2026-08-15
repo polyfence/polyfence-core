@@ -86,12 +86,6 @@ class LocationTrackerPersistHookTest {
         method.invoke(tracker, zoneId, eventType, location, 5.0)
     }
 
-    /**
-     * A no-op delegate stub — represents the "bridge is registered" case.
-     * The persist-hook checks `coreDelegate == null || !bridgeAttached`;
-     * without a stub, `coreDelegate == null` always short-circuits to
-     * persist and the bridge-attached signal cannot be isolated.
-     */
     /** Records what core hands over, so a case can prove delivery happened. */
     private class CollectingDelegate : PolyfenceCoreDelegate {
         val received = mutableListOf<Map<String, Any>>()
@@ -102,6 +96,12 @@ class LocationTrackerPersistHookTest {
         override fun isTrackingEnabled(): Boolean = true
     }
 
+    /**
+     * A no-op delegate stub — represents the "bridge is registered" case.
+     * The persist-hook checks `coreDelegate == null || !bridgeAttached`;
+     * without a stub, `coreDelegate == null` always short-circuits to
+     * persist and the bridge-attached signal cannot be isolated.
+     */
     private class NoopDelegate : PolyfenceCoreDelegate {
         override fun onGeofenceEvent(eventData: Map<String, Any>) {}
         override fun onLocationUpdate(locationData: Map<String, Any>) {}
