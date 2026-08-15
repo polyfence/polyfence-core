@@ -65,6 +65,7 @@ class PendingEventsAutoDrainTest {
     fun tearDown() {
         storeDir.deleteRecursively()
         clearStagedListenerSignal()
+        LocationTracker.setPendingCoreDelegate(null)
         PolyfenceConfig(context).resetToDefaults()
     }
 
@@ -202,6 +203,46 @@ class PendingEventsAutoDrainTest {
             2,
             collector.received.size
         )
+    }
+
+    /**
+     * The staged half of the case below: a direct consumer that registers
+     * before the Service exists. `onCreate` applies that delegate, which raises
+     * the subscribe signal, and the replay it triggers must reach the queue.
+     *
+     * Ordering-sensitive. Raising the signal before `pendingEventsStore` is
+     * built makes the replay return on the queue-size check, which sits above
+     * the zone-state check that would otherwise defer it, so the deferred flag
+     * is never armed and the restore below hands over nothing. Live delivery of
+     * new crossings still works in that state, which is what makes the loss
+     * quiet: the consumer sees fresh events and never learns the stored ones
+     * existed.
+     */
+    @Test
+    fun `a delegate staged before the service starts replays the queue once zones restore`() {
+        invokeUpdateConfigurationFromMap(mapOf("pendingEventsQueueSize" to 10))
+        tracker.setCoreDelegate(null)
+        tracker.setBridgeAttached(false)
+        invokeHandleGeofenceEvent("zone-a", "ENTER")
+
+        // Null staged signal is what "no bridge has claimed it" looks like; a
+        // bridge stages false and keeps the auto-raise suppressed.
+        clearStagedListenerSignal()
+        LocationTracker.setPendingCoreDelegate(collector)
+
+        val staged = Robolectric.buildService(LocationTracker::class.java).create().get()
+        LocationTracker::class.java
+            .getDeclaredMethod("restoreZonesFromStorage")
+            .apply { isAccessible = true }
+            .invoke(staged)
+
+        assertEquals(
+            "the crossing queued before the consumer registered must be handed over",
+            1,
+            collector.received.size
+        )
+        assertEquals("zone-a", collector.received[0]["zoneId"])
+        assertEquals(true, collector.received[0]["deliveredLate"])
     }
 
     @Test

@@ -1025,9 +1025,6 @@ class LocationTracker : Service() {
         pendingEventsAutoDrainEnabled = config.pendingEventsAutoDrainEnabled
         pendingEventsStore = PendingEventsStore(applicationContext, pendingEventsQueueSize)
 
-        // Applied after the store exists so a listener that went live before
-        // this Service was created replays against a real queue. The drain
-        // itself still waits for restoreZonesFromStorage.
         // Applied after the store exists, for the same reason the listener
         // apply below is. Routed through setCoreDelegate rather than assigning
         // the field, so a direct Kotlin consumer still gets its "I am

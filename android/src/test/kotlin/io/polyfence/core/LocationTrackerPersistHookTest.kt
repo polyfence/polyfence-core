@@ -92,6 +92,16 @@ class LocationTrackerPersistHookTest {
      * without a stub, `coreDelegate == null` always short-circuits to
      * persist and the bridge-attached signal cannot be isolated.
      */
+    /** Records what core hands over, so a case can prove delivery happened. */
+    private class CollectingDelegate : PolyfenceCoreDelegate {
+        val received = mutableListOf<Map<String, Any>>()
+        override fun onGeofenceEvent(eventData: Map<String, Any>) { received.add(eventData) }
+        override fun onLocationUpdate(locationData: Map<String, Any>) {}
+        override fun onPerformanceEvent(performanceData: Map<String, Any>) {}
+        override fun onError(errorData: Map<String, Any>) {}
+        override fun isTrackingEnabled(): Boolean = true
+    }
+
     private class NoopDelegate : PolyfenceCoreDelegate {
         override fun onGeofenceEvent(eventData: Map<String, Any>) {}
         override fun onLocationUpdate(locationData: Map<String, Any>) {}
@@ -156,7 +166,8 @@ class LocationTrackerPersistHookTest {
         // different input and makes this look like the delegate path failing.
         stagedField("pendingEventListenerActive").set(null, null)
         stagedField("pendingBridgeAttached").set(null, null)
-        LocationTracker.setPendingCoreDelegate(NoopDelegate())
+        val collector = CollectingDelegate()
+        LocationTracker.setPendingCoreDelegate(collector)
 
         val staged = Robolectric.buildService(LocationTracker::class.java).create().get()
         // Configured on the staged instance, not the one from setUp. Pointing
@@ -183,8 +194,13 @@ class LocationTrackerPersistHookTest {
                 5.0
             )
 
+        // Asserted on the delegate, not just on an empty queue: an empty queue
+        // is equally consistent with the crossing never reaching the persist
+        // hook at all, so absence alone would not prove live delivery.
+        assertEquals(1, collector.received.size)
+        assertEquals("zone-1", collector.received[0]["zoneId"])
         assertTrue(
-            "a staged delegate must receive live delivery, not have its crossings withheld",
+            "live delivery must not also persist",
             LocationTracker.drainPendingEvents(context).isEmpty()
         )
     }
