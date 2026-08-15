@@ -94,11 +94,62 @@ final class LocationTrackerPersistHookTests: XCTestCase {
         tracker.updateConfigurationFromMap(["pendingEventsQueueSize": 10])
         tracker.coreDelegate = delegate
         tracker.setBridgeAttached(true)
+        // Stated rather than inherited from the coreDelegate didSet, so this
+        // reads as the all-three-conditions case it is meant to cover.
+        tracker.setEventListenerActive(true)
 
         tracker._testInvokeHandleGeofenceEvent(zoneId: "zone-a", eventType: "ENTER", location: locationAt(lat: 50.0, lng: 0.0))
 
         XCTAssertTrue(tracker.drainPendingEvents().isEmpty,
                       "Store must be empty — live delivery was possible so persist must not fire")
+    }
+
+    /// A registered delegate and a wired sink are not enough. When the consumer
+    /// has unsubscribed the bridge emits into nothing: a nil FlutterEventSink
+    /// swallows the call, RCTDeviceEventEmitter fans out to whoever registered.
+    /// The queue is the only place the crossing can survive, and this is the
+    /// case that produces a fired OS notification with nothing in the log.
+    ///
+    /// Load-bearing on iOS specifically: delivery is dispatched to the main
+    /// queue, so the delegate's outcome is not observable and this gate is the
+    /// only thing standing between an unsubscribed consumer and a lost event.
+    func testEventPersistsWhenBridgeAttachedButNoListenerActive() {
+        let delegate = NoopDelegate()
+        tracker.updateConfigurationFromMap(["pendingEventsQueueSize": 10])
+        tracker.coreDelegate = delegate
+        tracker.setBridgeAttached(true)
+        tracker.setEventListenerActive(false)
+
+        tracker._testInvokeHandleGeofenceEvent(zoneId: "zone-a", eventType: "ENTER", location: locationAt(lat: 50.0, lng: 0.0))
+
+        // Guarded rather than subscripted: when this regresses the array is
+        // empty, and indexing it traps and aborts the whole suite instead of
+        // reporting one failure.
+        guard let first = tracker.drainPendingEvents().first else {
+            return XCTFail("crossing was neither delivered nor queued")
+        }
+        XCTAssertEqual(first["zoneId"] as? String, "zone-a")
+        XCTAssertEqual(first["eventType"] as? String, "ENTER")
+    }
+
+    func testListenerToggleTakesEffectBetweenFires() {
+        let delegate = NoopDelegate()
+        tracker.updateConfigurationFromMap(["pendingEventsQueueSize": 10])
+        tracker.coreDelegate = delegate
+        tracker.setBridgeAttached(true)
+
+        tracker.setEventListenerActive(false)
+        tracker._testInvokeHandleGeofenceEvent(zoneId: "queued-1", eventType: "ENTER", location: locationAt(lat: 50.0, lng: 0.0))
+        guard let queued = tracker.drainPendingEvents().first else {
+            return XCTFail("crossing fired with no listener was neither delivered nor queued")
+        }
+        XCTAssertEqual(queued["zoneId"] as? String, "queued-1")
+
+        // Raised after the drain above so the replay it triggers has nothing to
+        // hand back and cannot mask the live-delivery assertion below.
+        tracker.setEventListenerActive(true)
+        tracker._testInvokeHandleGeofenceEvent(zoneId: "live-1", eventType: "EXIT", location: locationAt(lat: 50.0, lng: 0.0))
+        XCTAssertTrue(tracker.drainPendingEvents().isEmpty)
     }
 
     func testEventDoesNotPersistWhenQueueSizeIsZero() {

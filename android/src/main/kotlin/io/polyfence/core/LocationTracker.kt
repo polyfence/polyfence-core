@@ -1814,15 +1814,23 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         }
     }
 
-    // Attempt live delivery when a delegate is registered AND the bridge has
-    // signalled its sink is receiving. Any exception thrown by the delegate
-    // (e.g. Flutter EventSink.success off-main → IllegalStateException) flips
-    // bridgeAttached to false and falls through to the persist branch — a
-    // crashed bridge that never called setBridgeAttached(false) auto-recovers
-    // on the next event.
+    // Attempt live delivery only when all three conditions hold: a delegate is
+    // registered, the bridge's sink is wired, and a consumer is actually
+    // listening. The listener signal is load-bearing, not advisory. A bridge
+    // whose sink is wired but whose consumer has unsubscribed emits into
+    // nothing: RCTDeviceEventEmitter fans out to whoever registered, a nil
+    // FlutterEventSink swallows the call. Delivering there destroys the event
+    // and reports it delivered, so the crossing never reaches the durable
+    // queue either.
+    //
+    // A delegate that throws flips bridgeAttached to false and falls through to
+    // the persist branch, which recovers a bridge whose sink died without
+    // reporting it. That backstop cannot be relied on for bridges that marshal
+    // to another thread before touching their sink, since the delegate returns
+    // before delivery is attempted.
     val delegate = coreDelegate
     var deliveredLive = false
-    if (delegate != null && bridgeAttached) {
+    if (delegate != null && bridgeAttached && eventListenerActive) {
         try {
             delegate.onGeofenceEvent(eventMap)
             deliveredLive = true

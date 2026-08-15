@@ -121,9 +121,53 @@ class LocationTrackerPersistHookTest {
         invokeUpdateConfigurationFromMap(mapOf("pendingEventsQueueSize" to 10))
         tracker.setCoreDelegate(NoopDelegate())
         tracker.setBridgeAttached(true)
+        // Stated rather than inherited from setCoreDelegate's side effect, so
+        // this reads as the all-three-conditions case it is meant to cover.
+        tracker.setEventListenerActive(true)
 
         invokeHandleGeofenceEvent("zone-1", "ENTER")
 
+        assertTrue(LocationTracker.drainPendingEvents(context).isEmpty())
+    }
+
+    /**
+     * A registered delegate and a wired sink are not enough. When the consumer
+     * has unsubscribed, the bridge emits into an empty subscriber list and the
+     * crossing is destroyed, so the queue is the only place it can survive.
+     * This is the case a bridge reports through `setEventListenerActive`, and
+     * the one that produces a fired OS notification with nothing in the log.
+     */
+    @Test
+    fun `event persists when the bridge is attached but no listener is active`() {
+        invokeUpdateConfigurationFromMap(mapOf("pendingEventsQueueSize" to 10))
+        tracker.setCoreDelegate(NoopDelegate())
+        tracker.setBridgeAttached(true)
+        tracker.setEventListenerActive(false)
+
+        invokeHandleGeofenceEvent("zone-1", "ENTER")
+
+        val drained = LocationTracker.drainPendingEvents(context)
+        assertEquals(1, drained.size)
+        assertEquals("zone-1", drained[0]["zoneId"])
+        assertEquals("ENTER", drained[0]["eventType"])
+    }
+
+    @Test
+    fun `listener toggle takes effect between fires`() {
+        invokeUpdateConfigurationFromMap(mapOf("pendingEventsQueueSize" to 10))
+        tracker.setCoreDelegate(NoopDelegate())
+        tracker.setBridgeAttached(true)
+
+        tracker.setEventListenerActive(false)
+        invokeHandleGeofenceEvent("queued-1", "ENTER")
+        val queued = LocationTracker.drainPendingEvents(context)
+        assertEquals(1, queued.size)
+        assertEquals("queued-1", queued[0]["zoneId"])
+
+        // Raised after the drain above, so the replay this triggers has nothing
+        // to hand back and cannot mask the live-delivery assertion below.
+        tracker.setEventListenerActive(true)
+        invokeHandleGeofenceEvent("live-1", "EXIT")
         assertTrue(LocationTracker.drainPendingEvents(context).isEmpty())
     }
 

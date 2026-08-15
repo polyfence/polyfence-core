@@ -1046,26 +1046,31 @@ public class LocationTracker: NSObject {
         }
 
         // XOR delivery for the delegate path: live-deliver when a delegate is
-        // registered AND the bridge has signalled its sink is receiving;
-        // otherwise persist to the durable queue for a subsequent drain.
-        // Never both — persist AFTER a live delivery would double-report the
-        // crossing on the next drain.
+        // registered, the bridge's sink is wired AND a consumer is actually
+        // listening; otherwise persist to the durable queue for a subsequent
+        // drain. Never both — persist AFTER a live delivery would double-report
+        // the crossing on the next drain.
         //
-        // Unlike Android, iOS does not additionally try/catch the delegate
-        // invocation. Rationale: Swift try/catch catches only Swift Error
-        // values, not the Objective-C NSException that would flow from e.g. a
-        // FlutterEventSink invoked from the wrong queue — those crash the
-        // process rather than becoming catchable failures. iOS bridges own
-        // the responsibility of calling setBridgeAttached(false) from their
-        // teardown / invalidation callbacks; the tracker cannot detect a
-        // broken sink post-invocation the way Android can.
+        // The listener signal is load-bearing, not advisory. A bridge whose
+        // sink is wired but whose consumer has unsubscribed emits into nothing:
+        // a nil FlutterEventSink swallows the call, RCTDeviceEventEmitter fans
+        // out to whoever registered. Delivering there destroys the event and
+        // records it delivered, so it never reaches the queue either.
+        //
+        // This gate is the whole safety net on iOS. Delivery is dispatched to
+        // the main queue because platform sinks require it, so the delegate
+        // returns before delivery is attempted and its outcome is not
+        // observable here. Swift try/catch would not help either: it catches
+        // only Swift Error values, not the Objective-C NSException a sink
+        // invoked from the wrong queue raises. Correctness therefore depends on
+        // bridges keeping setBridgeAttached / setEventListenerActive accurate.
         bridgeAttachedLock.lock()
         let attached = bridgeAttached
         bridgeAttachedLock.unlock()
         let delegate = coreDelegate
         let deliveredLive: Bool
 
-        if delegate != nil && attached {
+        if delegate != nil && attached && isEventListenerActive() {
             DispatchQueue.main.async {
                 delegate?.onGeofenceEvent(finalEventData)
             }
