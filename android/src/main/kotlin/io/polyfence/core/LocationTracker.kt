@@ -1005,7 +1005,7 @@ class LocationTracker : Service() {
 
         // Apply pending core delegate set before service existed
         pendingCoreDelegate?.let { delegate ->
-            coreDelegate = delegate
+            setCoreDelegate(delegate)
         }
 
         // Apply pending bridge-attached hint set before service existed

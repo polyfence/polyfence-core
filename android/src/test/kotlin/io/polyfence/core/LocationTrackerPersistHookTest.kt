@@ -42,7 +42,17 @@ class LocationTrackerPersistHookTest {
     @After
     fun tearDown() {
         storeDir.deleteRecursively()
+        // Every one of these is process-wide companion state that a Service
+        // reads in onCreate. A case that leaves one set changes how the NEXT
+        // test class behaves, and the symptom surfaces as an unrelated gate
+        // input being false rather than as a leak.
+        LocationTracker.setPendingCoreDelegate(null)
+        stagedField("pendingEventListenerActive").set(null, null)
+        stagedField("pendingBridgeAttached").set(null, null)
     }
+
+    private fun stagedField(name: String) =
+        LocationTracker::class.java.getDeclaredField(name).apply { isAccessible = true }
 
     // Both helpers below reach past private visibility via reflection to exercise
     // the exact code path the running Service invokes. The alternatives —
@@ -128,6 +138,55 @@ class LocationTrackerPersistHookTest {
         invokeHandleGeofenceEvent("zone-1", "ENTER")
 
         assertTrue(LocationTracker.drainPendingEvents(context).isEmpty())
+    }
+
+    /**
+     * A direct Kotlin consumer has no listener lifecycle to hook, so
+     * registering a delegate is its only subscribe signal. Registering before
+     * the Service exists stages the delegate for `onCreate`, and that path must
+     * raise the signal the same way a live registration does. Applying the
+     * staged delegate by assignment skips it, which leaves live delivery gated
+     * shut for the life of the process and drops every crossing while the queue
+     * is off, as it is by default.
+     */
+    @Test
+    fun `a delegate staged before the service starts still gets live delivery`() {
+        // All three staged values are cleared, not just the listener one. A
+        // leftover pendingBridgeAttached=false shuts the gate through a
+        // different input and makes this look like the delegate path failing.
+        stagedField("pendingEventListenerActive").set(null, null)
+        stagedField("pendingBridgeAttached").set(null, null)
+        LocationTracker.setPendingCoreDelegate(NoopDelegate())
+
+        val staged = Robolectric.buildService(LocationTracker::class.java).create().get()
+        // Configured on the staged instance, not the one from setUp. Pointing
+        // this at the wrong tracker leaves its queue size at the default 0 and
+        // the drain below reads empty whether the gate opened or not.
+        LocationTracker::class.java
+            .getDeclaredMethod("updateConfigurationFromMap", Map::class.java)
+            .apply { isAccessible = true }
+            .invoke(staged, mapOf("pendingEventsQueueSize" to 10))
+        LocationTracker::class.java
+            .getDeclaredMethod(
+                "handleGeofenceEvent",
+                String::class.java,
+                String::class.java,
+                Location::class.java,
+                Double::class.javaPrimitiveType
+            )
+            .apply { isAccessible = true }
+            .invoke(
+                staged,
+                "zone-1",
+                "ENTER",
+                Location("test").apply { latitude = 51.5; longitude = -0.1 },
+                5.0
+            )
+
+        assertTrue(
+            "a staged delegate must receive live delivery, not have its crossings withheld",
+            LocationTracker.drainPendingEvents(context).isEmpty()
+        )
     }
 
     /**
