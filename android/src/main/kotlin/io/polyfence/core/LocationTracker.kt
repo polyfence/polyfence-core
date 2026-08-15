@@ -1003,11 +1003,6 @@ class LocationTracker : Service() {
             telemetryAggregator.setBridgePlatform(platform)
         }
 
-        // Apply pending core delegate set before service existed
-        pendingCoreDelegate?.let { delegate ->
-            setCoreDelegate(delegate)
-        }
-
         // Apply pending bridge-attached hint set before service existed
         pendingBridgeAttached?.let { attached ->
             bridgeAttached = attached
@@ -1033,6 +1028,20 @@ class LocationTracker : Service() {
         // Applied after the store exists so a listener that went live before
         // this Service was created replays against a real queue. The drain
         // itself still waits for restoreZonesFromStorage.
+        // Applied after the store exists, for the same reason the listener
+        // apply below is. Routed through setCoreDelegate rather than assigning
+        // the field, so a direct Kotlin consumer still gets its "I am
+        // receiving" moment: registering a delegate is the only subscribe
+        // signal such a consumer has, and live delivery is gated on it.
+        // Raising that signal before the store is built makes the replay it
+        // triggers return against a queue size of zero, above the zone-state
+        // check that would otherwise defer it, leaving a queue full of
+        // crossings that is never handed over. A bridge stages a listener value
+        // before the service exists, which suppresses the shortcut here.
+        pendingCoreDelegate?.let { delegate ->
+            setCoreDelegate(delegate)
+        }
+
         pendingEventListenerActive?.let { active ->
             setEventListenerActive(active)
         }
