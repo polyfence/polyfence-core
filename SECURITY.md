@@ -4,7 +4,8 @@
 
 | Version | Supported |
 |---------|-----------|
-| 1.0.x   | Yes       |
+| 3.0.x   | Yes       |
+| < 3.0   | No        |
 
 ## Reporting a Vulnerability
 
@@ -91,7 +92,7 @@ This is **not** required for normal use cases — standard "you arrived at the o
 
 ## Security Updates
 
-Security updates are released as patch versions (e.g., 1.0.1) and announced via:
+Security updates are released as patch versions (e.g., 3.0.1) and announced via:
 
 - GitHub Security Advisories
 - CHANGELOG.md

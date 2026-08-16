@@ -347,7 +347,7 @@ object SmartGpsConfigFactory {
      * values for shape stability — this is the READ / display shape
      * only. Runtime null semantics are unchanged until a config is
      * re-applied via [fromMap]. Use [toMergeBaseMap] for the sparse
-     * variant needed by BUG-015 merge. BUG-014b.
+     * variant needed when merging a partial configuration.
      */
     fun toMap(config: SmartGpsConfig): Map<String, Any> {
         return mapOf(
@@ -362,8 +362,8 @@ object SmartGpsConfigFactory {
 
     /**
      * Sparse base shape used by [LocationTracker.updateConfigurationFromMap]
-     * for BUG-015 merge. Nested settings that are null on the instance
-     * are omitted — matches pre-BUG-014b [toMap] semantics. Merging a
+     * when merging a partial configuration. Nested settings that are
+     * null on the instance are omitted. Merging a
      * partial update against this base won't materialise a
      * default-constructed nested block the caller never asked for
      * (which the runtime treats as "feature inactive"). Do NOT use

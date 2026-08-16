@@ -1,7 +1,7 @@
 # PolyfenceCore — Privacy Policy
 
-**Effective Date:** March 26, 2026
-**Last Updated:** March 26, 2026
+**Effective Date:** August 5, 2026
+**Last Updated:** August 5, 2026
 **Applies to:** PolyfenceCore native library (Kotlin + Swift)
 
 ---
@@ -18,7 +18,9 @@ PolyfenceCore is a standalone on-device geofencing engine. It performs geometric
 
 ### Zero PII about your end users
 
-This library **never collects, transmits, or stores** location data, identifiers, or PII. It makes no network calls to Polyfence, includes no vendor telemetry, and does not send us any data. All geofence math runs on-device. Any zone or location data remains under **your** app's control.
+This library **never collects, transmits, or stores** location data, identifiers, or PII. It makes no network calls to Polyfence, includes no vendor telemetry, and does not send us any data. Any zone or location data remains under **your** app's control.
+
+All geofence math runs on-device by default. The one exception is the opt-in OS wake fences described below, which share zone boundaries — never positions — with the operating system.
 
 ---
 
@@ -27,6 +29,15 @@ This library **never collects, transmits, or stores** location data, identifiers
 - Does not connect to the internet
 - Does not phone home, track usage, or send analytics to Polyfence or third parties
 - Does not request device permissions (GPS and activity recognition permissions are your app's responsibility)
+- Does not share anything with the operating system's geofence service unless you opt in — see below
+
+### OS wake fences (opt-in, off by default)
+
+When the developer enables `osGeofenceWakeEnabled`, Polyfence registers a small number of zone perimeters (coordinates + radius) with the phone's operating system geofence service, so that events can fire when the app is not running. Only zone boundaries are shared with the OS — the user's location is still processed on-device and is never sent to the OS or to us via this mechanism. When `osGeofenceWakeEnabled` is disabled (the default), no zone data is shared with the OS.
+
+On Android those boundaries go to Google Play Services; on iOS, to CoreLocation. Both are components of the device's operating system, not Polyfence services. If you enable this, reflect it in your own privacy policy.
+
+This is also the only part of the library that needs a background-location grant. Base tracking runs as a foreground service and asks for foreground location only, so an integration that leaves wake fences off never requests `ACCESS_BACKGROUND_LOCATION` (Android) or "Always" authorization (iOS), and shares nothing with the OS geofence service.
 
 ### Local persistence (optional)
 

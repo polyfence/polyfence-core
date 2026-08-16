@@ -228,6 +228,29 @@ class ZonePersistence(private val context: Context) {
     }
 
     /**
+     * Merge zone states into persistent storage as a single write-through.
+     *
+     * Zone ids absent from [states] keep their stored membership, so a caller
+     * holding only a partial view of the zone set cannot erase the rest.
+     * Deletion is deliberate and has its own entry points — [removeZoneState]
+     * and [clearAllZoneStates].
+     *
+     * Thread-safe: Uses synchronization to prevent race conditions
+     */
+    fun mergeZoneStates(states: Map<String, Boolean>) {
+        if (states.isEmpty()) return
+        synchronized(lock) {
+            try {
+                val merged = loadZoneStates().toMutableMap()
+                merged.putAll(states)
+                saveZoneStates(merged)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to merge zone states: ${e.message}")
+            }
+        }
+    }
+
+    /**
      * Save single zone state (write-through)
      * More efficient for single state changes
      */

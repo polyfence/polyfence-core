@@ -9,8 +9,6 @@ import android.os.Process
 import android.os.Debug
 import androidx.core.app.ActivityCompat
 import android.Manifest
-import java.io.RandomAccessFile
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedDeque
 
 /**
@@ -18,76 +16,131 @@ import java.util.concurrent.ConcurrentLinkedDeque
  * Integrates with existing analytics and error systems
  */
 class PolyfenceDebugCollector {
+
+    /**
+     * Names of the payload entries that are read back by name elsewhere in
+     * the library rather than only handed to a consumer.
+     *
+     * A reader that spells one of these differently gets null and falls back
+     * to a default — and for the scored metrics the default is the *best*
+     * possible value, so a typo raises the health score instead of breaking
+     * it. Sharing the constant makes the two sides impossible to drift apart.
+     */
+    object Key {
+        const val PERFORMANCE = "performance"
+        const val RECENT_ERRORS = "recentErrors"
+        const val AVERAGE_DETECTION_LATENCY = "averageDetectionLatency"
+    }
+
     companion object {
-        private val performanceMetrics = ConcurrentHashMap<String, Any>()
         private val errorHistory = ConcurrentLinkedDeque<Map<String, Any>>()
         private var sessionStartTime = System.currentTimeMillis()
+        private var pluginVersion: String? = null // Stored during initialization
+
+        /**
+         * Guards the session counters below. They are written from the
+         * location and geofence callback threads and read from whichever
+         * background thread serves [collectDebugInfo], so every access is
+         * taken under this monitor. Readers snapshot the values and release
+         * before doing anything else with them, so a debug poll can never
+         * hold the monitor across work that would stall an incoming GPS fix.
+         */
+        private val metricsLock = Any()
         private var lastLocationUpdateTime = 0L
         private var lastKnownAccuracy = -1.0
         private var locationUpdateCount = 0
         private var zoneDetectionCount = 0
-        private var totalDetectionLatency = 0.0
+        private var timedDetectionCount = 0
+        private var totalDetectionLatencyMs = 0.0
         private var restartCount = 0
-        private var pluginVersion: String? = null // Stored during initialization
-        private var geofenceEngine: GeofenceEngine? = null
-
-        /**
-         * Set reference to GeofenceEngine for zone status collection
-         */
-        fun setGeofenceEngine(engine: GeofenceEngine) {
-            geofenceEngine = engine
-        }
 
         fun collectDebugInfo(context: Context): Map<String, Any> {
             return mapOf(
                 "systemStatus" to collectSystemStatus(context),
-                "performance" to collectPerformanceMetrics(),
+                Key.PERFORMANCE to collectPerformanceMetrics(),
                 "battery" to collectBatteryMetrics(context),
                 "zones" to collectZoneStatus(),
-                "recentErrors" to getRecentErrors()
+                Key.RECENT_ERRORS to getRecentErrors()
             )
         }
 
-        private fun collectSystemStatus(context: Context): Map<String, Any> {
+        private fun collectSystemStatus(context: Context): Map<String, Any?> {
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as AndroidLocationManager
+
+            val accuracy: Double
+            val lastUpdate: Long
+            synchronized(metricsLock) {
+                accuracy = lastKnownAccuracy
+                lastUpdate = lastLocationUpdateTime
+            }
 
             return mapOf(
                 "isLocationPermissionGranted" to hasLocationPermission(context),
                 "isBackgroundLocationEnabled" to hasBackgroundLocationPermission(context),
                 "isBatteryOptimizationDisabled" to powerManager.isIgnoringBatteryOptimizations(context.packageName),
                 "isGpsEnabled" to isGpsEnabled(locationManager),
-                "isWakeLockAcquired" to isWakeLockAcquired(),
-                "lastKnownAccuracy" to lastKnownAccuracy,
-                "lastLocationUpdate" to lastLocationUpdateTime,
+                "isWakeLockAcquired" to LocationTracker.currentWakeLockHeld(),
+                "lastKnownAccuracy" to accuracy,
+                "lastLocationUpdate" to lastUpdate,
                 "platformVersion" to Build.VERSION.RELEASE,
-                "pluginVersion" to getPluginVersion()
+                "pluginVersion" to getPluginVersion(),
+                // Null when osGeofenceWakeEnabled = false. Present as a
+                // { requested, registered, lastError } map when opted in so a
+                // consumer surface can observe OS-cap hits (requested >
+                // registered) or permission drift (lastError set to a
+                // background_location_denied-shaped string).
+                "osGeofenceRegistrationHealth" to
+                    (LocationTracker.osGeofenceRegistrationHealth())
             )
         }
 
-        private fun collectPerformanceMetrics(): Map<String, Any> {
+        private fun collectPerformanceMetrics(): Map<String, Any?> {
             val runtime = Runtime.getRuntime()
             val usedMemory = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024
 
+            val updates: Int
+            val detections: Int
+            val averageLatency: Double?
+            val timed: Int
+            val restarts: Int
+            synchronized(metricsLock) {
+                updates = locationUpdateCount
+                detections = zoneDetectionCount
+                // Absent until a crossing has been *timed*: a synthesised
+                // one raises totalZoneDetections without contributing a
+                // sample. Zero is the best possible latency, so reporting it
+                // for "no samples" makes an unmeasured device look perfect.
+                timed = timedDetectionCount
+                averageLatency = if (timedDetectionCount > 0) {
+                    totalDetectionLatencyMs / timedDetectionCount
+                } else {
+                    null
+                }
+                restarts = restartCount
+            }
+
             return mapOf(
                 "uptime" to (System.currentTimeMillis() - sessionStartTime),
-                "totalLocationUpdates" to locationUpdateCount,
-                "totalZoneDetections" to zoneDetectionCount,
-                "averageDetectionLatency" to if (zoneDetectionCount > 0) totalDetectionLatency / zoneDetectionCount else 0.0,
+                "totalLocationUpdates" to updates,
+                "totalZoneDetections" to detections,
+                // How many of those were timed, and so how many samples the
+                // mean below covers. Without it a consumer would assume the
+                // mean spans every crossing, which it cannot when the engine
+                // synthesises one outside a timed evaluation.
+                "timedZoneDetections" to timed,
+                Key.AVERAGE_DETECTION_LATENCY to averageLatency,
+                // Java heap only. iOS reports whole-process resident size, so
+                // the two are not comparable across platforms.
                 "memoryUsageMB" to usedMemory.toInt(),
-                "cpuUsagePercent" to getCpuUsage(),
-                "restartCount" to restartCount
+                "restartCount" to restarts
             )
         }
 
         private fun collectBatteryMetrics(context: Context): Map<String, Any> {
             val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
-            val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
 
             return mapOf(
-                "estimatedHourlyDrain" to estimateBatteryDrain(),
-                "gpsActiveTimePercent" to calculateGpsActiveTimePercent(),
-                "wakeUpCount" to getWakeUpCount(),
                 "isCharging" to isCharging(batteryManager),
                 "batteryLevel" to getBatteryLevel(batteryManager),
                 "totalActiveTime" to (System.currentTimeMillis() - sessionStartTime)
@@ -95,14 +148,16 @@ class PolyfenceDebugCollector {
         }
 
         private fun collectZoneStatus(): Map<String, Any> {
-            val engine = geofenceEngine
+            // Read through the running service rather than holding a
+            // reference: once the service is destroyed there is nothing being
+            // monitored, and a retained engine would keep reporting the zones
+            // of a session that has ended.
+            val engine = LocationTracker.currentGeofenceEngine()
             if (engine == null) {
                 return mapOf(
                     "activeZones" to 0,
                     "circleZones" to 0,
-                    "polygonZones" to 0,
-                    "lastZoneUpdate" to System.currentTimeMillis(),
-                    "zoneEventCounts" to emptyMap<String, Int>()
+                    "polygonZones" to 0
                 )
             }
 
@@ -113,9 +168,7 @@ class PolyfenceDebugCollector {
             return mapOf(
                 "activeZones" to zones.size,
                 "circleZones" to circleCount,
-                "polygonZones" to polygonCount,
-                "lastZoneUpdate" to System.currentTimeMillis(),
-                "zoneEventCounts" to emptyMap<String, Int>()
+                "polygonZones" to polygonCount
             )
         }
 
@@ -124,14 +177,35 @@ class PolyfenceDebugCollector {
         }
 
         fun recordLocationUpdate(accuracy: Double) {
-            lastKnownAccuracy = accuracy
-            lastLocationUpdateTime = System.currentTimeMillis()
-            locationUpdateCount++
+            synchronized(metricsLock) {
+                lastKnownAccuracy = accuracy
+                lastLocationUpdateTime = System.currentTimeMillis()
+                locationUpdateCount++
+            }
         }
 
-        fun recordZoneDetection(latencyMs: Long) {
-            zoneDetectionCount++
-            totalDetectionLatency += latencyMs
+        /**
+         * Record one zone crossing, and the time the engine spent producing
+         * it where that was measured.
+         *
+         * A null latency means the crossing was real but never timed — the
+         * engine synthesises some outside a location evaluation. Those still
+         * count as crossings, because the consumer received them; they are
+         * simply left out of the mean rather than folded in as zero, which
+         * would drag it toward a speed nothing achieved.
+         *
+         * Latency is fractional milliseconds: a point-in-zone evaluation
+         * routinely completes in well under a millisecond, so the sum is kept
+         * and the mean derived at read time.
+         */
+        fun recordZoneDetection(latencyMs: Double?) {
+            synchronized(metricsLock) {
+                zoneDetectionCount++
+                if (latencyMs != null) {
+                    timedDetectionCount++
+                    totalDetectionLatencyMs += latencyMs
+                }
+            }
         }
 
         fun recordError(errorType: String, message: String, context: Map<String, Any> = emptyMap()) {
@@ -148,7 +222,7 @@ class PolyfenceDebugCollector {
          * PolyfenceErrorManager uses this to preserve correlationId and
          * share the exact timestamp between the real-time callback and
          * the persisted entry — matching iOS's addErrorToHistory
-         * semantics. BUG-016 parity nit.
+         * semantics.
          */
         fun recordError(errorEntry: Map<String, Any>) {
             errorHistory.addLast(errorEntry)
@@ -159,8 +233,16 @@ class PolyfenceDebugCollector {
             }
         }
 
+        /**
+         * Record that the tracking service was created again inside a process
+         * that had already created it once. Counting is scoped to the process:
+         * a restart that follows process death takes this state with it, so
+         * the figure reads alongside `uptime`, which has the same scope.
+         */
         fun recordRestart() {
-            restartCount++
+            synchronized(metricsLock) {
+                restartCount++
+            }
         }
 
         fun getErrorHistory(timeRangeMs: Long?, errorTypes: List<String>?): List<Map<String, Any>> {
@@ -210,12 +292,6 @@ class PolyfenceDebugCollector {
                    locationManager.isProviderEnabled(AndroidLocationManager.NETWORK_PROVIDER)
         }
 
-        private fun isWakeLockAcquired(): Boolean {
-            // This would check if our wake lock is currently held
-            // For now, return false as we don't have direct access to the wake lock instance
-            return false
-        }
-
         /**
          * Set plugin version (called during initialization)
          */
@@ -225,58 +301,6 @@ class PolyfenceDebugCollector {
 
         private fun getPluginVersion(): String {
             return pluginVersion ?: "unknown"
-        }
-
-        /**
-         * Measures CPU usage by reading /proc/stat before and after a 360ms interval.
-         * Must be called from a background thread — blocks for ~360ms to measure CPU usage.
-         * Do not call from the main thread.
-         */
-        private fun getCpuUsage(): Double {
-            require(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
-                "getCpuUsage() blocks for ~360ms and must not be called on the main thread"
-            }
-            return try {
-                val reader = RandomAccessFile("/proc/stat", "r")
-                val load = reader.readLine()
-                reader.close()
-
-                val toks = load.split(" ".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
-                val idle1 = toks[4].toLong()
-                val cpu1 = toks[1].toLong() + toks[2].toLong() + toks[3].toLong() + toks[5].toLong() + toks[6].toLong() + toks[7].toLong() + toks[8].toLong()
-
-                Thread.sleep(360)
-
-                val reader2 = RandomAccessFile("/proc/stat", "r")
-                val load2 = reader2.readLine()
-                reader2.close()
-
-                val toks2 = load2.split(" ".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
-                val idle2 = toks2[4].toLong()
-                val cpu2 = toks2[1].toLong() + toks2[2].toLong() + toks2[3].toLong() + toks2[5].toLong() + toks2[6].toLong() + toks2[7].toLong() + toks2[8].toLong()
-
-                val cpuUsage = (cpu2 - cpu1).toDouble() / ((cpu2 + idle2) - (cpu1 + idle1)) * 100.0
-                cpuUsage.coerceIn(0.0, 100.0)
-            } catch (e: Exception) {
-                0.0
-            }
-        }
-
-        private fun estimateBatteryDrain(): Double {
-            // Simple estimation based on GPS usage
-            val gpsActiveTime = (System.currentTimeMillis() - sessionStartTime) / 1000.0 / 3600.0 // hours
-            return gpsActiveTime * 5.0 // Estimated 5% per hour for GPS
-        }
-
-        private fun calculateGpsActiveTimePercent(): Int {
-            val totalTime = System.currentTimeMillis() - sessionStartTime
-            val gpsActiveTime = totalTime // Assume GPS is always active when tracking
-            return ((gpsActiveTime.toDouble() / totalTime) * 100).toInt()
-        }
-
-        private fun getWakeUpCount(): Int {
-            // This would track wake-up events
-            return 0
         }
 
         private fun isCharging(batteryManager: android.os.BatteryManager): Boolean {

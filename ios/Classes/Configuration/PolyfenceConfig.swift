@@ -4,6 +4,22 @@ import Foundation
  * Centralized configuration management for Polyfence iOS
  * Single responsibility: Runtime configuration and persistence
  * iOS counterpart of Android PolyfenceConfig.kt
+ *
+ * ## Every field here must be written by updateConfigurationFromMap
+ *
+ * This class is the only thing that survives process death. The OS can
+ * relaunch a killed process — on a region crossing, on a significant location
+ * change — and run library code before any bridge has had the chance to
+ * re-apply configuration. Whatever is not persisted here reads as its
+ * compile-time default in that window.
+ *
+ * A field that is applied to an in-memory property but not written back here
+ * therefore appears to work in every test and in every foreground session, and
+ * silently reverts in exactly the scenario the durable-queue and wake-fence
+ * features exist for. Adding a config field means adding it in three places:
+ * this class, the write path in `LocationTracker.updateConfigurationFromMap`,
+ * and the read path in `setupGeofenceEngine`. The Android `PolyfenceConfig`
+ * carries the same rule.
  */
 public class PolyfenceConfig {
 
@@ -42,6 +58,12 @@ public class PolyfenceConfig {
     static let MIN_GPS_RESTART_INTERVAL_MS: Int = 10000
     static let MIN_UPDATE_RESTART_INTERVAL_MS: Int = 5000
     static let MAX_UPDATE_RESTART_DELAY_MS: Int = 15000
+
+    // MARK: - OS Wake-Fence Slot Allocation
+    // Apple monitors at most 20 CLCircularRegions per app. Default and ceiling
+    // are the same value because there is no headroom to hand out.
+    public static let DEFAULT_OS_GEOFENCE_MAX_REGIONS: Int = 20
+    public static let DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS: Int = 20
 
     // MARK: - Validation Ranges
     static let MIN_GPS_INTERVAL_MS: Int = 1000
@@ -84,6 +106,79 @@ public class PolyfenceConfig {
     public var gpsStalenessTimeoutMs: Double {
         get { return defaults.double(forKey: "gps_staleness_timeout_ms") }
         set { defaults.set(newValue, forKey: "gps_staleness_timeout_ms") }
+    }
+
+    // Durable pending-events queue cap. 0 = off (default). When > 0, geofence
+    // events fired while the bridge sink is not receiving are persisted to disk
+    // in a bounded ring buffer; oldest events evict on overflow. Drained by the
+    // consumer via LocationTracker.drainPendingEvents.
+    public var pendingEventsQueueSize: Int {
+        get { return defaults.integer(forKey: "pending_events_queue_size") }
+        set { defaults.set(newValue, forKey: "pending_events_queue_size") }
+    }
+
+    // Automatic delivery of queued events. true = on (default) — the moment a
+    // consumer signals a live event listener, the queue is drained and replayed
+    // through the normal event callback. false leaves the queue pull-only, so
+    // nothing is delivered until the consumer calls
+    // LocationTracker.drainPendingEvents itself. Only has an effect while
+    // pendingEventsQueueSize > 0.
+    // Reads through `object(forKey:)` because `bool(forKey:)` cannot tell an
+    // absent key from a stored `false`, and this default is `true`.
+    public var pendingEventsAutoDrainEnabled: Bool {
+        get {
+            if defaults.object(forKey: "pending_events_auto_drain_enabled") != nil {
+                return defaults.bool(forKey: "pending_events_auto_drain_enabled")
+            }
+            return true
+        }
+        set { defaults.set(newValue, forKey: "pending_events_auto_drain_enabled") }
+    }
+
+    // OS wake-fence registration. false = off (default) — Polyfence's own polling
+    // engine is the sole detector; nothing is registered with the OS. When true,
+    // the top-N-nearest active zones are registered with CLLocationManager
+    // region monitoring so an OS-side callback can wake the app after full
+    // process kill and enqueue the crossing into the pending-events queue for
+    // drain-on-next-boot. Requires "Always" location authorization granted by
+    // the consumer app and the corresponding Info.plist usage description.
+    public var osGeofenceWakeEnabled: Bool {
+        get { return defaults.bool(forKey: "os_geofence_wake_enabled") }
+        set { defaults.set(newValue, forKey: "os_geofence_wake_enabled") }
+    }
+
+    // How many OS geofence slots Polyfence may occupy while the app is
+    // backgrounded. Unlike Android there is nothing to tune here: iOS hard-caps
+    // simultaneously-monitored CLCircularRegions at 20 per app, so the default
+    // is already the ceiling and any higher value is clamped. The field exists
+    // so the configuration surface stays identical across platforms and so a
+    // consumer that registers its own regions can lower it.
+    // Clamped on write so the persisted value is always the value that will
+    // actually be applied. Storing the raw request instead would make
+    // getConfiguration() echo a budget the registrar never uses, and would
+    // leave consumers with no way to discover the effective one. The clamp
+    // guarantees a stored value is never 0, so treating 0 as "unset" below
+    // cannot swallow a deliberate setting.
+    public var osGeofenceMaxRegions: Int {
+        get {
+            let stored = defaults.integer(forKey: "os_geofence_max_regions")
+            return stored != 0 ? stored : PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
+        }
+        set {
+            defaults.set(
+                PolyfenceConfig.clampOsGeofenceMaxRegions(newValue),
+                forKey: "os_geofence_max_regions"
+            )
+        }
+    }
+
+    /// Constrains a slot budget to what the platform will honour. iOS silently
+    /// declines regions past its per-app cap, so passing a raw value through
+    /// would report coverage that does not exist. Kept identical in shape to
+    /// the Android clamp so the same consumer value produces the same
+    /// effective budget on both platforms.
+    public static func clampOsGeofenceMaxRegions(_ requested: Int) -> Int {
+        return min(max(requested, 1), DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS)
     }
 
     public var minUpdateIntervalMs: Int {

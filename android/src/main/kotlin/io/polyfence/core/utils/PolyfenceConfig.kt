@@ -7,6 +7,22 @@ import android.util.Log
 /**
  * Centralized configuration management for Polyfence
  * Single responsibility: Runtime configuration and persistence
+ *
+ * ## Every field here must be written by updateConfigurationFromMap
+ *
+ * This class is the only thing that survives process death. The OS can
+ * relaunch a killed process — on a geofence crossing, on a significant
+ * location change, at boot — and run library code before any bridge has had
+ * the chance to re-apply configuration. Whatever is not persisted here reads
+ * as its compile-time default in that window.
+ *
+ * A field that is applied to an in-memory property but not written back here
+ * therefore appears to work in every test and in every foreground session, and
+ * silently reverts in exactly the scenario the durable-queue and wake-fence
+ * features exist for. Adding a config field means adding it in three places:
+ * this class, the write path in `LocationTracker.updateConfigurationFromMap`,
+ * and the read path in the tracker's setup. The iOS `PolyfenceConfig` carries
+ * the same rule.
  */
 class PolyfenceConfig(context: Context) {
 
@@ -68,6 +84,22 @@ class PolyfenceConfig(context: Context) {
         // Cache Configuration
         const val DEFAULT_LRU_INITIAL_CAPACITY = 16
         const val DEFAULT_LRU_LOAD_FACTOR = 0.75f
+
+        // OS wake-fence slot allocation. Google Play Services caps geofences at
+        // 100 per app; the default reserves half for the consumer's own
+        // registrations because there is no way to discover how many they hold.
+        const val DEFAULT_OS_GEOFENCE_MAX_REGIONS = 50
+        const val DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS = 100
+
+        /**
+         * Constrains a slot budget to what the platform will honour. Play
+         * Services rejects an over-large `addGeofences` request wholesale, so
+         * passing a raw value through would register nothing rather than
+         * register more. Kept identical in shape to the iOS clamp so the same
+         * consumer value produces the same effective budget on both platforms.
+         */
+        fun clampOsGeofenceMaxRegions(requested: Int): Int =
+            requested.coerceIn(1, DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS)
     }
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -93,6 +125,60 @@ class PolyfenceConfig(context: Context) {
         get() = prefs.getLong("gps_staleness_timeout_ms", 0L)
         set(value) {
             prefs.edit().putLong("gps_staleness_timeout_ms", value).apply()
+        }
+
+    // Durable pending-events queue cap. 0 = off (default). When > 0, geofence
+    // events fired while the bridge sink is not receiving are persisted to disk
+    // in a bounded ring buffer; oldest events evict on overflow. Drained by the
+    // consumer via LocationTracker.drainPendingEvents.
+    var pendingEventsQueueSize: Int
+        get() = prefs.getInt("pending_events_queue_size", 0)
+        set(value) {
+            prefs.edit().putInt("pending_events_queue_size", value).apply()
+        }
+
+    // Automatic delivery of queued events. true = on (default) — the moment a
+    // consumer signals a live event listener, the queue is drained and replayed
+    // through the normal event callback. false leaves the queue pull-only, so
+    // nothing is delivered until the consumer calls
+    // LocationTracker.drainPendingEvents itself. Only has an effect while
+    // pendingEventsQueueSize > 0.
+    var pendingEventsAutoDrainEnabled: Boolean
+        get() = prefs.getBoolean("pending_events_auto_drain_enabled", true)
+        set(value) {
+            prefs.edit().putBoolean("pending_events_auto_drain_enabled", value).apply()
+        }
+
+    // OS wake-fence registration. false = off (default) — Polyfence's own polling
+    // engine is the sole detector; nothing is registered with the OS. When true,
+    // the top-N-nearest active zones are registered with GeofencingClient so an
+    // OS-side broadcast can wake the app after full process kill and enqueue the
+    // crossing into the pending-events queue for drain-on-next-boot. Requires
+    // ACCESS_BACKGROUND_LOCATION granted by the consumer app.
+    var osGeofenceWakeEnabled: Boolean
+        get() = prefs.getBoolean("os_geofence_wake_enabled", false)
+        set(value) {
+            prefs.edit().putBoolean("os_geofence_wake_enabled", value).apply()
+        }
+
+    // How many OS geofence slots Polyfence may occupy while the app is
+    // backgrounded. Google Play Services allows 100 geofences per APP, not per
+    // library, and exposes no API to query how many are already spoken for —
+    // so a consumer that registers its own geofences has to tell us how much
+    // room to leave. The default leaves half the allocation free; a consumer
+    // with no geofences of its own can raise this to
+    // DEFAULT_OS_GEOFENCE_PLATFORM_MAX_REGIONS for full coverage. Values above
+    // the platform maximum are clamped.
+    // Clamped on write so the persisted value is always the value that will
+    // actually be applied. Storing the raw request instead would make
+    // getConfiguration() echo a budget the registrar never uses, and would
+    // leave consumers with no way to discover the effective one.
+    var osGeofenceMaxRegions: Int
+        get() = prefs.getInt("os_geofence_max_regions", DEFAULT_OS_GEOFENCE_MAX_REGIONS)
+        set(value) {
+            prefs.edit()
+                .putInt("os_geofence_max_regions", clampOsGeofenceMaxRegions(value))
+                .apply()
         }
 
     var minUpdateIntervalMs: Long

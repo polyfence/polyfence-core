@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "io.polyfence"
-version = "1.0.14"
+version = "3.0.0"
 
 android {
     namespace = "io.polyfence.core"

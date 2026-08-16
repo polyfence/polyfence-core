@@ -495,8 +495,7 @@ class ScheduleReceiver : BroadcastReceiver() {
 
                 // Restart continuous tracking if it was active before boot/update.
                 // Use persisted tracking state — delegate is unavailable in a BroadcastReceiver.
-                val trackingPrefs = context.getSharedPreferences("polyfence_tracking", Context.MODE_PRIVATE)
-                val wasTrackingActive = trackingPrefs.getBoolean("continuous_tracking_active", false)
+                val wasTrackingActive = LocationTracker.isContinuousTrackingIntended(context)
                 if (!scheduler.isEnabled() && wasTrackingActive) {
                     Log.i("ScheduleReceiver", "Restarting continuous tracking after ${intent.action}")
                     val serviceIntent = Intent(context, LocationTracker::class.java).apply {

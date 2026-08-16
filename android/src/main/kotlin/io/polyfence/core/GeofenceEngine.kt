@@ -176,6 +176,14 @@ class GeofenceEngine {
     // Track if state was recovered from persistence on startup
     private var stateRecoveredFromPersistence = false
 
+    // Mutual exclusion between reconcile and drain-apply. Both mutate zoneStates
+    // and emit events based on it; if reconcile runs mid-apply, it could see a
+    // half-updated zoneStates and fire a spurious RECOVERY_ENTER/EXIT for a
+    // zone whose drain-final state hasn't been written yet. Holding the same
+    // lock across both operations serialises them without adding overhead to
+    // per-fix zone checks (checkLocation does not take this lock).
+    private val reconcileLock = Any()
+
 
     /**
      * Zone confidence tracking
@@ -512,11 +520,22 @@ fun getZoneName(zoneId: String): String? {
     }
 
     /**
-     * Reconcile zone states with current location after service restart
-     * Fires RECOVERY_ENTER/RECOVERY_EXIT events for mismatches
-     * Should be called with first valid location after restart
+     * Reconcile zone states with current location after service restart.
+     * Fires RECOVERY_ENTER/RECOVERY_EXIT events for mismatches. Should be
+     * called with the first valid location after restart.
+     *
+     * Drain-then-reconcile ordering is preserved via applyDrainedEventsToState
+     * (called from LocationTracker.drainPendingEvents BEFORE reconcile runs):
+     * that method walks the drained batch and writes the post-drain truth into
+     * zoneStates. Reconcile then does its normal mismatch check — if the drain
+     * left state consistent with actual position, no recovery event fires; if
+     * a genuine mismatch remains (e.g. eviction dropped a later crossing so
+     * the drain's final state disagrees with GPS), reconcile correctly fires
+     * RECOVERY_ENTER / RECOVERY_EXIT to recover the missed transition. Signature
+     * is unchanged from the pre-queue behaviour — the ordering rule lives in
+     * the state-application done upstream, not in a skip-list at this layer.
      */
-    fun reconcileZoneStates(location: Location) {
+    fun reconcileZoneStates(location: Location) = synchronized(reconcileLock) {
         if (!stateRecoveredFromPersistence) {
             // Cold-start race guard: if no zones are registered yet, the engine
             // got a GPS fix before the bridge's addZone() calls landed (most
@@ -555,7 +574,7 @@ fun getZoneName(zoneId: String): String? {
                     eventCallback?.invoke(zoneId, "ENTER", location, detectionTimeMs)
                 }
             }
-            persistAllZoneStates()
+            persistKnownZoneStates()
             return
         }
 
@@ -587,7 +606,7 @@ fun getZoneName(zoneId: String): String? {
 
         if (reconciliationCount > 0) {
             Log.i(TAG, "Reconciled $reconciliationCount zone state mismatches")
-            persistAllZoneStates()
+            persistKnownZoneStates()
         } else {
             Log.d(TAG, "All zone states match current location - no reconciliation needed")
         }
@@ -596,11 +615,77 @@ fun getZoneName(zoneId: String): String? {
     }
 
     /**
-     * Persist all current zone states (called after reconciliation or bulk changes)
+     * Apply the state implied by a batch of drained pending events to the
+     * engine's zoneStates and persist the updated snapshot. Returns the set
+     * of zoneIds whose state was touched.
+     *
+     * LocationTracker.drainPendingEvents calls this BEFORE the next
+     * reconcileZoneStates fires. The subsequent reconcile then does its
+     * normal mismatch check against the post-drain zoneStates — where the
+     * drained batch left state consistent with actual position, no
+     * recovery event fires; where a genuine mismatch remains (e.g. eviction
+     * dropped a later crossing so the drain's final state disagrees with
+     * GPS), reconcile fires RECOVERY_ENTER / RECOVERY_EXIT to recover the
+     * missed transition.
+     *
+     * Only ENTER/EXIT/DWELL events (and their RECOVERY variants) mutate
+     * membership. SIGNAL_LOST/SIGNAL_RESTORED are membership-neutral and
+     * ignored by this method.
      */
-    private fun persistAllZoneStates() {
+    fun applyDrainedEventsToState(events: List<Map<String, Any>>): Set<String> = synchronized(reconcileLock) {
+        if (events.isEmpty()) return@synchronized emptySet()
+        val touched = mutableSetOf<String>()
+        for (event in events) {
+            val zoneId = event["zoneId"] as? String ?: continue
+            val eventType = event["eventType"] as? String ?: continue
+            val isInsideAfter = when (eventType) {
+                "ENTER", EVENT_RECOVERY_ENTER, "DWELL" -> true
+                "EXIT", EVENT_RECOVERY_EXIT -> false
+                else -> continue
+            }
+            zoneStates[zoneId] = isInsideAfter
+            touched.add(zoneId)
+        }
+        if (touched.isNotEmpty()) persistKnownZoneStates()
+        touched
+    }
+
+    /**
+     * Atomic drain + apply. Holds `reconcileLock` across the store drain
+     * and the state application so a concurrent `reconcileZoneStates`
+     * from the location-callback thread cannot see post-drain / pre-apply
+     * state and mis-fire `RECOVERY_ENTER` / `RECOVERY_EXIT`. Callers must
+     * route through this composite instead of pairing `store.drainAll()`
+     * and `applyDrainedEventsToState(events)` themselves — the gap
+     * between those two calls is where §9's double-report defeat becomes
+     * possible.
+     *
+     * A null store returns an empty list — matches the "Service not
+     * running, no engine to update" call shape.
+     */
+    internal fun drainAndApply(store: PendingEventsStore?): List<Map<String, Any>> = synchronized(reconcileLock) {
+        val events = store?.drainAll() ?: return@synchronized emptyList()
+        if (events.isNotEmpty()) {
+            applyDrainedEventsToState(events)
+        }
+        events
+    }
+
+    /**
+     * Persist the zone states this engine currently knows about, after
+     * reconciliation or a bulk change.
+     *
+     * [zoneStates] covers registered zones plus whatever a drained batch
+     * touched — never the whole persisted set — so the write merges rather
+     * than replaces. A call made while the map is partially populated (a
+     * drain that lands before zone restoration, a zone whose stored record
+     * failed to parse on restore) therefore leaves every other zone's stored
+     * membership intact. Removing a zone's persisted state is deliberate and
+     * goes through ZonePersistence.removeZoneState / clearAllZoneStates.
+     */
+    private fun persistKnownZoneStates() {
         val persistence = zonePersistence ?: return
-        persistence.saveZoneStates(zoneStates.toMap())
+        persistence.mergeZoneStates(zoneStates.toMap())
     }
 
     /**
@@ -609,6 +694,18 @@ fun getZoneName(zoneId: String): String? {
     private fun persistZoneState(zoneId: String, isInside: Boolean) {
         val persistence = zonePersistence ?: return
         persistence.saveZoneState(zoneId, isInside)
+    }
+
+    /**
+     * Containment test against a single zone's real geometry.
+     *
+     * The OS wake path registers a polygon as a circular bounding cover, so a
+     * wake can fire for a position inside the cover but outside the polygon.
+     * This lets that path settle the question with the same math the in-process
+     * engine uses. Returns false when the zone is unknown.
+     */
+    fun isLocationInsideZone(zoneId: String, location: Location): Boolean {
+        return zones[zoneId]?.contains(location) ?: false
     }
 
     /**

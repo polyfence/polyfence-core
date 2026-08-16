@@ -51,6 +51,32 @@ class LocationTracker : Service() {
         var isRunning = false
             private set
 
+        /**
+         * Preferences file holding the consumer's tracking intent across
+         * process death. Distinct from [isRunning], which only describes the
+         * current process.
+         */
+        internal const val TRACKING_PREFS_NAME = "polyfence_tracking"
+
+        /**
+         * True between a `startTracking()` and the matching `stopTracking()`,
+         * written through synchronously so an abrupt process kill cannot lose
+         * the transition. Read by anything that restarts the tracker without a
+         * consumer call — a boot broadcast, an OS wake fence — to distinguish
+         * "the app died while tracking" from "the consumer turned tracking
+         * off".
+         */
+        internal const val TRACKING_ACTIVE_KEY = "continuous_tracking_active"
+
+        /**
+         * Whether the consumer last asked for tracking to be on. Survives
+         * process death, force-stop and reboot; false on a fresh install.
+         */
+        internal fun isContinuousTrackingIntended(context: Context): Boolean =
+            context.applicationContext
+                .getSharedPreferences(TRACKING_PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(TRACKING_ACTIVE_KEY, false)
+
         // Smart GPS Configuration
         private var currentSmartConfig: SmartGpsConfig = SmartGpsConfig()
 
@@ -72,6 +98,22 @@ class LocationTracker : Service() {
         // Pending core delegate (stored until service starts)
         private var pendingCoreDelegate: PolyfenceCoreDelegate? = null
 
+        // Pending bridge-attached hint (stored until service starts). Non-null
+        // means the bridge has expressed an intent before the Service was up;
+        // the instance-level default reasserts on Service restart, so callers
+        // that toggle this before onCreate need this staging point.
+        private var pendingBridgeAttached: Boolean? = null
+
+        // Pending listener-live signal (stored until service starts). Non-null
+        // also means an external caller owns this signal, which suppresses the
+        // delegate-registration shortcut a direct-Kotlin consumer relies on.
+        @Volatile
+        private var pendingEventListenerActive: Boolean? = null
+
+        // Whether this process has already created the service once, so the
+        // first creation is not reported as a restart.
+        private var serviceCreatedOnce = false
+
         /**
          * Store activity settings to be applied when tracking starts
          */
@@ -89,6 +131,93 @@ class LocationTracker : Service() {
          */
         fun getCurrentZoneStates(): Map<String, Boolean> {
             return currentInstance?.geofenceEngine?.getCurrentZoneStates() ?: emptyMap()
+        }
+
+        /**
+         * Drain every event that was persisted while a bridge was not receiving.
+         * Returns the events in oldest-first order and removes them from disk in
+         * the same serialised block. Safe to call whether or not the tracking
+         * Service is running — a temporary read-only store is constructed off
+         * the caller's context when the Service is not up. Returns an empty
+         * list when no events are queued.
+         *
+         * When the Service is running, drained events are also applied to the
+         * engine's zoneStates so a subsequent reconcileZoneStates sees the
+         * post-drain truth: any zone whose drain-final state matches actual
+         * position produces no RECOVERY event; any zone with a genuine
+         * mismatch (e.g. eviction dropped a later crossing) still recovers
+         * via the normal reconcile mismatch path. When the Service is not
+         * running there's no engine to update — the caller gets the raw
+         * events and reconcile-on-next-boot fills in from persisted state.
+         */
+        fun drainPendingEvents(context: Context): List<Map<String, Any>> {
+            val instance = currentInstance
+            return if (instance != null) {
+                // Composite drain-and-apply holds `reconcileLock` across both
+                // operations. Routing here (instead of drain + separate apply)
+                // closes the window where a concurrent `reconcileZoneStates`
+                // on the location-callback thread would see post-drain /
+                // pre-apply state and mis-fire `RECOVERY_*` for a zone the
+                // drained batch already resolved.
+                instance.geofenceEngine.drainAndApply(instance.pendingEventsStore)
+            } else {
+                val store = PendingEventsStore(context.applicationContext, 0)
+                store.drainAll().also { store.shutdown() }
+            }
+        }
+
+        /**
+         * Companion accessor for OS-geofence adapters that need to read
+         * live-instance state (broadcast receiver, registrar). Null when
+         * the Service is dead; the receiver falls back to a transient
+         * store constructed against the persisted config in that case.
+         */
+        internal val currentInstanceForOsGeofence: LocationTracker?
+            get() = currentInstance
+
+        /**
+         * Latest snapshot of the OS-geofence registration state as a plain
+         * map for the debug-collector systemStatus surface. Returns null when
+         * `osGeofenceWakeEnabled` is off, matching the "no health data yet"
+         * contract consumers use to distinguish opt-out from cap-hit.
+         */
+        fun osGeofenceRegistrationHealth(): Map<String, Any?>? {
+            return currentInstance?.osGeofenceRegistrar?.health?.toMap()
+        }
+
+        /**
+         * Cumulative count of events that have been evicted from the pending queue
+         * since first construction of a store on this device (oldest-first eviction
+         * fires when the queue cap is reached). The counter persists across process
+         * restarts. Does not reset.
+         */
+        fun pendingEventsDroppedCount(context: Context): Long {
+            val runningStore = currentInstance?.pendingEventsStore
+            if (runningStore != null) return runningStore.droppedCountValue()
+            val store = PendingEventsStore(context.applicationContext, 0)
+            return store.droppedCountValue().also { store.shutdown() }
+        }
+
+        /**
+         * Geofence engine of the running service, or null when no service is
+         * running. Lets the debug collector count monitored zones without
+         * holding a reference that would outlive the session it describes.
+         */
+        internal fun currentGeofenceEngine(): GeofenceEngine? {
+            return currentInstance?.geofenceEngine
+        }
+
+        /**
+         * Whether a wake lock is held right now, or null when no service is
+         * running and therefore nothing could be holding one.
+         *
+         * Reads the lock itself rather than the bookkeeping flag beside it:
+         * the OS releases a lock on its own timeout, which leaves the flag
+         * set and the lock gone.
+         */
+        internal fun currentWakeLockHeld(): Boolean? {
+            val instance = currentInstance ?: return null
+            return instance.wakeLock?.isHeld == true
         }
 
         /**
@@ -152,6 +281,12 @@ class LocationTracker : Service() {
                 base["dwellSettings"] = engine.getDwellConfigMap()
                 base["clusterSettings"] = engine.getClusterConfigMap()
                 base["gpsStalenessTimeoutMs"] = instance?.gpsStalenessTimeoutMs ?: 0L
+                base["pendingEventsQueueSize"] = instance?.pendingEventsQueueSize ?: 0
+                base["pendingEventsAutoDrainEnabled"] =
+                    instance?.pendingEventsAutoDrainEnabled ?: true
+                base["osGeofenceWakeEnabled"] = instance?.osGeofenceWakeEnabled ?: false
+                base["osGeofenceMaxRegions"] = instance?.osGeofenceMaxRegions
+                    ?: PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
             } else {
                 // Service not running — return the engine's compile-time
                 // defaults so the caller sees a stable shape rather than
@@ -170,6 +305,10 @@ class LocationTracker : Service() {
                     "refreshDistanceMeters" to GeofenceEngine.DEFAULT_CLUSTER_REFRESH_DISTANCE_METERS
                 )
                 base["gpsStalenessTimeoutMs"] = 0L
+                base["pendingEventsQueueSize"] = 0
+                base["pendingEventsAutoDrainEnabled"] = true
+                base["osGeofenceWakeEnabled"] = false
+                base["osGeofenceMaxRegions"] = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
             }
 
             // TrackingScheduler is a companion field lazily initialised
@@ -303,6 +442,10 @@ class LocationTracker : Service() {
                 "timeWindows" to emptyList<Any>()
             )
             base["gpsStalenessTimeoutMs"] = 0L
+            base["pendingEventsQueueSize"] = 0
+            base["pendingEventsAutoDrainEnabled"] = true
+            base["osGeofenceWakeEnabled"] = false
+            base["osGeofenceMaxRegions"] = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
             val defaults = ActivitySettings()
             base["activitySettings"] = mapOf(
                 "enabled" to defaults.enabled,
@@ -463,6 +606,52 @@ class LocationTracker : Service() {
         }
 
         /**
+         * Tell the tracker whether the bridge's delivery sink is currently
+         * receiving. Platform bridges (Flutter, React Native, etc.) call this
+         * from their init / dispose / teardown paths. See the instance method
+         * `setBridgeAttached` for the delivery-vs-persist contract.
+         *
+         * If the service is already running, applies to the live instance
+         * immediately. Otherwise stored as pending and applied when the
+         * service is created — the instance-level default (attached=true)
+         * reasserts on every Service restart, so the pending value survives
+         * a stop/start cycle before init completes.
+         */
+        fun setBridgeAttached(attached: Boolean) {
+            pendingBridgeAttached = attached
+            currentInstance?.setBridgeAttached(attached)
+        }
+
+        /**
+         * Tell the tracker whether a consumer's event listener is live.
+         *
+         * Distinct from [setBridgeAttached], which reports whether the bridge's
+         * own platform-channel sink is wired. A sink can be wired long before
+         * anything downstream of it is subscribed — both bridges attach their
+         * sink during `initialize()` — so only this signal means "an event
+         * handed over now reaches somebody".
+         *
+         * On the false→true edge, and when `pendingEventsQueueSize > 0` and the
+         * auto-drain flag is on, the durable queue is drained and replayed
+         * through the normal event callback. Repeated `true` calls are a no-op:
+         * a second subscriber must not replay the batch the first one received.
+         *
+         * Calling this at all declares that the caller owns the signal, which
+         * suppresses the delegate-registration shortcut in [setCoreDelegate].
+         * Bridges therefore call `setEventListenerActive(false)` from their
+         * plugin-attach hook — which the platform guarantees runs before any
+         * method-channel call can register a delegate.
+         *
+         * If the service is already running, applies to the live instance
+         * immediately. Otherwise stored as pending and applied when the service
+         * is created.
+         */
+        fun setEventListenerActive(active: Boolean) {
+            pendingEventListenerActive = active
+            currentInstance?.setEventListenerActive(active)
+        }
+
+        /**
          * Collect session telemetry from all native components.
          */
         fun getSessionTelemetry(): Map<String, Any?> {
@@ -516,13 +705,175 @@ class LocationTracker : Service() {
     // Core delegate for platform bridge communication
     private var coreDelegate: PolyfenceCoreDelegate? = null
 
+    // Durable-events plumbing. `pendingEventsQueueSize` = 0 disables persistence
+    // entirely (the default). `bridgeAttached` is the signal a platform bridge
+    // toggles to false when its internal delivery sink is not receiving —
+    // polyfence-core cannot see past the delegate boundary, so this hint tells
+    // the persist-hook that a live delivery attempt would drop.
+    private var pendingEventsQueueSize: Int = 0
+    private var pendingEventsStore: PendingEventsStore? = null
+    @Volatile
+    private var bridgeAttached: Boolean = true
+
+    // Auto-delivery plumbing. `eventListenerActive` is the "somebody is
+    // receiving" edge that replays the queue; `bridgeAttached` above is only
+    // "the bridge's sink is wired", which is true from `initialize()` onward
+    // and therefore says nothing about a subscriber existing.
+    @Volatile
+    private var eventListenerActive: Boolean = false
+    private var pendingEventsAutoDrainEnabled: Boolean = true
+
+    // A replay applies zone membership to the engine, so it runs once
+    // restoreZonesFromStorage has registered the zones and reloaded their
+    // stored states — the batch then settles against a whole engine rather
+    // than seeding a map that restore is about to overwrite. It must also stay
+    // ahead of the first reconcile, which runs off the first fix after that
+    // same restore.
+    @Volatile
+    private var zoneStatesRestored: Boolean = false
+    @Volatile
+    private var autoDrainDeferredUntilZonesRestored: Boolean = false
+
+    // OS wake-fence plumbing. Off by default. When on, the registrar mirrors the
+    // top-N-nearest zones to Google Play Services' geofence API so a killed
+    // process can be woken by an OS-side broadcast that enqueues the crossing
+    // into the pending queue for drain on the next tracker boot.
+    private var osGeofenceWakeEnabled: Boolean = false
+    private var osGeofenceMaxRegions: Int = PolyfenceConfig.DEFAULT_OS_GEOFENCE_MAX_REGIONS
+    private var osGeofenceRegistrar: OsGeofenceRegistrar? = null
+
+    /** Registrar / receiver seam. Reads what's currently on this Service instance. */
+    internal val pendingEventsStoreForOsGeofence: PendingEventsStore?
+        get() = pendingEventsStore
+    internal val geofenceEngineForOsGeofence: GeofenceEngine get() = geofenceEngine
+    internal val lastKnownLocationForOsGeofence: android.location.Location?
+        get() = lastKnownLocation
+
     /**
      * Set the core delegate for receiving events from the engine.
      * Platform bridges (Flutter, React Native, etc.) implement PolyfenceCoreDelegate.
      */
     fun setCoreDelegate(delegate: PolyfenceCoreDelegate?) {
+        val hadDelegate = coreDelegate != null
         coreDelegate = delegate
+        // A direct-Kotlin consumer has no listener lifecycle to hook, so
+        // registering a delegate is its "I am receiving" moment. A bridge
+        // declares ownership of the signal from its plugin-attach hook, before
+        // any delegate can be registered, and is excluded here.
+        if (delegate != null && !hadDelegate && pendingEventListenerActive == null) {
+            setEventListenerActive(true)
+        }
     }
+
+    /**
+     * Tell the tracker whether the bridge's delivery sink is currently receiving.
+     * Bridges call `false` when their platform-channel sink is torn down (e.g. on
+     * `EventChannel.onCancel` in Flutter, `hasActiveReactInstance == false` in RN)
+     * and `true` when it is re-attached. The tracker uses this to decide whether
+     * a fired event will actually reach the consumer or drop silently — in the
+     * drop case, the event is persisted into the durable queue (when
+     * `pendingEventsQueueSize > 0`) instead. Default is `true` — a direct-Kotlin
+     * consumer with no bridge sees today's behaviour with no change.
+     */
+    fun setBridgeAttached(attached: Boolean) {
+        bridgeAttached = attached
+    }
+
+    /**
+     * Tell the tracker whether a consumer's event listener is live. See the
+     * companion overload for the contract; this is the instance half.
+     */
+    fun setEventListenerActive(active: Boolean) {
+        if (eventListenerActive == active) return
+        eventListenerActive = active
+        if (active) replayQueuedEventsToListener()
+    }
+
+    /**
+     * Drain the durable queue and hand the events to the consumer through the
+     * same delegate callback live events use. No-op unless the queue is on, the
+     * auto-drain flag is set, and something is actually queued.
+     */
+    private fun replayQueuedEventsToListener() {
+        if (!pendingEventsAutoDrainEnabled) return
+        if (pendingEventsQueueSize <= 0) return
+        val store = pendingEventsStore ?: return
+        if (!zoneStatesRestored) {
+            autoDrainDeferredUntilZonesRestored = true
+            return
+        }
+        autoDrainDeferredUntilZonesRestored = false
+        // Nothing queued that this store has not already handed over — skip the
+        // file read so repeated attach/detach cycles cost nothing.
+        if (!store.mayHaveEvents()) return
+
+        // Composite drain-and-apply holds `reconcileLock` across the store drain
+        // and the state application, which is what keeps a concurrent
+        // reconcileZoneStates on the location-callback thread from mis-firing
+        // RECOVERY_* for a zone this batch already resolved.
+        val drained = geofenceEngine.drainAndApply(store)
+        if (drained.isEmpty()) return
+
+        val delegate = coreDelegate
+        if (delegate == null) {
+            Log.w(TAG, "PF: listener signalled active but no delegate registered — re-queueing ${drained.size} event(s)")
+            requeueUndeliveredEvents(drained)
+            return
+        }
+
+        val nowMs = System.currentTimeMillis()
+        for ((index, event) in drained.withIndex()) {
+            try {
+                delegate.onGeofenceEvent(markDeliveredLate(event, nowMs))
+            } catch (e: Exception) {
+                // Same auto-recovery the live path uses: a throwing sink is a
+                // dead sink. The rest of the batch goes back on disk rather
+                // than being lost with the failed one.
+                Log.w(TAG, "PF: delegate.onGeofenceEvent threw ${e.javaClass.simpleName} during replay — re-queueing remainder")
+                bridgeAttached = false
+                eventListenerActive = false
+                requeueUndeliveredEvents(drained.subList(index, drained.size))
+                return
+            }
+        }
+        Log.i(TAG, "PF: replayed ${drained.size} queued event(s) to the consumer's listener")
+    }
+
+    /**
+     * Return events to the durable queue after a failed replay. Membership
+     * state applied by the drain stays as-is: re-applying the same events on
+     * the next drain resolves to the same per-zone value.
+     */
+    private fun requeueUndeliveredEvents(events: List<Map<String, Any>>) {
+        val store = pendingEventsStore ?: return
+        events.forEach { store.append(it) }
+    }
+
+    /**
+     * Stamp the replay-provenance fields onto a queued event. `capturedTs` is
+     * the moment the crossing was detected — the `timestamp` the event carried
+     * when it was queued — so `queuedDurationMs` measures the wait, not the
+     * round trip.
+     */
+    private fun markDeliveredLate(event: Map<String, Any>, nowMs: Long): Map<String, Any> {
+        val capturedTs = (event["timestamp"] as? Number)?.toLong() ?: nowMs
+        return event + mapOf(
+            "deliveredLate" to true,
+            "capturedTs" to capturedTs,
+            "queuedDurationMs" to (nowMs - capturedTs).coerceAtLeast(0L)
+        )
+    }
+
+    /**
+     * True when the in-process polling engine is running and will therefore
+     * record this crossing itself — either delivering it live or persisting it
+     * through the same queue the OS wake path writes to.
+     *
+     * Deliberately NOT "can deliver live": a detached bridge leaves the engine
+     * polling and persisting, so gating the OS path on deliverability would let
+     * both writers record one physical crossing.
+     */
+    internal val isEngineRunningForOsGeofence: Boolean get() = isRunning
 
     // Error Recovery Properties
     private lateinit var errorRecovery: PolyfenceErrorRecovery
@@ -628,6 +979,17 @@ class LocationTracker : Service() {
         // Set current instance for static access to zone states
         currentInstance = this
 
+        // A second creation inside one process means the service was torn
+        // down and brought back — by the platform under START_STICKY, or by a
+        // stop/start cycle. The collector's counters live in the same process,
+        // so a restart that followed process death cannot be seen from here
+        // and is not counted.
+        if (serviceCreatedOnce) {
+            PolyfenceDebugCollector.recordRestart()
+        } else {
+            serviceCreatedOnce = true
+        }
+
         // Capture battery snapshot for telemetry drain calculation. Done here
         // so it aligns with TelemetryAggregator's sessionStartTime (set when
         // this LocationTracker was constructed moments earlier). The matching
@@ -641,9 +1003,9 @@ class LocationTracker : Service() {
             telemetryAggregator.setBridgePlatform(platform)
         }
 
-        // Apply pending core delegate set before service existed
-        pendingCoreDelegate?.let { delegate ->
-            coreDelegate = delegate
+        // Apply pending bridge-attached hint set before service existed
+        pendingBridgeAttached?.let { attached ->
+            bridgeAttached = attached
         }
 
         // Log device info for debugging battery issues on Samsung/etc
@@ -655,6 +1017,49 @@ class LocationTracker : Service() {
 
         // Initialize persistence
         zonePersistence = ZonePersistence(this)
+
+        // Initialize durable pending-events queue. Off (append is a no-op) when
+        // pendingEventsQueueSize == 0. The store still initialises so drainAll
+        // works — recovers events queued under a previous larger cap.
+        pendingEventsQueueSize = config.pendingEventsQueueSize
+        pendingEventsAutoDrainEnabled = config.pendingEventsAutoDrainEnabled
+        pendingEventsStore = PendingEventsStore(applicationContext, pendingEventsQueueSize)
+
+        // Both applies below must stay under the store construction above.
+        // Each can raise the listener-live signal, and the replay a raise
+        // triggers returns on the queue-size check, which sits above the
+        // zone-state check that would otherwise defer it. Raised too early,
+        // the deferred flag is never armed and a queue full of crossings is
+        // never handed over, while live delivery of new ones keeps working:
+        // the loss is silent.
+        //
+        // A delegate reaches setCoreDelegate rather than the field so a direct
+        // Kotlin consumer gets its "I am receiving" moment; registering a
+        // delegate is the only subscribe signal such a consumer has, and live
+        // delivery is gated on it. Bridges are expected to stage a listener
+        // value before the service exists, which routes them through the apply
+        // below instead of that shortcut.
+        pendingCoreDelegate?.let { delegate ->
+            setCoreDelegate(delegate)
+        }
+
+        pendingEventListenerActive?.let { active ->
+            setEventListenerActive(active)
+        }
+
+        // OS wake-fence registrar. Off unless the consumer opts in — when off,
+        // no fences are registered with the OS, no permission is checked, and
+        // no zone-change or movement hook fires. The registrar's own
+        // initial registration is deferred until a zone or a fix arrives.
+        osGeofenceWakeEnabled = config.osGeofenceWakeEnabled
+        osGeofenceMaxRegions = config.osGeofenceMaxRegions
+        PolyfenceBootReceiver.setEnabled(applicationContext, osGeofenceWakeEnabled)
+        if (osGeofenceWakeEnabled) {
+            osGeofenceRegistrar = OsGeofenceRegistrar(
+                applicationContext,
+                requestedMaxRegions = osGeofenceMaxRegions
+            ).apply { startObservingAppLifecycle() }
+        }
 
         // Initialize location client
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -708,9 +1113,32 @@ class LocationTracker : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        // START_STICKY hands back a null intent when the platform restarts this
+        // service after the process died — memory pressure, a crash, or the
+        // system reclaiming resources. Without this the restart produces a
+        // foreground service showing a tracking notification that tracks
+        // nothing: no GPS request, no zones loaded, no reconcile. Everything
+        // downstream reads the service as healthy, including the OS-wake
+        // receiver's already-running check, so a wake declines to capture while
+        // the engine it deferred to is inert.
+        //
+        // Resuming is conditional on the consumer's own last instruction, so a
+        // deliberate stopTracking() is never undone by a restart.
+        if (intent == null) {
+            if (isContinuousTrackingIntended(this) && hasCoreTrackingPerms()) {
+                Log.i(TAG, "Service restarted after process death — resuming tracking")
+                startTracking()
+            } else {
+                Log.i(TAG, "Service restarted after process death — tracking was not intended; stopping")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            return START_STICKY
+        }
+
+        when (intent.action) {
             ACTION_START_TRACKING -> {
-                if (!hasLocationPerms()) {
+                if (!hasCoreTrackingPerms()) {
                     Log.w(TAG, "Missing runtime permissions for location/FGS; not starting tracking")
                     return START_NOT_STICKY // do not restart
                 }
@@ -761,17 +1189,40 @@ class LocationTracker : Service() {
         return START_STICKY
     }
 
-    private fun hasLocationPerms(): Boolean {
+    /**
+     * Permissions required to run the tracker at all.
+     *
+     * `ACCESS_BACKGROUND_LOCATION` is deliberately NOT part of this. The
+     * tracker is a foreground service, and a foreground service typed
+     * `location` has location access for as long as it runs. The background
+     * permission governs location access *outside* a foreground service —
+     * passive geofences, jobs, receivers — which is what OS wake fences use
+     * and nothing else here does. Requiring it unconditionally refused to
+     * start for consumers who never asked for that capability, and forced
+     * every integrator through Google Play's background-location review for a
+     * feature they were not using. iOS has always accepted "when in use" here;
+     * this is what makes the platforms agree.
+     */
+    private fun hasCoreTrackingPerms(): Boolean {
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val bgOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
-        } else true
         // API 34 (Android 14) requires FOREGROUND_SERVICE_LOCATION permission
         val fgsOk = if (Build.VERSION.SDK_INT >= 34) {
             ContextCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE_LOCATION) == PackageManager.PERMISSION_GRANTED
         } else true
-        return (fine || coarse) && bgOk && fgsOk
+        return (fine || coarse) && fgsOk
+    }
+
+    /**
+     * Whether the grant that OS wake fences need is held. Only meaningful on
+     * API 29+; the permission does not exist below that, where a foreground
+     * service's location access already covers everything this library does.
+     */
+    private fun hasBackgroundLocationPerm(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
+        return ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     // Track if GPS start is deferred waiting for zones
@@ -780,9 +1231,33 @@ class LocationTracker : Service() {
     private fun startTracking() {
         // Must call startForeground() immediately — Android requires it within ~10s
         // of startForegroundService(). Do this BEFORE any checks that might bail out.
-        startForeground(NOTIFICATION_ID, createTrackingNotification())
+        //
+        // The call itself can be refused. A service started while the process is
+        // backgrounded is subject to the platform's foreground-service start
+        // rules, and on API 34+ the `location` service type additionally
+        // requires the background-location grant at the moment of the call. Both
+        // refusals arrive as exceptions here, and an escaping one would surface
+        // to the user as a crash of the consumer's app rather than as tracking
+        // simply not starting.
+        try {
+            startForeground(NOTIFICATION_ID, createTrackingNotification())
+        } catch (e: Exception) {
+            Log.w(TAG, "Foreground service start refused: ${e.message}")
+            PolyfenceErrorManager.reportError(
+                "foreground_service_start_refused",
+                "The system refused to start the tracking foreground service: " +
+                    (e.message ?: e.javaClass.simpleName),
+                mapOf(
+                    "severity" to "warning",
+                    "platform" to "android",
+                    "timestamp" to System.currentTimeMillis()
+                )
+            )
+            stopSelf()
+            return
+        }
 
-        if (!hasLocationPerms()) {
+        if (!hasCoreTrackingPerms()) {
             Log.e(TAG, "Cannot start tracking - missing permissions")
             @Suppress("DEPRECATION")
             stopForeground(true)
@@ -794,9 +1269,13 @@ class LocationTracker : Service() {
         firstLocationAfterRestart = true  // Reset for state reconciliation
         hasReceivedFirstLocation = false  // Reset for distance filter deferral
 
-        // Persist tracking state for restart recovery (used by ScheduleReceiver)
-        getSharedPreferences("polyfence_tracking", Context.MODE_PRIVATE)
-            .edit().putBoolean("continuous_tracking_active", true).apply()
+        // Written through with commit() rather than apply(): this flag is what
+        // an out-of-process restart path reads to decide whether tracking was
+        // wanted, and apply()'s deferred write can be lost to a force-stop or a
+        // low-memory kill in the seconds right after tracking starts — exactly
+        // the window where the flag matters most.
+        getSharedPreferences(TRACKING_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(TRACKING_ACTIVE_KEY, true).commit()
 
         // Acquire wake lock before starting location requests
         acquireWakeLock()
@@ -849,7 +1328,7 @@ class LocationTracker : Service() {
 
         val locationRequest = LocationRequest.Builder(priority, interval)
             .setMinUpdateIntervalMillis(interval / 2)
-            .setMaxUpdateDelayMillis(interval * 2)
+            .setMaxUpdateDelayMillis(batchingWindowFor(interval))
             .setWaitForAccurateLocation(smartConfig.shouldWaitForAccurateLocation())
             .setMinUpdateDistanceMeters(distanceFilter)
             .build()
@@ -877,6 +1356,20 @@ class LocationTracker : Service() {
                         if (location != null && firstLocationAfterRestart && isRunning) {
                             Log.d(TAG, "Seeding initial location from lastLocation cache")
                             lastLocationTime = System.currentTimeMillis()
+                            // A seed is a real fix: it reaches the consumer and
+                            // drives a reconcile that can raise crossings. Not
+                            // counting it leaves the counters short on exactly
+                            // the stationary cold start where it may be the
+                            // only fix for some time — and leaves the health
+                            // score reading no GPS samples at all, which it
+                            // treats as a GPS that is failing to deliver.
+                            telemetryAggregator.recordGpsUpdate(
+                                intervalMs = currentGpsInterval,
+                                accuracyM = location.accuracy
+                            )
+                            PolyfenceDebugCollector.recordLocationUpdate(
+                                if (location.hasAccuracy()) location.accuracy.toDouble() else -1.0
+                            )
                             sendLocationToDelegate(location)
                             firstLocationAfterRestart = false
                             geofenceEngine.reconcileZoneStates(location)
@@ -900,9 +1393,12 @@ class LocationTracker : Service() {
     }
 
     private fun stopTracking() {
-        // Clear persisted tracking state (used by ScheduleReceiver for restart recovery)
-        getSharedPreferences("polyfence_tracking", Context.MODE_PRIVATE)
-            .edit().putBoolean("continuous_tracking_active", false).apply()
+        // commit(), not apply(): losing this write would leave a consumer who
+        // deliberately stopped tracking looking, to every out-of-process
+        // restart path, exactly like a consumer whose app was killed mid-session
+        // — and tracking would come back on behind them.
+        getSharedPreferences(TRACKING_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(TRACKING_ACTIVE_KEY, false).commit()
 
         isRunning = false
         locationCallback?.let { callback ->
@@ -938,7 +1434,7 @@ class LocationTracker : Service() {
                 if (!isRunning) return
 
                 // === Permission Check (was separate 60s timer) ===
-                if (!hasLocationPerms()) {
+                if (!hasCoreTrackingPerms()) {
                     Log.w(TAG, "Location permission revoked - stopping tracking gracefully")
                     PolyfenceErrorManager.reportError(
                         "permission_revoked",
@@ -947,6 +1443,15 @@ class LocationTracker : Service() {
                     )
                     stopTracking()
                     return
+                }
+
+                // Losing the background grant costs OS wake fences, not
+                // tracking. Stopping here would take the whole product away
+                // over a capability the consumer may never have relied on; the
+                // registrar reports the loss and the polling engine carries on
+                // exactly as it does for consumers who never opted in.
+                if (osGeofenceWakeEnabled && !hasBackgroundLocationPerm()) {
+                    osGeofenceRegistrar?.revalidatePermission()
                 }
 
                 // === GPS Health Check (was separate 30s timer) ===
@@ -992,15 +1497,9 @@ class LocationTracker : Service() {
                 healthScoreTickCount++
                 if (healthScoreTickCount >= healthScoreEmitEveryNTicks) {
                     healthScoreTickCount = 0
-                    // emitHealthScore -> collectDebugInfo -> getCpuUsage reads
-                    // /proc/stat with a 360ms sleep and require()s it isn't
-                    // running on the main looper. This runnable IS scheduled
-                    // on Looper.getMainLooper() (see combinedHealthCheckHandler
-                    // init below), so calling emitHealthScore inline throws
-                    // IllegalArgumentException — the outer try/catch swallows
-                    // it and onHealthScore consumers never receive an event.
-                    // Spawn a background thread so the CPU read can block
-                    // without violating the main-looper guard. Once per 5
+                    // Collection touches counters written from the location
+                    // and geofence callback threads, so it is taken off the
+                    // main looper rather than run inline here. Once per five
                     // minutes; lifecycle is trivial — no shared executor
                     // needed.
                     Thread {
@@ -1045,20 +1544,27 @@ class LocationTracker : Service() {
         if (!isRunning) return
         try {
             val debugInfo = PolyfenceDebugCollector.collectDebugInfo(applicationContext)
-            val perfMetrics = debugInfo["performance"] as? Map<*, *>
+            val perfMetrics = debugInfo[PolyfenceDebugCollector.Key.PERFORMANCE] as? Map<*, *>
             val telemetry = telemetryAggregator.getSessionTelemetry()
 
             val gpsGoodRatio = (telemetry["gps_ok_ratio"] as? Number)?.toDouble() ?: 0.0
-            val batteryMetrics = debugInfo["battery"] as? Map<*, *>
-            val batteryDrain = (batteryMetrics?.get("estimatedHourlyDrainPercent") as? Number)?.toDouble() ?: 0.0
-            val avgLatency = (perfMetrics?.get("averageDetectionLatencyMs") as? Number)?.toDouble() ?: 0.0
-            val errorCount = (debugInfo["recentErrors"] as? List<*>)?.size ?: 0
-            val falseRatio = (telemetry["false_event_ratio"] as? Number)?.toDouble() ?: 0.0
+            // Null when the collector had nothing to average, which the
+            // score treats as an unmeasured dimension rather than a perfect
+            // one.
+            val avgLatency = (perfMetrics?.get(PolyfenceDebugCollector.Key.AVERAGE_DETECTION_LATENCY) as? Number)?.toDouble()
+            val errorCount = (debugInfo[PolyfenceDebugCollector.Key.RECENT_ERRORS] as? List<*>)?.size ?: 0
+            // detections_total is the ratio's own denominator. The nearby
+            // boundary_events_count is not: it counts only detections within
+            // the boundary threshold, so gating on it would discard a ratio
+            // measured over detections further out.
+            val detections = (telemetry["detections_total"] as? Number)?.toInt() ?: 0
+            val falseRatio = if (detections > 0) {
+                (telemetry["false_event_ratio"] as? Number)?.toDouble()
+            } else null
             val zoneCount = geofenceEngine.getZoneCount()
 
             val result = HealthScoreCalculator.calculate(
                 gpsGoodRatio = gpsGoodRatio,
-                batteryDrainPctPerHr = batteryDrain,
                 avgDetectionLatencyMs = avgLatency,
                 errorCountRecent = errorCount,
                 falseEventRatio = falseRatio,
@@ -1161,6 +1667,7 @@ class LocationTracker : Service() {
                 geofenceEngine.reconcileZoneStates(cachedLocation)
             }
         }
+        osGeofenceRegistrar?.requestRefresh()
     }
 
     private fun removeZone(intent: Intent) {
@@ -1179,6 +1686,7 @@ class LocationTracker : Service() {
     private fun removeZoneById(zoneId: String) {
         geofenceEngine.removeZone(zoneId)
         zonePersistence.removeZone(zoneId)
+        osGeofenceRegistrar?.requestRefresh()
     }
 
     private fun clearZones() {
@@ -1188,6 +1696,7 @@ class LocationTracker : Service() {
         // Clear from persistent storage
         zonePersistence.clearAllZones()
 
+        osGeofenceRegistrar?.requestRefresh()
     }
 
     // Restore zones from storage on service start
@@ -1212,9 +1721,24 @@ class LocationTracker : Service() {
             // This restores the "inside/outside" state from before service restart
             geofenceEngine.loadPersistedZoneStates()
 
+            // Play Services drops all registered geofences on device reboot,
+            // and this restore path writes to the engine directly rather than
+            // through addZoneById, so it does not hit that method's refresh
+            // hook. Without this the OS-side fences would stay unregistered
+            // until an unrelated zone mutation happened to trigger one.
+            osGeofenceRegistrar?.requestRefresh()
+
             Log.i(TAG, "Restored $restored zones from storage ($failed failed)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to restore zones: ${e.message}")
+        } finally {
+            // Zone membership is now whole, and the first reconcile still has
+            // not run — the window where a replay's state application survives
+            // restore and is still what reconcile evaluates against.
+            zoneStatesRestored = true
+            if (autoDrainDeferredUntilZonesRestored && eventListenerActive) {
+                replayQueuedEventsToListener()
+            }
         }
     }
 
@@ -1243,6 +1767,32 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         accuracyM = gpsAccuracy,
         detectionTimeMs = detectionTimeMs
     )
+
+    // Boundary crossings only: dwell and the signal-lost/restored pair are
+    // state changes, not crossings, and counting them would inflate a figure
+    // consumers read as "how many times did the user cross a zone".
+    //
+    // Counts what this engine detected in this process. A crossing captured
+    // by an OS wake fence while the process was dead is delivered on drain
+    // without passing through here, so it reaches the consumer uncounted —
+    // counting it at capture would attribute it to whichever process the
+    // broadcast woke, and counting it at drain risks doubling with the
+    // reconcile that follows. Both need deciding together rather than
+    // patching one side.
+    //
+    // A detection time of zero marks a crossing the engine synthesised
+    // outside a location evaluation — a degraded-GPS exit. The consumer
+    // receives it like any other, so it counts; it was never timed, so it is
+    // passed as absent rather than as zero, which would drag the mean toward
+    // a speed nothing achieved.
+    if (eventType == "ENTER" || eventType == "EXIT" ||
+        eventType == GeofenceEngine.EVENT_RECOVERY_ENTER ||
+        eventType == GeofenceEngine.EVENT_RECOVERY_EXIT
+    ) {
+        PolyfenceDebugCollector.recordZoneDetection(
+            if (detectionTimeMs > 0) detectionTimeMs else null
+        )
+    }
 
     // Send event to delegate with detection metrics, GPS coordinates, and ML context.
     // `timestamp` mirrors the iOS event map (see ios/Classes/LocationTracker.swift:639);
@@ -1273,7 +1823,56 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             eventMap["dwellDurationMs"] = dwellMs
         }
     }
-    coreDelegate?.onGeofenceEvent(eventMap)
+
+    // Attempt live delivery only when all three conditions hold: a delegate is
+    // registered, the bridge's sink is wired, and a consumer is actually
+    // listening. The listener signal is load-bearing, not advisory. A bridge
+    // whose sink is wired but whose consumer has unsubscribed emits into
+    // nothing: RCTDeviceEventEmitter fans out to whoever registered, a nil
+    // FlutterEventSink swallows the call. Delivering there destroys the event
+    // and reports it delivered, so the crossing never reaches the durable
+    // queue either.
+    //
+    // A delegate that throws flips bridgeAttached to false and falls through to
+    // the persist branch, which recovers a bridge whose sink died without
+    // reporting it. That backstop cannot be relied on for bridges that marshal
+    // to another thread before touching their sink, since the delegate returns
+    // before delivery is attempted.
+    val delegate = coreDelegate
+    var deliveredLive = false
+    if (delegate != null && bridgeAttached && eventListenerActive) {
+        try {
+            delegate.onGeofenceEvent(eventMap)
+            deliveredLive = true
+        } catch (e: Exception) {
+            Log.w(TAG, "PF: delegate.onGeofenceEvent threw ${e.javaClass.simpleName}: ${e.message} — persisting instead")
+            bridgeAttached = false
+        }
+    }
+
+    // Persist to the durable queue if live delivery did not happen — either the
+    // delegate was missing, the bridge was detached, or the delivery attempt
+    // above threw. Guarded by pendingEventsQueueSize > 0 so consumers who never
+    // opt in see no change.
+    if (!deliveredLive && pendingEventsQueueSize > 0) {
+        val store = pendingEventsStore
+        if (store != null) {
+            val evicted = store.append(eventMap.toMap())
+            if (evicted > 0) {
+                PolyfenceErrorManager.reportError(
+                    type = "pending_events_evicted",
+                    message = "Pending events queue reached capacity; oldest events dropped",
+                    context = mapOf(
+                        "severity" to "warning",
+                        "droppedCount" to evicted,
+                        "platform" to "android"
+                    )
+                )
+            }
+        } else {
+            Log.w(TAG, "PF: queue enabled (size=$pendingEventsQueueSize) but store is nil — event dropped")
+        }
+    }
 
     // Terse geofence event log
     val displayName = if (zoneName.isNotEmpty()) zoneName else zoneId
@@ -1406,7 +2005,16 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
-        currentInstance = null  // Clear instance reference
+
+        // The subscription is held by the fused client, not by this Service,
+        // so destroying the Service does not end it. Every other resource
+        // acquired here is released below; this was the one that outlived it,
+        // and a process that survives the Service would go on sampling GPS
+        // with nothing left to receive it.
+        locationCallback?.let { callback ->
+            fusedLocationClient?.removeLocationUpdates(callback)
+        }
+
         errorRecovery.stopMonitoring()
         healthCheckHandler?.removeCallbacksAndMessages(null)
         // Stop activity recognition and unregister receiver
@@ -1414,6 +2022,28 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         activityRecognitionManager = null
         // Ensure wake lock is released
         releaseWakeLock()
+        // Shut down pending-events writer thread. Its single-thread executor
+        // keeps its worker alive after the Service dies; each stop→destroy→
+        // create cycle would otherwise leak a `polyfence-pending-events`
+        // thread, accumulating in long-lived processes that restart the
+        // foreground service (memory-pressure respawn, scheduled-window
+        // start).
+        pendingEventsStore?.shutdown()
+        pendingEventsStore = null
+
+        // Remove any OS-registered fences and stop the debounce handler. The
+        // receiver in the manifest can still be woken by a pending OS
+        // transition — it constructs its own transient PendingEventsStore
+        // in that path, so tearing this down does not lose events.
+        osGeofenceRegistrar?.shutdown()
+        osGeofenceRegistrar = null
+
+        // Cleared LAST. The broadcast receiver keys off this reference to
+        // decide whether to reuse the Service's store or construct a transient
+        // one; nulling it before the store is shut down would let a geofence
+        // broadcast in that window open a second writer thread on the same
+        // on-disk log while this one is still running.
+        currentInstance = null
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -1583,6 +2213,13 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 telemetryAggregator.recordGpsUpdate(
                     intervalMs = currentGpsInterval,
                     accuracyM = location.accuracy
+                )
+
+                // Negative when the fix carries no accuracy — the collector
+                // reports it as lastKnownAccuracy, whose absent value is
+                // already a negative sentinel.
+                PolyfenceDebugCollector.recordLocationUpdate(
+                    if (location.hasAccuracy()) location.accuracy.toDouble() else -1.0
                 )
 
                 // Check for unreliable GPS (large accuracy swings, poor accuracy)
@@ -1881,6 +2518,87 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
                 Log.d(TAG, "GPS staleness timeout updated to ${gpsStalenessTimeoutMs}ms")
             }
 
+            // Durable pending-events queue cap (0 = off). Rebuild the store on
+            // change so the new cap takes effect on the next append. On-disk
+            // events survive the rebuild because construction does not touch
+            // the log file.
+            val newQueueSize = configMap["pendingEventsQueueSize"] as? Number
+            if (newQueueSize != null) {
+                pendingEventsQueueSize = newQueueSize.toInt()
+                config.pendingEventsQueueSize = pendingEventsQueueSize
+                pendingEventsStore?.shutdown()
+                pendingEventsStore = PendingEventsStore(applicationContext, pendingEventsQueueSize)
+                Log.d(TAG, "Pending events queue size updated to $pendingEventsQueueSize")
+            }
+
+            // Automatic replay of queued events (true = on, default). Turning
+            // it on while a listener is already live replays immediately —
+            // otherwise the switch would not take effect until the consumer
+            // happened to resubscribe.
+            val newAutoDrain = configMap["pendingEventsAutoDrainEnabled"] as? Boolean
+            if (newAutoDrain != null) {
+                val autoDrainTurnedOn = newAutoDrain && !pendingEventsAutoDrainEnabled
+                pendingEventsAutoDrainEnabled = newAutoDrain
+                config.pendingEventsAutoDrainEnabled = newAutoDrain
+                if (autoDrainTurnedOn && eventListenerActive) {
+                    replayQueuedEventsToListener()
+                }
+                Log.d(TAG, "Pending events auto-drain updated to $pendingEventsAutoDrainEnabled")
+            }
+
+            // OS wake-fence slot budget. Applied before the toggle below so a
+            // single updateConfiguration carrying both lands the new cap on the
+            // registrar this call creates.
+            val newMaxRegions = configMap["osGeofenceMaxRegions"] as? Number
+            // Store the clamped value in memory too. Keeping the raw request
+            // here would make getConfiguration echo a budget that was never
+            // applied, indistinguishable from a genuine cap hit, until the next
+            // process start silently swapped it for the persisted clamp.
+            val effectiveMaxRegions = newMaxRegions?.let {
+                PolyfenceConfig.clampOsGeofenceMaxRegions(it.toInt())
+            }
+            val maxRegionsChanged =
+                effectiveMaxRegions != null && effectiveMaxRegions != osGeofenceMaxRegions
+            if (effectiveMaxRegions != null) {
+                osGeofenceMaxRegions = effectiveMaxRegions
+                config.osGeofenceMaxRegions = effectiveMaxRegions
+            }
+
+            // OS wake-fence toggle (false = off, default). Instantiating the
+            // registrar is deferred until the app backgrounds, so flipping on
+            // with an empty engine is safe. Flipping off removes any
+            // currently-registered fences and clears the health snapshot.
+            val newOsWake = configMap["osGeofenceWakeEnabled"] as? Boolean
+            val wakeChanged = newOsWake != null && newOsWake != osGeofenceWakeEnabled
+            if (newOsWake != null) {
+                osGeofenceWakeEnabled = newOsWake
+                config.osGeofenceWakeEnabled = newOsWake
+            }
+            // The cap is immutable on a constructed registrar, so a cap change
+            // while the feature is already on has to rebuild it — otherwise the
+            // new budget would not take effect until the next Service start.
+            if (wakeChanged) {
+                PolyfenceBootReceiver.setEnabled(applicationContext, osGeofenceWakeEnabled)
+            }
+            if (wakeChanged || (maxRegionsChanged && osGeofenceWakeEnabled)) {
+                osGeofenceRegistrar?.shutdown()
+                osGeofenceRegistrar = null
+                if (osGeofenceWakeEnabled) {
+                    osGeofenceRegistrar = OsGeofenceRegistrar(
+                        applicationContext,
+                        requestedMaxRegions = osGeofenceMaxRegions
+                    ).apply {
+                        startObservingAppLifecycle()
+                        requestRefresh()
+                    }
+                }
+                Log.d(
+                    TAG,
+                    "OS wake fences updated: enabled=$osGeofenceWakeEnabled " +
+                        "maxRegions=$osGeofenceMaxRegions"
+                )
+            }
+
             // Update dwell configuration if provided
             val dwellSettings = configMap["dwellSettings"] as? Map<String, Any>
             if (dwellSettings != null) {
@@ -1995,6 +2713,18 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     }
 
     /**
+     * Batching window for a location request, saturating instead of overflowing.
+     *
+     * The battery strategy signals "pause GPS" by returning [Long.MAX_VALUE] as the
+     * interval, and [calculateCurrentInterval] takes the longest of the strategies,
+     * so that value reaches here whenever the device is below the critical battery
+     * threshold and away from every zone. Doubling it wraps to a negative number and
+     * `setMaxUpdateDelayMillis` rejects that, taking the tracking service down.
+     */
+    private fun batchingWindowFor(interval: Long): Long =
+        if (interval > Long.MAX_VALUE / 2) Long.MAX_VALUE else interval * 2
+
+    /**
      * Update location request based on current smart configuration
      */
     private fun updateLocationRequest() {
@@ -2006,21 +2736,27 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
 
         val locationRequest = LocationRequest.Builder(priority, interval)
             .setMinUpdateIntervalMillis(interval / 2)
-            .setMaxUpdateDelayMillis(interval * 2)
+            .setMaxUpdateDelayMillis(batchingWindowFor(interval))
             .setWaitForAccurateLocation(smartConfig.shouldWaitForAccurateLocation())
             .setMinUpdateDistanceMeters(distanceFilter)
             .build()
 
-        // Stop current location updates
-        locationCallback?.let { callback ->
-            fusedLocationClient?.removeLocationUpdates(callback)
+        // The same instance must be cancelled that was registered — the fused
+        // client matches by identity, so a callback the tracker cannot name
+        // can never be removed and would outlive stopTracking().
+        val callback = locationCallback ?: run {
+            Log.e(TAG, "LocationCallback is null - cannot update location request")
+            return
         }
+
+        // Stop current location updates
+        fusedLocationClient?.removeLocationUpdates(callback)
 
         // Start new location updates with new configuration
         try {
             fusedLocationClient?.requestLocationUpdates(
                 locationRequest,
-                locationCallback ?: createLocationCallback(),
+                callback,
                 Looper.getMainLooper()
             )
 
@@ -2389,6 +3125,11 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
      */
     private fun updateMovementState(location: android.location.Location) {
         lastKnownLocation = location
+        // Notify the OS-geofence registrar so it can recompute the top-N-nearest
+        // set as the user drives past the previously-registered fringe. Cheap
+        // when the registrar is off (null) or when the movement threshold has
+        // not been crossed (compares two lat/lngs, no allocations).
+        osGeofenceRegistrar?.onLocationUpdate(location)
         val currentTime = System.currentTimeMillis()
         val movementSettings = smartConfig.movementSettings
 
@@ -2434,49 +3175,6 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
         // fixes keep arriving. Both location callbacks funnel through here.
         if (geofenceEngine.isValidFix(location)) {
             lastValidFixTime = currentTime
-        }
-    }
-
-    /**
-     * Create location callback for smart GPS configuration
-     */
-    private fun createLocationCallback(): LocationCallback {
-        return object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult) {
-                locationResult.lastLocation?.let { location ->
-                    // Guard clause: only process if tracking is active
-                    if (!isRunning) {
-                        return
-                    }
-
-                    // Update movement state for smart GPS
-                    updateMovementState(location)
-
-                    // Update health tracking
-                    lastLocationTime = System.currentTimeMillis()
-                    consecutiveGpsFailures = 0
-
-                    // Process location with geofence engine
-                    geofenceEngine.checkLocation(location)
-
-                    // Send location update to delegate
-                    sendLocationToDelegate(location)
-
-                    // Emit status periodically
-                    emitRuntimeStatus()
-                }
-            }
-
-            override fun onLocationAvailability(locationAvailability: LocationAvailability) {
-                if (!locationAvailability.isLocationAvailable) {
-                    Log.w(TAG, "Location availability lost")
-                    consecutiveGpsFailures++
-
-                    if (consecutiveGpsFailures >= 3) {
-                        errorRecovery.handleGpsFailure()
-                    }
-                }
-            }
         }
     }
 

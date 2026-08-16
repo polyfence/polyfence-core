@@ -16,12 +16,20 @@ public class ZonePersistence {
     // MARK: - Properties
     private let userDefaults = UserDefaults.standard
 
-    // Synchronization queue for thread-safe read-modify-write operations
-    // Concurrent queue allows parallel reads, barrier flag serializes writes
-    private let persistenceQueue = DispatchQueue(
+    // Serialises the read-modify-write cycles below. Concurrent so reads run in
+    // parallel; writes take the barrier.
+    //
+    // Static because the store it guards is `UserDefaults.standard`, which is
+    // global. A per-instance queue would order each instance against itself and
+    // against nothing else, so a write issued through one instance could still
+    // be invisible to a read issued through another moments later — the queue
+    // would look like protection while providing none across instances.
+    private static let sharedQueue = DispatchQueue(
         label: "io.polyfence.zonePersistence",
         attributes: .concurrent
     )
+
+    private var persistenceQueue: DispatchQueue { ZonePersistence.sharedQueue }
 
     public init() {}
 
@@ -174,6 +182,32 @@ public class ZonePersistence {
 
             let insideCount = states.values.filter { $0 }.count
             NSLog("[\(ZonePersistence.TAG)] Saved zone states: \(states.count) zones, inside=\(insideCount)")
+        }
+    }
+
+    /**
+     * Merge zone states into persistent storage as a single write-through.
+     *
+     * Zone ids absent from `states` keep their stored membership, so a caller
+     * holding only a partial view of the zone set cannot erase the rest.
+     * Deletion is deliberate and has its own entry points — `removeZoneState`
+     * and `clearAllZoneStates`.
+     *
+     * Thread-safe: Uses barrier queue to prevent race conditions
+     */
+    public func mergeZoneStates(_ states: [String: Bool]) {
+        if states.isEmpty { return }
+        persistenceQueue.async(flags: .barrier) {
+            var merged = self.userDefaults.dictionary(forKey: ZonePersistence.ZONE_STATES_KEY) as? [String: Bool] ?? [:]
+            for (zoneId, isInside) in states {
+                merged[zoneId] = isInside
+            }
+
+            self.userDefaults.set(merged, forKey: ZonePersistence.ZONE_STATES_KEY)
+            self.userDefaults.set(Date().timeIntervalSince1970, forKey: ZonePersistence.LAST_STATE_UPDATE_KEY)
+
+            let insideCount = merged.values.filter { $0 }.count
+            NSLog("[\(ZonePersistence.TAG)] Merged zone states: \(states.count) updated, \(merged.count) stored, inside=\(insideCount)")
         }
     }
 

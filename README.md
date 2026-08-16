@@ -35,7 +35,7 @@ polyfence-core is the mobile surface of the Polyfence geofence layer — the nat
 ### iOS (CocoaPods)
 
 ```ruby
-pod 'PolyfenceCore', '~> 1.0.14'
+pod 'PolyfenceCore', '~> 3.0.0'
 ```
 
 ### iOS (Swift Package Manager)
@@ -43,7 +43,7 @@ pod 'PolyfenceCore', '~> 1.0.14'
 Add to your `Package.swift` dependencies:
 
 ```swift
-.package(url: "https://github.com/polyfence/polyfence-core.git", from: "1.0.14")
+.package(url: "https://github.com/polyfence/polyfence-core.git", from: "3.0.0")
 ```
 
 Or in Xcode: File → Add Package Dependencies → paste the repository URL.
@@ -51,8 +51,56 @@ Or in Xcode: File → Add Package Dependencies → paste the repository URL.
 ### Android (Maven)
 
 ```kotlin
-implementation("io.polyfence:polyfence-core:1.0.14")
+implementation("io.polyfence:polyfence-core:3.0.0")
 ```
+
+### Permissions
+
+polyfence-core declares **no** `<uses-permission>` entries of its own. Manifest merging happens at build time and cannot be gated on a runtime flag, so any permission this library declared would land in your merged manifest whether or not you use the feature that needs it — and `ACCESS_BACKGROUND_LOCATION` in particular triggers Google Play's manual background-location review. Declare what your integration actually uses:
+
+**Android — the minimum viable set.** Polyfence's tracker is a foreground service, so foreground location is all base tracking needs. `ACCESS_BACKGROUND_LOCATION` is deliberately *not* here — see the opt-in block below:
+
+```xml
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+```
+
+You must also declare the tracker service yourself with `foregroundServiceType="location"`. polyfence-core does not declare the `<service>`, and a foreground service needs that type to hold location access — required from API 29, and hard-enforced from API 34, where `startForeground()` throws without it:
+
+```xml
+<service
+    android:name="io.polyfence.core.LocationTracker"
+    android:foregroundServiceType="location"
+    android:exported="false" />
+```
+
+**Android — additionally required only if you set `osGeofenceWakeEnabled = true`:**
+
+```xml
+<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+```
+
+`ACCESS_BACKGROUND_LOCATION` governs location access *outside* a foreground service, which is exactly what OS wake fences are: they fire when nothing of yours is running. Requesting it puts your app into Google Play's manual background-location review, which is why base tracking does not ask for it. `RECEIVE_BOOT_COMPLETED` lets Polyfence re-register wake fences after a device restart — Play Services drops all registered geofences on reboot. Without it the boot receiver is simply never invoked and wake coverage resumes the next time your app starts tracking.
+
+If `ACCESS_BACKGROUND_LOCATION` is missing or not granted, **tracking still runs**: OS wake fences degrade to polling-only operation and emit an `os_geofence_permission_denied` event on the error channel with `context["severity"] = "warning"`, and `osGeofenceRegistrationHealth` reports `lastError = "background_location_denied"`. The same applies if the grant is revoked mid-session. The runtime permission request is yours to make and to justify to the user.
+
+**iOS — required for background tracking**, in your app's own `Info.plist`. `requestAlwaysAuthorization()` is a silent no-op unless *both* usage descriptions are present, and `allowsBackgroundLocationUpdates` requires the `location` background mode — omit any of the three and you get no prompt, no error, and no background fixes:
+
+```xml
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>Explain here why your app needs location while you are using it.</string>
+<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+<string>Explain here why your app needs location while it is not in use.</string>
+<key>UIBackgroundModes</key>
+<array>
+  <string>location</string>
+</array>
+```
+
+If you set `osGeofenceWakeEnabled = true` you additionally need an "Always" authorization grant. "When in use" cannot deliver region callbacks after the process is killed, so Polyfence treats it the same as an outright denial and reports it through the same error path.
 
 ### Who this is for
 

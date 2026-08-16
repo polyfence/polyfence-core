@@ -44,7 +44,7 @@ public class PolyfenceErrorManager {
         //
         // Same errorData is passed to both paths so correlationId +
         // timestamp match between the live onError delivery and the
-        // persisted entry. BUG-016.
+        // persisted entry.
         PolyfenceDebugCollector.shared.addErrorToHistory(errorData)
 
         errorCallback?(errorData)
@@ -126,6 +126,8 @@ public class PolyfenceErrorManager {
             return "Location permission was revoked while tracking"
         case "memory_low":
             return "Low memory detected - may affect performance"
+        case "pending_events_evicted":
+            return "Pending events queue reached capacity; oldest events dropped"
         default:
             return "Unknown error occurred: \(type) - \(details)"
         }
