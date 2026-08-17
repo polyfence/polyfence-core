@@ -228,9 +228,6 @@ class OsGeofenceWakeTest {
         app.denyPermissions(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)
     }
 
-    // Plain Java Mockito, not the Kotlin extensions: mockito-kotlin's inline
-    // helpers ship as JVM-11 bytecode and cannot be inlined into this module's
-    // 1.8 target. Same choice the sibling engine / scheduler suites made.
     private fun succeedingClient(): GeofencingClient {
         val client = mock(GeofencingClient::class.java)
         `when`(client.addGeofences(any(GeofencingRequest::class.java), any(PendingIntent::class.java)))

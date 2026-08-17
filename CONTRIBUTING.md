@@ -91,7 +91,7 @@ grep -rn "import Flutter" ios/          # Must return 0 results
 
 ## Code Style
 
-- **Kotlin:** Follow standard Kotlin conventions. Package: `io.polyfence.core`. JVM target 1.8.
+- **Kotlin:** Follow standard Kotlin conventions. Package: `io.polyfence.core`. JVM target 17.
 - **Swift:** Follow standard Swift conventions. iOS 14.0+ APIs only. Protocol-oriented where possible.
 - **Comments:** Short, factual, explain WHY not WHAT. No conversational tone or emojis in production code.
 - **Tests:** All new features and bug fixes must include tests on both platforms.
