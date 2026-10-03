@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
     Native iOS engine for the Polyfence platform — the same zones you define
     once run on mobile, IoT, and server. On-device polygon (ray-casting) and
     circle (haversine) geofencing with SmartGPS, activity recognition, and
-    aggregate-only telemetry. No coordinates, no identifiers, no PII about
+    aggregate-only telemetry. No coordinates, no end-user identifiers, no PII about
     your end users. No cloud required from this library.
   DESC
   s.homepage         = 'https://github.com/polyfence/polyfence-core'
