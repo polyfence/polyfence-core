@@ -1,14 +1,14 @@
 # PolyfenceCore — Privacy Policy
 
 **Effective Date:** August 5, 2026
-**Last Updated:** August 5, 2026
+**Last Updated:** October 3, 2026
 **Applies to:** PolyfenceCore native library (Kotlin + Swift)
 
 ---
 
 ## Where this fits in the Polyfence platform
 
-polyfence-core is the mobile surface of the Polyfence platform — the same zones you define once also run on IoT devices (polyfence-embedded) and on the Polyfence server (polyfence.io). Each surface has its own privacy posture. This library has the strongest one: it never makes network calls, never collects, never transmits, never stores. Aggregate telemetry — when you opt into it through a bridge like polyfence-flutter or polyfence-react-native — never includes coordinates, identifiers, or PII.
+polyfence-core is the mobile surface of the Polyfence platform — the same zones you define once also run on IoT devices (polyfence-embedded) and on the Polyfence server (polyfence.io). Each surface has its own privacy posture. This library has the strongest one: it makes no network calls, so nothing leaves the device by way of this library. It does aggregate session metrics in memory — detection latency, GPS accuracy, battery drain, zone type counts — and a bridge like polyfence-flutter or polyfence-react-native is what sends them, by default, disabled with one line. Those aggregates never include coordinates, end-user identifiers, or PII; they do carry the host app's package name.
 
 ---
 
@@ -18,7 +18,7 @@ PolyfenceCore is a standalone on-device geofencing engine. It performs geometric
 
 ### Zero PII about your end users
 
-This library **never collects, transmits, or stores** location data, identifiers, or PII. It makes no network calls to Polyfence, includes no vendor telemetry, and does not send us any data. Any zone or location data remains under **your** app's control.
+This library **never collects, transmits, or stores** location data, end-user identifiers, or PII. It makes no network calls to Polyfence, includes no vendor telemetry, and does not send us any data. Any zone or location data remains under **your** app's control.
 
 All geofence math runs on-device by default. The one exception is the opt-in OS wake fences described below, which share zone boundaries — never positions — with the operating system.
 
