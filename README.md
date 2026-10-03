@@ -18,7 +18,7 @@ polyfence-core is the mobile surface of the Polyfence geofence layer — the nat
 - **Dwell detection** — Fire events when a device remains in a zone for a configurable duration
 - **Zone clustering** — Performance optimization for large zone sets (100+ zones)
 - **Scheduled tracking** — Time-window and day-of-week tracking schedules
-- **Telemetry aggregation** — Session-level performance metrics collected natively. Zero PII about your end users; never coordinates, never identifiers.
+- **Telemetry aggregation** — Session-level performance metrics collected natively. Zero PII about your end users; never coordinates, never end-user identifiers. The payload carries the host app's package name when a bridge supplies one.
 - **Zone persistence** — Zone state recovery across app restarts
 
 ## Requirements
