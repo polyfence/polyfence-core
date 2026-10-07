@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`no-tracked-ignored-files` consistency check.** Fails when any file is both tracked and matched by `.gitignore`. That pairing is self-concealing: the ignore rule stops `git status` reporting the file, so committed build output stays in the repository with nothing pointing at it again, and adding the rule does not untrack what is already in. It is the state the Swift build output sat in before #64 removed it, and the state this repo would have been left in had the `android/.kotlin/` rule below been added on its own. The check asks git which tracked files it would otherwise ignore rather than listing known output directories, so it covers whatever `.gitignore` names without an update per toolchain, and it respects negations, so deliberately tracked paths such as `android/gradle.properties` and the Gradle wrapper jar still pass. It does not catch an artifact that no rule covers yet, which is how the log below was committed.
+- **`android/.kotlin/` is now ignored**, alongside the existing `android/.gradle/` and `android/build/` rules. The Kotlin daemon writes there on every build. `android/.kotlin/errors/errors-1778881644603.log` had been tracked since the directory was never ignored: 185 bytes recording one failed Kotlin 2.0.21 daemon startup, holding a version string and a status line and no paths, usernames or other local detail. It is untracked now, so it leaves the working tree of a fresh clone while staying on disk for anyone who already has it. It remains in the published history, because untracking does not rewrite past commits. No consumer is affected: Android resolves the published Maven artifact and the podspec's `source_files` cover `ios/Classes` only.
+
 ## [3.0.0] - 2026-08-05
 
 ### Added

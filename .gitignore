@@ -1,6 +1,7 @@
 # Android
 android/.gradle/
 android/build/
+android/.kotlin/
 android/local.properties
 android/.idea/
 *.iml
