@@ -7,10 +7,10 @@ checks:
     fix: Remove tracked bootstrap/internal paths — git rm --cached them — keep local-only copies per CONTRIBUTING guidance.
 
   - id: no-tracked-ignored-files
-    description: no file is both tracked and matched by .gitignore, the state that lets committed build output survive an ignore rule added later
+    description: no file is both tracked and matched by a committed .gitignore rule, the state that lets committed build output survive an ignore rule added later
     type: subprocess
     runs: bash scripts/consistency-no-tracked-ignored-files.sh
-    fix: git rm --cached each reported path, which untracks it and leaves it on disk. If a path has to stay tracked, give it an explicit ! negation in .gitignore.
+    fix: git rm --cached each reported path, which untracks it and leaves it on disk here, though pulling the change deletes it from other working trees. If a path has to stay tracked, give it an explicit ! negation in .gitignore.
 
   - id: podspec-gradle-version-match
     description: CocoaPods PolyfenceCore.podspec version matches android/build.gradle.kts library version
