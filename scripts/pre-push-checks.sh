@@ -41,9 +41,16 @@ if grep -rPn '(sk_live_|sk_test_|pk_live_|pk_test_|AKIA[A-Z0-9]{16}|ghp_[a-zA-Z0
   exit 1
 fi
 
-# Android build + test
+# Android build + test.
+#
+# One command per line, not an && chain. `set -e` does not fire on a command
+# that fails in the middle of an && list, so `cd android && ./gradlew build &&
+# ./gradlew test` reported a Gradle failure, skipped the test run, printed
+# "All pre-push checks passed" and exited 0.
 echo "  Building Android..."
-cd android && ./gradlew build --quiet && ./gradlew test --quiet
+cd android
+./gradlew build --quiet
+./gradlew test --quiet
 cd "$REPO_ROOT"
 
 echo "  Running consistency checks..."
