@@ -1147,27 +1147,38 @@ public class LocationTracker: NSObject {
     private func showGeofenceNotification(eventType: String, zoneId: String, zoneName: String) {
         guard isRunning else { return }
         guard alertNotificationsEnabled else { return }  // Respect disableAlertNotifications config
-        // Zone name leads the title so the alert names the place, not our
-        // category. DWELL and RECOVERY_ENTER are inside-states — only a true
-        // EXIT / RECOVERY_EXIT reads as leaving.
-        let title: String
+        // Read per call rather than cached: the host app can set its own text
+        // after tracking is already running, and the next alert should carry it.
+        let cfg = PolyfenceConfig()
+
+        // The host supplies the sentence and we supply the place name. DWELL and
+        // RECOVERY_ENTER are inside-states — only a true EXIT / RECOVERY_EXIT
+        // reads as leaving — so the two enter-ish events share one title and the
+        // two exit-ish events share the other, which is what the fixed strings
+        // did. Android applies the same mapping.
+        let titleTemplate: String
         let isInside: Bool
         switch eventType {
         case "ENTER", GeofenceEngine.EVENT_RECOVERY_ENTER:
-            title = "Entered \(zoneName)"
+            titleTemplate = cfg.alertTitleEnter
             isInside = true
         case GeofenceEngine.EVENT_DWELL:
-            title = "Dwelling in \(zoneName)"
+            titleTemplate = cfg.alertTitleDwell
             isInside = true
         default:  // EXIT, RECOVERY_EXIT
-            title = "Exited \(zoneName)"
+            titleTemplate = cfg.alertTitleExit
             isInside = false
         }
+        let title = LocationTracker.renderNotificationText(
+            titleTemplate,
+            ["zone": zoneName]
+        )
 
         let content = UNMutableNotificationContent()
         content.title = title
         // Body carries time-in-zone for DWELL only; ENTER/EXIT stay single-line.
-        if eventType == GeofenceEngine.EVENT_DWELL, let dwellBody = formatDwellBody(zoneId) {
+        if eventType == GeofenceEngine.EVENT_DWELL,
+           let dwellBody = formatDwellBody(zoneId, zoneName: zoneName) {
             content.body = dwellBody
         }
 
@@ -1207,17 +1218,145 @@ public class LocationTracker: NSObject {
     }
 
     /**
-     * Human-readable "time in zone" line for DWELL alerts, e.g. "Here 12 min".
-     * Returns nil when the engine has no dwell start recorded for the zone.
+     * Fill the `{slot}` placeholders in a host-supplied notification string.
+     *
+     * Substitution rather than positional formatting because the host writes
+     * these in its own language: `{zone}` has to be movable to wherever the
+     * place name belongs in that sentence, and a host that wants the slot twice,
+     * or does not want it at all, is making a legitimate choice about its own
+     * copy rather than a mistake to correct.
+     *
+     * A placeholder this call has no value for is left exactly as written.
+     * Blanking it would turn a host's typo into a sentence with a hole in it,
+     * while leaving `{whatver}` visible in the tray points at the line that
+     * needs fixing.
+     *
+     * One left-to-right pass over the template, appending each replacement to
+     * the output rather than writing it back into the subject. Replacing one
+     * slot at a time in the running result would rescan what it had just
+     * inserted, so a zone legitimately named `Bay {minutes}` would have that
+     * literal substituted by a later slot. It would also make the answer depend
+     * on Dictionary iteration order, which Swift does not define, so the same
+     * zone could render differently between runs and differently from Android.
+     * A single pass is order-independent by construction. Android's
+     * `renderNotificationText` is the same algorithm.
+     *
+     * - Parameters:
+     *   - template: host-supplied string, or our English default.
+     *   - slots: placeholder name to replacement, without the braces.
+     * - Returns: the template with every known placeholder replaced.
      */
-    private func formatDwellBody(_ zoneId: String) -> String? {
+    /// Which of the four dwell bodies applies, and the numbers it is given.
+    internal enum DwellBodyVariant { case underMinute, minutes, hours, hoursMinutes }
+
+    internal struct DwellBodySelection {
+        let variant: DwellBodyVariant
+        let hours: Int
+        let minutes: Int
+    }
+
+    /// Choose the dwell body for a duration, and the values its slots get.
+    ///
+    /// Pulled out of `formatDwellBody` so it can be tested: that method needs a
+    /// live engine and a zone the engine knows about, which left a four-way
+    /// branch and a total-versus-remainder switch with no coverage at all. Two
+    /// one-character edits, `<= 60` and passing `minutes` where `totalMinutes`
+    /// belongs, would both have been invisible.
+    ///
+    /// `minutes` is the whole duration below an hour and the remainder above
+    /// one, because that is what each sentence reads as: "Here 59 min" against
+    /// "Here 1h 1min". `hours` is offered to every variant even where no default
+    /// uses it. A negative duration is clamped to zero, because clock skew can
+    /// produce one and `-1` in a host's sentence reads as a bug in their app.
+    ///
+    /// Kotlin's `selectDwellBody` is the same table.
+    internal static func selectDwellBody(_ totalMinutes: Int) -> DwellBodySelection {
+        let spent = max(totalMinutes, 0)
+        let hours = spent / 60
+        let remainder = spent % 60
+        if spent < 1 {
+            return DwellBodySelection(variant: .underMinute, hours: hours, minutes: remainder)
+        }
+        if spent < 60 {
+            return DwellBodySelection(variant: .minutes, hours: hours, minutes: spent)
+        }
+        if remainder == 0 {
+            return DwellBodySelection(variant: .hours, hours: hours, minutes: remainder)
+        }
+        return DwellBodySelection(variant: .hoursMinutes, hours: hours, minutes: remainder)
+    }
+
+    internal static func renderNotificationText(
+        _ template: String,
+        _ slots: [String: String]
+    ) -> String {
+        // Scanned over unicodeScalars rather than Characters. A Character is a
+        // grapheme cluster, so a combining mark after a brace makes "}" plus
+        // that mark one Character, which does not equal "}": the search misses,
+        // the loop ends, and every remaining slot in the template is left
+        // unrendered. Kotlin walks UTF-16 code units and substitutes normally.
+        // Scalars match that for these delimiters, because "{" and "}" are
+        // ASCII and so can never be part of a surrogate pair.
+        let scalars = template.unicodeScalars
+        let openBrace = Unicode.Scalar("{")
+        let closeBrace = Unicode.Scalar("}")
+
+        var out = String.UnicodeScalarView()
+        out.reserveCapacity(scalars.count)
+        var cursor = scalars.startIndex
+
+        while cursor < scalars.endIndex {
+            guard let open = scalars[cursor...].firstIndex(of: openBrace) else { break }
+            let afterOpen = scalars.index(after: open)
+            guard let close = scalars[afterOpen...].firstIndex(of: closeBrace) else { break }
+
+            out.append(contentsOf: scalars[cursor..<open])
+            if let value = slots[String(String.UnicodeScalarView(scalars[afterOpen..<close]))] {
+                out.append(contentsOf: value.unicodeScalars)
+            } else {
+                out.append(contentsOf: scalars[open...close])
+            }
+            cursor = scalars.index(after: close)
+        }
+        out.append(contentsOf: scalars[cursor...])
+        return String(out)
+    }
+
+    /**
+     * Body line for a dwell alert, in the host app's own words.
+     *
+     * Four separate host-supplied sentences rather than one assembled from a
+     * prefix and unit abbreviations. Which sentence applies depends on the
+     * duration, and a language's plural rules and word order decide how each one
+     * reads: "1 minute" against "2 minutes" in English, three distinct forms in
+     * Polish. Handing the host whole sentences puts that decision where the
+     * translation files already live.
+     *
+     * `{zone}` is offered to every variant even though no default uses it, so a
+     * host whose natural phrasing names the place can have it.
+     *
+     * - Returns: the rendered body, or nil when the engine has no dwell duration
+     *   for this zone, which keeps the alert single-line as before.
+     */
+    private func formatDwellBody(_ zoneId: String, zoneName: String) -> String? {
         guard let ms = geofenceEngine.getDwellDurationMs(zoneId) else { return nil }
-        let totalMinutes = Int(ms / 60_000)
-        if totalMinutes < 1 { return "Here under a minute" }
-        if totalMinutes < 60 { return "Here \(totalMinutes) min" }
-        let h = totalMinutes / 60
-        let m = totalMinutes % 60
-        return m == 0 ? "Here \(h)h" : "Here \(h)h \(m)min"
+        let cfg = PolyfenceConfig()
+        let selection = LocationTracker.selectDwellBody(Int(ms / 60_000))
+        let template: String
+        switch selection.variant {
+        case .underMinute: template = cfg.alertDwellBodyUnderMinute
+        case .minutes: template = cfg.alertDwellBodyMinutes
+        case .hours: template = cfg.alertDwellBodyHours
+        case .hoursMinutes: template = cfg.alertDwellBodyHoursMinutes
+        }
+        return LocationTracker.renderNotificationText(
+            template,
+            [
+                "zone": zoneName,
+                "hours": String(selection.hours),
+                "minutes": String(selection.minutes)
+            ]
+        )
     }
 
     /**
@@ -1817,7 +1956,7 @@ extension LocationTracker {
     /// Android's path goes through the foreground-service map handler
     /// which already does the merge internally.
     /**
-     * Full 12-key configuration update, mirroring Kotlin's
+     * Full configuration update, mirroring Kotlin's
      * `LocationTracker.updateConfigurationFromMap`. Applies a partial
      * or complete configuration map to every subsystem the composed
      * `getCurrentConfigurationMap` exposes:
@@ -1993,17 +2132,45 @@ extension LocationTracker {
         if let disableAlertNotifications = partial["disableAlertNotifications"] as? Bool {
             self.alertNotificationsEnabled = !disableAlertNotifications
         }
+
+        // Notification text, for the same reason as the flag above: the read
+        // side emits `notificationText` and the reset path restores it, so the
+        // write side has to honour it or
+        // updateConfiguration({notificationText: {...}}) silently does nothing.
+        //
+        // Applied key by key so a partial map leaves the rest alone, which is
+        // how every other group here behaves. Writes land in PolyfenceConfig
+        // rather than a property on this instance because the notification is
+        // also built after a process relaunch, when no bridge has run.
+        if let notificationText = partial["notificationText"] as? [String: Any] {
+            let cfg = PolyfenceConfig()
+            if let v = notificationText["trackingTitle"] as? String { cfg.trackingNotificationTitle = v }
+            if let v = notificationText["trackingText"] as? String { cfg.trackingNotificationText = v }
+            if let v = notificationText["trackingIconName"] as? String { cfg.trackingNotificationIconName = v }
+            if let v = notificationText["enterTitle"] as? String { cfg.alertTitleEnter = v }
+            if let v = notificationText["dwellTitle"] as? String { cfg.alertTitleDwell = v }
+            if let v = notificationText["exitTitle"] as? String { cfg.alertTitleExit = v }
+            if let v = notificationText["dwellBodyUnderMinute"] as? String { cfg.alertDwellBodyUnderMinute = v }
+            if let v = notificationText["dwellBodyMinutes"] as? String { cfg.alertDwellBodyMinutes = v }
+            if let v = notificationText["dwellBodyHours"] as? String { cfg.alertDwellBodyHours = v }
+            if let v = notificationText["dwellBodyHoursMinutes"] as? String { cfg.alertDwellBodyHoursMinutes = v }
+            if let v = notificationText["trackingChannelName"] as? String { cfg.trackingChannelName = v }
+            if let v = notificationText["trackingChannelDescription"] as? String { cfg.trackingChannelDescription = v }
+            if let v = notificationText["alertChannelName"] as? String { cfg.alertChannelName = v }
+            if let v = notificationText["alertChannelDescription"] as? String { cfg.alertChannelDescription = v }
+            NSLog("[\(LocationTracker.TAG)] Notification text applied via updateConfiguration: \(notificationText.keys)")
+        }
     }
 
     /// Reset smart GPS configuration to defaults
     public func resetSmartConfiguration() {
-        // Reset the full 12-field configuration surface, not just
+        // Reset the whole configuration surface, not just
         // SmartGpsConfig. Bridges rely on `resetConfiguration()`
         // clearing every subsystem the composed
         // `getCurrentConfigurationMap` exposes — dwell, cluster,
-        // schedule, activity, gpsAccuracyThreshold, and the alert
-        // flag included — so a caller can't invoke reset and still
-        // observe a previously-set override.
+        // schedule, activity, gpsAccuracyThreshold, the alert flag,
+        // and the notification text included — so a caller can't
+        // invoke reset and still observe a previously-set override.
         updateSmartConfiguration(SmartGpsConfig())
         geofenceEngine.setGpsAccuracyThreshold(GeofenceEngine.DEFAULT_GPS_ACCURACY_THRESHOLD)
         geofenceEngine.setDwellConfig(
@@ -2018,6 +2185,7 @@ extension LocationTracker {
         TrackingScheduler.shared.updateConfig(nil)
         updateActivityRecognition(ActivitySettings())
         alertNotificationsEnabled = true
+        LocationTracker.resetNotificationText()
     }
 
     /**
@@ -2028,7 +2196,7 @@ extension LocationTracker {
     }
 
     /**
-     * Full 12-key configuration snapshot for the bridge
+     * Full configuration snapshot for the bridge
      * `getConfiguration()` surface. Composes state from the four
      * places it actually lives:
      *   1. `smartConfig` — top-level scalars + proximity / movement /
@@ -2086,7 +2254,65 @@ extension LocationTracker {
         // silently reset the caller's original init preference.
         base["disableAlertNotifications"] = !alertNotificationsEnabled
 
+        // Notification text, emitted for the same reason as the flag above: a
+        // round-trip getConfiguration() -> cache -> updateConfiguration() must
+        // not quietly reset wording the host set earlier. Grouped under one key
+        // rather than ten top-level ones, matching Android.
+        base["notificationText"] = LocationTracker.notificationTextMap(PolyfenceConfig())
+
         return base
+    }
+
+    /**
+     * Wire shape for the host-settable notification strings.
+     *
+     * One nested map rather than fourteen top-level keys: they are a single
+     * concern, and it means each bridge adds one accepted key instead of
+     * fourteen. The three tracking_* values and the four channel labels have no
+     * iOS surface and are carried so a cross-platform host can round-trip one
+     * config object through either platform.
+     */
+    internal static func notificationTextMap(_ cfg: PolyfenceConfig) -> [String: Any] {
+        var map: [String: Any] = [
+            "trackingTitle": cfg.trackingNotificationTitle,
+            "trackingText": cfg.trackingNotificationText,
+            "enterTitle": cfg.alertTitleEnter,
+            "dwellTitle": cfg.alertTitleDwell,
+            "exitTitle": cfg.alertTitleExit,
+            "dwellBodyUnderMinute": cfg.alertDwellBodyUnderMinute,
+            "dwellBodyMinutes": cfg.alertDwellBodyMinutes,
+            "dwellBodyHours": cfg.alertDwellBodyHours,
+            "dwellBodyHoursMinutes": cfg.alertDwellBodyHoursMinutes,
+            "trackingChannelName": cfg.trackingChannelName,
+            "trackingChannelDescription": cfg.trackingChannelDescription,
+            "alertChannelName": cfg.alertChannelName,
+            "alertChannelDescription": cfg.alertChannelDescription
+        ]
+        // Absent rather than null when unset: the map crosses a bridge that
+        // cannot carry a null, and absent already means "host set nothing".
+        if let icon = cfg.trackingNotificationIconName {
+            map["trackingIconName"] = icon
+        }
+        return map
+    }
+
+    /** Restore every notification string to its compile-time default. */
+    internal static func resetNotificationText() {
+        let cfg = PolyfenceConfig()
+        cfg.trackingNotificationTitle = PolyfenceConfig.DEFAULT_TRACKING_NOTIFICATION_TITLE
+        cfg.trackingNotificationText = PolyfenceConfig.DEFAULT_TRACKING_NOTIFICATION_TEXT
+        cfg.trackingNotificationIconName = nil
+        cfg.alertTitleEnter = PolyfenceConfig.DEFAULT_ALERT_TITLE_ENTER
+        cfg.alertTitleDwell = PolyfenceConfig.DEFAULT_ALERT_TITLE_DWELL
+        cfg.alertTitleExit = PolyfenceConfig.DEFAULT_ALERT_TITLE_EXIT
+        cfg.alertDwellBodyUnderMinute = PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_UNDER_MINUTE
+        cfg.alertDwellBodyMinutes = PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_MINUTES
+        cfg.alertDwellBodyHours = PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_HOURS
+        cfg.alertDwellBodyHoursMinutes = PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_HOURS_MINUTES
+        cfg.trackingChannelName = PolyfenceConfig.DEFAULT_TRACKING_CHANNEL_NAME
+        cfg.trackingChannelDescription = PolyfenceConfig.DEFAULT_TRACKING_CHANNEL_DESCRIPTION
+        cfg.alertChannelName = PolyfenceConfig.DEFAULT_ALERT_CHANNEL_NAME
+        cfg.alertChannelDescription = PolyfenceConfig.DEFAULT_ALERT_CHANNEL_DESCRIPTION
     }
 
     /// Most recent GPS accuracy in metres, or `nil` if no fix has

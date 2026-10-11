@@ -22,6 +22,7 @@ polyfence-core is the mobile surface of the Polyfence geofence layer — the nat
 - **Scheduled tracking** — Time-window and day-of-week tracking schedules
 - **Telemetry aggregation** — Session-level performance metrics collected natively. Zero PII about your end users; never coordinates, never end-user identifiers. The payload carries the host app's package name when a bridge supplies one.
 - **Zone persistence** — Zone state recovery across app restarts
+- **Host-written notification text**: every string Polyfence shows your users is yours to write, in your own language
 
 ## Requirements
 
@@ -199,6 +200,68 @@ let tracker = LocationTracker()
 tracker.startTracking()
 ```
 
+## Notification text
+
+Polyfence shows your users two kinds of notification, and every string in both
+is yours to write. Nothing is set by default beyond the English below, so an
+integrator who configures nothing sees no change.
+
+| Property on `PolyfenceConfig` | Default | Surface |
+|---|---|---|
+| `trackingNotificationTitle` | `Polyfence Active` | The ongoing notification Android requires while background tracking runs. Android only. |
+| `trackingNotificationText` | `Monitoring geofence zones` | Body of the same notification. Android only. |
+| `trackingNotificationIconName` | unset | Drawable resource **name** for its small icon. Android only. |
+| `alertTitleEnter` | `Entered {zone}` | Shown when someone enters a zone. |
+| `alertTitleDwell` | `Dwelling in {zone}` | Shown while someone stays in a zone. |
+| `alertTitleExit` | `Exited {zone}` | Shown when someone leaves a zone. |
+| `alertDwellBodyUnderMinute` | `Here under a minute` | Dwell body, under a minute. |
+| `alertDwellBodyMinutes` | `Here {minutes} min` | Dwell body, under an hour. |
+| `alertDwellBodyHours` | `Here {hours}h` | Dwell body, whole hours. |
+| `alertDwellBodyHoursMinutes` | `Here {hours}h {minutes} min` | Dwell body, hours and minutes. |
+| `trackingChannelName` | `Location Tracking` | Notification-channel label, shown in the system Settings app. Android only. |
+| `trackingChannelDescription` | `Background location tracking` | Its description. Android only. |
+| `alertChannelName` | `Geofence Alerts` | Channel label for zone alerts. Android only. |
+| `alertChannelDescription` | `Zone entry and exit notifications` | Its description. Android only. |
+
+```kotlin
+PolyfenceConfig(context).apply {
+    alertTitleEnter = "Arrivé à {zone}"
+    alertTitleExit = "Départ de {zone}"
+    alertDwellBodyMinutes = "{minutes} minutes sur place"
+}
+```
+
+```swift
+let config = PolyfenceConfig()
+config.alertTitleEnter = "Arrivé à {zone}"
+config.alertTitleExit = "Départ de {zone}"
+config.alertDwellBodyMinutes = "{minutes} minutes sur place"
+```
+
+Put `{zone}` wherever your language needs it: a Japanese app writes
+`{zone}に到着`. A placeholder you misspell stays visible rather than blanking, so
+the mistake shows up in the tray.
+
+Polyfence ships no translations and does not detect the device language. Pass the
+strings for the language your app is in, and set them again if that changes.
+
+A field you leave alone keeps whatever is stored for it, so dropping one later
+does not bring English back. Pass the English text yourself, or call
+`resetConfiguration()` to restore every default.
+
+`trackingNotificationIconName` is a resource **name** such as `ic_tracking`, not
+an `R.drawable` id, and an empty string clears it. Android draws a small icon
+from its alpha channel alone, so use a monochrome asset with a transparent
+background or it arrives as a white square. A name that does not resolve falls
+back to the platform glyph.
+
+The Android-only fields are stored and echoed on iOS, so one configuration object
+round-trips through `getConfiguration()` on either platform.
+
+If you change a channel name or description and the system Settings screen still
+shows the old one, you are most likely looking at a channel created by an earlier
+run or install. A clean install confirms which it is.
+
 ## Architecture
 
 Polyfence Core is the engine layer consumed by platform-specific bridges:
@@ -219,7 +282,7 @@ polyfence-core (this repo)
 | `ActivityRecognitionManager` | Detects user activity (still, walking, running, cycling, driving) via Play Services (Android) / CoreMotion (iOS). Feeds activity data to LocationTracker for interval adjustment. |
 | `TrackingScheduler` | Time-based tracking control — start/stop tracking based on configurable time windows and days of week. |
 | `TelemetryAggregator` | Collects session-level performance metrics natively — activity distribution, GPS interval histogram, zone transitions, dwell durations, device category. No GPS coordinates or PII. |
-| `ZonePersistence` | Persists zone definitions and inside/outside state to local storage. Enables state recovery after app restarts. |
+| `ZonePersistence` | Persists zone definitions and inside/outside state to local storage. Enables state recovery after app restarts. Reads one zone's stored data or name back with `loadZoneData(zoneId)` / `loadZoneName(zoneId)`. |
 | `SmartGpsConfig` | Configuration model — accuracy profiles (max, balanced, battery-optimal, adaptive), update strategies, proximity/movement/battery/dwell/cluster/schedule/activity settings. |
 | `PolyfenceCoreDelegate` | Bridge interface — platform bridges implement this to receive events from the engine. |
 | `GeoMath` | Shared geometry algorithms — haversine distance, ray-casting point-in-polygon, point-to-segment distance. Used by GeofenceEngine and LocationTracker. |

@@ -35,7 +35,115 @@ import kotlin.math.*
  */
 class LocationTracker : Service() {
 
+    /** Which of the four dwell bodies applies, and the numbers it is given. */
+    internal enum class DwellBodyVariant { UNDER_MINUTE, MINUTES, HOURS, HOURS_MINUTES }
+
+    internal data class DwellBodySelection(
+        val variant: DwellBodyVariant,
+        val hours: Int,
+        val minutes: Int
+    )
+
     companion object {
+        /**
+         * Small-icon for the ongoing tracking notification, resolved by resource
+         * name and never from a persisted id.
+         *
+         * Resource ids are assigned at compile time and move when the host app's
+         * resources change, so an id stored in preferences silently stops matching
+         * after their next release. A name survives a rebuild. The resolved value is
+         * then checked, because `getIdentifier` answers 0 for a name that is not
+         * there: this notification goes straight to `startForeground`, and Android
+         * kills the service when that call does not land, so an icon that no longer
+         * resolves has to degrade to the platform glyph rather than take background
+         * tracking down with it.
+         *
+         * @param name drawable resource name the host app set, or null if unset.
+         * @param resolve looks a drawable name up in the host app's resources,
+         *   answering 0 when there is none.
+         * @return a drawable id that is always non-zero.
+         */
+        internal fun resolveTrackingIcon(name: String?, resolve: (String) -> Int): Int =
+            name?.let(resolve)?.takeIf { it != 0 } ?: android.R.drawable.ic_menu_mylocation
+
+        /**
+         * Fill the `{slot}` placeholders in a host-supplied notification string.
+         *
+         * Substitution rather than positional formatting because the host writes
+         * these in its own language: `{zone}` has to be movable to wherever the
+         * place name belongs in that sentence, and a host that wants the slot
+         * twice, or does not want it at all, is making a legitimate choice about
+         * its own copy rather than a mistake to correct.
+         *
+         * A placeholder this call has no value for is left exactly as written.
+         * Blanking it would turn a host's typo into a sentence with a hole in it,
+         * while leaving `{whatver}` visible in the tray points at the line that
+         * needs fixing.
+         *
+         * One left-to-right pass over the template, appending each replacement to
+         * the output rather than writing it back into the subject. Replacing one
+         * slot at a time in the running result would rescan what it had just
+         * inserted, so a zone legitimately named `Bay {minutes}` would have that
+         * literal substituted by a later slot. It would also make the answer
+         * depend on map iteration order, which Kotlin fixes and Swift does not,
+         * so the two platforms would disagree about the same zone. A single pass
+         * is order-independent by construction.
+         *
+         * @param template host-supplied string, or our English default.
+         * @param slots placeholder name to replacement, without the braces.
+         * @return the template with every known placeholder replaced, and every
+         *   other brace sequence left as the host wrote it.
+         */
+        /**
+         * Choose the dwell body for a duration, and the values its slots get.
+         *
+         * Pulled out of [formatDwellBody] so it can be tested: that function
+         * needs a live engine and a zone the engine knows about, which left a
+         * four-way branch and a total-versus-remainder switch with no coverage
+         * at all. Two one-character edits, `<= 60` and passing `minutes` where
+         * `totalMinutes` belongs, would both have been invisible.
+         *
+         * `minutes` is the whole duration below an hour and the remainder above
+         * one, because that is what each sentence reads as: "Here 59 min" against
+         * "Here 1h 1min". `hours` is offered to every variant even where no
+         * default uses it.
+         *
+         * A negative duration is clamped to zero. Clock skew between a dwell
+         * start and the reading can produce one, and `-1` in a host's sentence
+         * reads as a bug in their app rather than in the clock.
+         *
+         * @param totalMinutes whole minutes spent inside the zone.
+         */
+        internal fun selectDwellBody(totalMinutes: Int): DwellBodySelection {
+            val spent = totalMinutes.coerceAtLeast(0)
+            val hours = spent / 60
+            val remainder = spent % 60
+            return when {
+                spent < 1 -> DwellBodySelection(DwellBodyVariant.UNDER_MINUTE, hours, remainder)
+                spent < 60 -> DwellBodySelection(DwellBodyVariant.MINUTES, hours, spent)
+                remainder == 0 -> DwellBodySelection(DwellBodyVariant.HOURS, hours, remainder)
+                else -> DwellBodySelection(DwellBodyVariant.HOURS_MINUTES, hours, remainder)
+            }
+        }
+
+        internal fun renderNotificationText(template: String, slots: Map<String, String>): String {
+            val out = StringBuilder(template.length)
+            var cursor = 0
+            while (cursor < template.length) {
+                val open = template.indexOf('{', cursor)
+                if (open < 0) break
+                val close = template.indexOf('}', open + 1)
+                if (close < 0) break
+
+                out.append(template, cursor, open)
+                val value = slots[template.substring(open + 1, close)]
+                if (value != null) out.append(value) else out.append(template, open, close + 1)
+                cursor = close + 1
+            }
+            out.append(template, cursor, template.length)
+            return out.toString()
+        }
+
         private const val TAG = "LocationTracker"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "polyfence_tracking"
@@ -228,7 +336,7 @@ class LocationTracker : Service() {
         }
 
         /**
-         * Full 12-key configuration snapshot for the bridge
+         * Full configuration snapshot for the bridge
          * `getConfiguration()` surface. Composes state from the four
          * places it actually lives:
          *   1. [currentSmartConfig] — top-level scalars +
@@ -379,8 +487,88 @@ class LocationTracker : Service() {
             // silently reset the caller's original init preference.
             base["disableAlertNotifications"] = !alertNotificationsEnabled
 
+            // Notification text, emitted for the same reason as the flag above:
+            // a round-trip getConfiguration() -> cache -> updateConfiguration()
+            // must not quietly reset wording the host set earlier. Grouped under
+            // one key rather than fourteen top-level ones, following
+            // activitySettings.
+            //
+            // Without a context there are no preferences to read, so this falls
+            // back to the compile-time defaults in read-side shape. Not the reset
+            // payload, which carries trackingIconName as an empty string: that is
+            // a value meaning "no icon", so a caller who read this snapshot and
+            // wrote it back would clear an icon the host had set.
+            base["notificationText"] = context?.let { notificationTextMap(PolyfenceConfig(it)) }
+                ?: unsetNotificationTextMap()
+
             return base
         }
+
+        /**
+         * Wire shape for the host-settable notification strings.
+         *
+         * One nested map rather than ten top-level keys: they are a single
+         * concern, it follows the grouping [activitySettings] already uses, and
+         * it means each bridge adds one accepted key instead of ten.
+         */
+        private fun notificationTextMap(cfg: PolyfenceConfig): Map<String, Any> = buildMap {
+            put("trackingTitle", cfg.trackingNotificationTitle)
+            put("trackingText", cfg.trackingNotificationText)
+            // Absent rather than null when unset: the map crosses a bridge that
+            // cannot carry a null, and absent already means "host set nothing".
+            cfg.trackingNotificationIconName?.let { put("trackingIconName", it) }
+            put("enterTitle", cfg.alertTitleEnter)
+            put("dwellTitle", cfg.alertTitleDwell)
+            put("exitTitle", cfg.alertTitleExit)
+            put("dwellBodyUnderMinute", cfg.alertDwellBodyUnderMinute)
+            put("dwellBodyMinutes", cfg.alertDwellBodyMinutes)
+            put("dwellBodyHours", cfg.alertDwellBodyHours)
+            put("dwellBodyHoursMinutes", cfg.alertDwellBodyHoursMinutes)
+            put("trackingChannelName", cfg.trackingChannelName)
+            put("trackingChannelDescription", cfg.trackingChannelDescription)
+            put("alertChannelName", cfg.alertChannelName)
+            put("alertChannelDescription", cfg.alertChannelDescription)
+        }
+
+        /**
+         * What a host that has set nothing reads back: [notificationTextMap] at
+         * compile-time defaults.
+         *
+         * Omits `trackingIconName`, because an unset icon is an absent key on the
+         * read side. This is the shape to hand a caller asking what the
+         * configuration is, including when there is no context to read.
+         */
+        private fun unsetNotificationTextMap(): Map<String, Any> = mapOf(
+            "trackingTitle" to PolyfenceConfig.DEFAULT_TRACKING_NOTIFICATION_TITLE,
+            "trackingText" to PolyfenceConfig.DEFAULT_TRACKING_NOTIFICATION_TEXT,
+            "enterTitle" to PolyfenceConfig.DEFAULT_ALERT_TITLE_ENTER,
+            "dwellTitle" to PolyfenceConfig.DEFAULT_ALERT_TITLE_DWELL,
+            "exitTitle" to PolyfenceConfig.DEFAULT_ALERT_TITLE_EXIT,
+            "dwellBodyUnderMinute" to PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_UNDER_MINUTE,
+            "dwellBodyMinutes" to PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_MINUTES,
+            "dwellBodyHours" to PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_HOURS,
+            "dwellBodyHoursMinutes" to PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_HOURS_MINUTES,
+            "trackingChannelName" to PolyfenceConfig.DEFAULT_TRACKING_CHANNEL_NAME,
+            "trackingChannelDescription" to PolyfenceConfig.DEFAULT_TRACKING_CHANNEL_DESCRIPTION,
+            "alertChannelName" to PolyfenceConfig.DEFAULT_ALERT_CHANNEL_NAME,
+            "alertChannelDescription" to PolyfenceConfig.DEFAULT_ALERT_CHANNEL_DESCRIPTION
+        )
+
+        /**
+         * The reset payload: [unsetNotificationTextMap] plus `trackingIconName`
+         * as an empty string.
+         *
+         * The one place that key is present and empty, and the reason
+         * `resetConfiguration()` can clear an icon at all. The write path applies
+         * values and treats an absent key as "leave what is stored alone", which
+         * is what a partial update needs, so a reset has to say "no icon" with a
+         * value. Empty is that value and cannot name a real drawable.
+         *
+         * Not interchangeable with the read-side shape for that exact reason: a
+         * caller who read this and wrote it back would clear a host's icon.
+         */
+        private fun defaultNotificationTextMap(): Map<String, Any> =
+            unsetNotificationTextMap() + ("trackingIconName" to "")
 
         /**
          * Most recent GPS accuracy in metres from the running tracker
@@ -412,7 +600,7 @@ class LocationTracker : Service() {
         }
 
         /**
-         * Build the same 12-key configuration map that
+         * Build the same configuration map that
          * [getCurrentConfigurationMap] emits, but populated entirely
          * with the SDK's compile-time defaults. Bridges use this as
          * the payload for `resetConfiguration()` so the reset walks
@@ -458,6 +646,7 @@ class LocationTracker : Service() {
                 "drivingIntervalMs" to ActivitySettings.DEFAULT_DRIVING_INTERVAL_MS
             )
             base["disableAlertNotifications"] = false
+            base["notificationText"] = defaultNotificationTextMap()
             return base
         }
 
@@ -1898,17 +2087,23 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
     private fun showGeofenceNotification(eventType: String, zoneId: String, zoneName: String) {
     if (!isRunning) return
     if (!alertNotificationsEnabled) return  // Respect disableAlertNotifications config
-    // Zone name leads the title so the alert names the place, not our
-    // category. DWELL and RECOVERY_ENTER are inside-states — only a true
-    // EXIT / RECOVERY_EXIT reads as leaving.
-    val title = when (eventType) {
-        "ENTER", GeofenceEngine.EVENT_RECOVERY_ENTER -> "Entered $zoneName"
-        GeofenceEngine.EVENT_DWELL -> "Dwelling in $zoneName"
-        else -> "Exited $zoneName"
+    // Read per call rather than cached: the host app can set its own text after
+    // the service is already running, and the next alert should carry it.
+    val cfg = PolyfenceConfig(this)
+
+    // The host supplies the sentence and we supply the place name. DWELL and
+    // RECOVERY_ENTER are inside-states — only a true EXIT / RECOVERY_EXIT reads
+    // as leaving — so the two enter-ish events share one title and the two
+    // exit-ish events share the other, which is what the fixed strings did.
+    val titleTemplate = when (eventType) {
+        "ENTER", GeofenceEngine.EVENT_RECOVERY_ENTER -> cfg.alertTitleEnter
+        GeofenceEngine.EVENT_DWELL -> cfg.alertTitleDwell
+        else -> cfg.alertTitleExit
     }
+    val title = renderNotificationText(titleTemplate, mapOf("zone" to zoneName))
     // Body carries time-in-zone for DWELL only; ENTER/EXIT stay single-line.
     val body: String? =
-        if (eventType == GeofenceEngine.EVENT_DWELL) formatDwellBody(zoneId) else null
+        if (eventType == GeofenceEngine.EVENT_DWELL) formatDwellBody(zoneId, zoneName) else null
 
     // Create PendingIntent to reuse existing app task when notification is tapped
     // Use dynamic package resolution instead of hardcoded class name
@@ -1941,54 +2136,95 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
 }
 
     /**
-     * Human-readable "time in zone" line for DWELL alerts, e.g. "Here 12 min".
-     * Null when the engine has no dwell start recorded for the zone.
+     * Body line for a dwell alert, in the host app's own words.
+     *
+     * Four separate host-supplied sentences rather than one assembled from a
+     * prefix and unit abbreviations. Which sentence applies depends on the
+     * duration, and a language's plural rules and word order decide how each
+     * one reads: "1 minute" against "2 minutes" in English, three distinct
+     * forms in Polish. Handing the host whole sentences puts that decision
+     * where the translation files already live.
+     *
+     * `{zone}` is offered to every variant even though no default uses it, so a
+     * host whose natural phrasing names the place can have it.
+     *
+     * @return the rendered body, or null when the engine has no dwell duration
+     *   for this zone, which keeps the alert single-line as before.
      */
-    private fun formatDwellBody(zoneId: String): String? {
+    private fun formatDwellBody(zoneId: String, zoneName: String): String? {
         val ms = geofenceEngine.getDwellDurationMs(zoneId) ?: return null
-        val totalMinutes = (ms / 60_000L).toInt()
-        return when {
-            totalMinutes < 1 -> "Here under a minute"
-            totalMinutes < 60 -> "Here $totalMinutes min"
-            else -> {
-                val h = totalMinutes / 60
-                val m = totalMinutes % 60
-                if (m == 0) "Here ${h}h" else "Here ${h}h ${m}min"
-            }
+        val cfg = PolyfenceConfig(this)
+        val selection = selectDwellBody((ms / 60_000L).toInt())
+        val template = when (selection.variant) {
+            DwellBodyVariant.UNDER_MINUTE -> cfg.alertDwellBodyUnderMinute
+            DwellBodyVariant.MINUTES -> cfg.alertDwellBodyMinutes
+            DwellBodyVariant.HOURS -> cfg.alertDwellBodyHours
+            DwellBodyVariant.HOURS_MINUTES -> cfg.alertDwellBodyHoursMinutes
         }
+        return renderNotificationText(
+            template,
+            mapOf(
+                "zone" to zoneName,
+                "hours" to selection.hours.toString(),
+                "minutes" to selection.minutes.toString()
+            )
+        )
     }
 
     private fun createTrackingNotification(): Notification {
+        // Read per call rather than cached, because this is also called to refresh
+        // an already-posted notification: updateConfigurationFromMap reissues
+        // NOTIFICATION_ID after a host changes any of the three values below.
+        val cfg = PolyfenceConfig(this)
+
+        val icon = resolveTrackingIcon(cfg.trackingNotificationIconName) {
+            resources.getIdentifier(it, "drawable", packageName)
+        }
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Polyfence Active")
-            .setContentText("Monitoring geofence zones")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setContentTitle(cfg.trackingNotificationTitle)
+            .setContentText(cfg.trackingNotificationText)
+            .setSmallIcon(icon)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
     }
 
+    /**
+     * Create, or update, the two notification channels.
+     *
+     * Also called after a host changes a channel label through
+     * `updateConfiguration`. Re-creating a channel under an id that already
+     * exists is how Android updates its name and description: what it declines
+     * is overriding importance, sound or vibration once the user has adjusted
+     * those in Settings, so the values below apply on first creation and the
+     * user's own choices survive afterwards. That is the behaviour a host wants,
+     * and it is why relabelling does not need the channel deleting first.
+     */
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            // Read per call rather than cached, because this is also the update
+            // path for a label the host changed while tracking runs.
+            val cfg = PolyfenceConfig(this)
 
             // Tracking channel
             val trackingChannel = NotificationChannel(
                 CHANNEL_ID,
-                "Location Tracking",
+                cfg.trackingChannelName,
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "Background location tracking"
+                description = cfg.trackingChannelDescription
                 setSound(null, null)
             }
 
             // Geofence alerts (high priority)
             val alertChannel = NotificationChannel(
                 GEOFENCE_CHANNEL_ID,
-                "Geofence Alerts",
+                cfg.alertChannelName,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Zone entry and exit notifications"
+                description = cfg.alertChannelDescription
                 enableVibration(true)
                 enableLights(true)
                 setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI, null)
@@ -2654,6 +2890,80 @@ private fun handleGeofenceEvent(zoneId: String, eventType: String, location: and
             if (disableAlertNotifications != null) {
                 setAlertNotificationsEnabled(!disableAlertNotifications)
                 Log.d(TAG, "Alert notifications flag applied via updateConfiguration: enabled=${!disableAlertNotifications}")
+            }
+
+            // Notification text, for the same reason as the flag above: the read
+            // side emits `notificationText` and buildDefaultConfigurationMap
+            // includes it, so the write side has to honour it or
+            // updateConfiguration({notificationText: {...}}) silently does
+            // nothing and resetConfiguration() cannot restore the defaults.
+            //
+            // Applied key by key so a partial map leaves the rest alone, which is
+            // how every other group here behaves. Writes land in PolyfenceConfig
+            // rather than a field on this instance because the notification is
+            // also built after a process relaunch, when no bridge has run.
+            @Suppress("UNCHECKED_CAST")
+            val notificationText = configMap["notificationText"] as? Map<String, Any>
+            if (notificationText != null) {
+                val cfg = PolyfenceConfig(this)
+                (notificationText["trackingTitle"] as? String)?.let { cfg.trackingNotificationTitle = it }
+                (notificationText["trackingText"] as? String)?.let { cfg.trackingNotificationText = it }
+                (notificationText["trackingIconName"] as? String)?.let { cfg.trackingNotificationIconName = it }
+                (notificationText["enterTitle"] as? String)?.let { cfg.alertTitleEnter = it }
+                (notificationText["dwellTitle"] as? String)?.let { cfg.alertTitleDwell = it }
+                (notificationText["exitTitle"] as? String)?.let { cfg.alertTitleExit = it }
+                (notificationText["dwellBodyUnderMinute"] as? String)?.let { cfg.alertDwellBodyUnderMinute = it }
+                (notificationText["dwellBodyMinutes"] as? String)?.let { cfg.alertDwellBodyMinutes = it }
+                (notificationText["dwellBodyHours"] as? String)?.let { cfg.alertDwellBodyHours = it }
+                (notificationText["dwellBodyHoursMinutes"] as? String)?.let { cfg.alertDwellBodyHoursMinutes = it }
+                (notificationText["trackingChannelName"] as? String)?.let { cfg.trackingChannelName = it }
+                (notificationText["trackingChannelDescription"] as? String)?.let { cfg.trackingChannelDescription = it }
+                (notificationText["alertChannelName"] as? String)?.let { cfg.alertChannelName = it }
+                (notificationText["alertChannelDescription"] as? String)?.let { cfg.alertChannelDescription = it }
+                Log.d(TAG, "Notification text applied via updateConfiguration: ${notificationText.keys}")
+
+                // The ongoing notification is built once, at startForeground, so
+                // without this a host that renames it mid-session watches its zone
+                // alerts change while the notification the user is actually looking
+                // at keeps the old words until the service restarts. Re-posting the
+                // same id updates that notification in place.
+                //
+                // Gated on isRunning because that flag is set only after
+                // startForeground returned: a refused start and a missing
+                // permission both stopSelf() and return ahead of it. Posting
+                // without that gate would put a notification in the tray where the
+                // service has none, and the user could swipe this one away.
+                //
+                // Only when one of the three keys it reads actually arrived, so a
+                // host changing alert wording alone does not reissue it.
+                // Channel labels live in the system Settings app, not the tray,
+                // and a channel is otherwise only built at service start. Android
+                // updates an existing channel's name and description when it is
+                // re-created under the same id, so this is the whole update path.
+                // No isRunning gate: creating a channel posts nothing, it only
+                // declares a category, so doing it while stopped is harmless.
+                val touchedChannelLabels = notificationText.keys.any {
+                    it == "trackingChannelName" || it == "trackingChannelDescription" ||
+                        it == "alertChannelName" || it == "alertChannelDescription"
+                }
+                if (touchedChannelLabels) {
+                    runCatching { createNotificationChannels() }.onFailure {
+                        Log.w(TAG, "Could not relabel the notification channels: ${it.message}")
+                    }
+                }
+
+                val touchedTrackingNotification = notificationText.keys.any {
+                    it == "trackingTitle" || it == "trackingText" || it == "trackingIconName"
+                }
+                if (touchedTrackingNotification && isRunning) {
+                    runCatching {
+                        val manager = getSystemService(Context.NOTIFICATION_SERVICE)
+                            as NotificationManager
+                        manager.notify(NOTIFICATION_ID, createTrackingNotification())
+                    }.onFailure {
+                        Log.w(TAG, "Could not refresh the tracking notification: ${it.message}")
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update configuration: ${e.message}")
