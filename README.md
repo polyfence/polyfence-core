@@ -22,6 +22,7 @@ polyfence-core is the mobile surface of the Polyfence geofence layer — the nat
 - **Scheduled tracking** — Time-window and day-of-week tracking schedules
 - **Telemetry aggregation** — Session-level performance metrics collected natively. Zero PII about your end users; never coordinates, never end-user identifiers. The payload carries the host app's package name when a bridge supplies one.
 - **Zone persistence** — Zone state recovery across app restarts
+- **Zone read-back**: whatever you attach to a zone comes back out, from the zone id a crossing hands you
 
 ## Requirements
 
@@ -199,6 +200,43 @@ let tracker = LocationTracker()
 tracker.startTracking()
 ```
 
+## Reading a zone back
+
+Whatever you attach to a zone when you save it is persisted, and you can read it
+back from the zone id a crossing hands you, without keeping a parallel copy in
+your own state.
+
+```kotlin
+val persistence = ZonePersistence(context)
+val data = persistence.loadZoneData(zoneId)   // Map<String, Any>?, null if absent
+val name = persistence.loadZoneName(zoneId)   // String?, null if absent
+```
+
+```swift
+let persistence = ZonePersistence()
+let data = persistence.loadZoneData(zoneId: zoneId)   // [String: Any]?
+let name = persistence.loadZoneName(zoneId: zoneId)   // String?
+```
+
+Both read persisted storage rather than the running engine, so they answer before
+tracking starts and after the process has been restarted, which is when a
+crossing handler usually asks.
+
+Null means no zone is stored under that id. That is a different answer from a
+zone saved with nothing attached, which reads back as an empty map.
+
+Two platform details worth knowing if you forward these values anywhere:
+
+On Android a value you stored as null comes back as `JSONObject.NULL`, at any
+depth. The map's value type is non-null, so a Java null cannot travel in it, and
+that sentinel is how the underlying JSON object represents one. It is a live
+object, so an `== null` check does not see it. iOS returns `NSNull`.
+
+Also on Android, all zones share one stored string. A zone whose own data will
+not parse costs you only that zone, but corruption of the outer string is not
+scoped: an entry that is not an object hides every zone stored after it, while
+zones stored before it still answer.
+
 ## Architecture
 
 Polyfence Core is the engine layer consumed by platform-specific bridges:
@@ -219,7 +257,7 @@ polyfence-core (this repo)
 | `ActivityRecognitionManager` | Detects user activity (still, walking, running, cycling, driving) via Play Services (Android) / CoreMotion (iOS). Feeds activity data to LocationTracker for interval adjustment. |
 | `TrackingScheduler` | Time-based tracking control — start/stop tracking based on configurable time windows and days of week. |
 | `TelemetryAggregator` | Collects session-level performance metrics natively — activity distribution, GPS interval histogram, zone transitions, dwell durations, device category. No GPS coordinates or PII. |
-| `ZonePersistence` | Persists zone definitions and inside/outside state to local storage. Enables state recovery after app restarts. |
+| `ZonePersistence` | Persists zone definitions and inside/outside state to local storage. Enables state recovery after app restarts. Reads one zone back with `loadZoneData(zoneId)` / `loadZoneName(zoneId)`. |
 | `SmartGpsConfig` | Configuration model — accuracy profiles (max, balanced, battery-optimal, adaptive), update strategies, proximity/movement/battery/dwell/cluster/schedule/activity settings. |
 | `PolyfenceCoreDelegate` | Bridge interface — platform bridges implement this to receive events from the engine. |
 | `GeoMath` | Shared geometry algorithms — haversine distance, ray-casting point-in-polygon, point-to-segment distance. Used by GeofenceEngine and LocationTracker. |
