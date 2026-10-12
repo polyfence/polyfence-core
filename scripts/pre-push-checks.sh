@@ -53,6 +53,24 @@ cd android
 ./gradlew test --quiet
 cd "$REPO_ROOT"
 
+# iOS compiles.
+#
+# A compile, not the test run CI does. scripts/ci-ios-swift-tests.sh walks a
+# list of simulator destinations until one answers, which is right on a GitHub
+# runner with a known simulator set and wrong here: on a developer machine whose
+# simulators differ it spends minutes failing destinations before it finds one.
+# A generic iOS destination needs no simulator and finishes in about ten
+# seconds, which is the most that belongs in a push.
+#
+# So this catches Swift that does not build. Swift tests that fail still reach
+# CI, which runs them against a real simulator.
+if command -v xcodebuild >/dev/null 2>&1; then
+  echo "  Building iOS..."
+  xcodebuild build -scheme PolyfenceCore -destination 'generic/platform=iOS' -quiet
+else
+  echo "  Skipping iOS build: xcodebuild not found, so Swift is unchecked until CI."
+fi
+
 echo "  Running consistency checks..."
 bash scripts/consistency-check.sh --local-only
 
