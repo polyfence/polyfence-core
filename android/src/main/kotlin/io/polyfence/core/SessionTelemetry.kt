@@ -22,6 +22,8 @@ data class SessionTelemetry(
     var detectionTimeP95Ms: Double = 0.0,
     var gpsAccuracyAvgM: Double = 0.0,
     var sessionDurationMinutes: Double = 0.0,
+    /** Identifies one accumulating session, so a re-send is recognisable as the same one. */
+    var sessionId: String? = null,
 
     // Zone usage
     var zoneUsage: Map<String, Int> = emptyMap(),
@@ -98,6 +100,7 @@ data class SessionTelemetry(
         map["detection_time_p95_ms"] = detectionTimeP95Ms
         map["gps_accuracy_avg_m"] = gpsAccuracyAvgM
         map["session_duration_minutes"] = sessionDurationMinutes
+        sessionId?.let { map["session_id"] = it }
 
         map["zone_usage"] = zoneUsage
         map["error_counts"] = errorCounts

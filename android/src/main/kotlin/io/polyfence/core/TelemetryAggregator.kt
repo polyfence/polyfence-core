@@ -47,6 +47,14 @@ internal class TelemetryAggregator {
     private val detectionTimesMs = mutableListOf<Double>()
     private var firstDetectionTimeMs: Long? = null
     private var sessionStartTime: Long = System.currentTimeMillis()
+
+    // Identifies this session for as long as it is being accumulated, so a
+    // bridge can send the same session twice and have the server recognise it.
+    // The uploaded payload is a running total: a session re-sent while it is
+    // still growing differs only in its duration, so nothing else in it can
+    // tell the second copy from a different session. Minted here and again
+    // wherever sessionStartTime is, so the two always describe the same span.
+    private var sessionId: String = java.util.UUID.randomUUID().toString()
     private var sessionStartHour: Int = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
 
     // --- Zone metrics ---
@@ -278,6 +286,7 @@ internal class TelemetryAggregator {
         val distancesSnapshot: List<Double>
         val dwellsSnapshot: List<Double>
         val snapshotSessionStartTime: Long
+        val snapshotSessionId: String
         val snapshotFirstDetectionTimeMs: Long?
         val snapshotTotalGpsReadings: Int
         val snapshotGoodGpsReadings: Int
@@ -332,6 +341,7 @@ internal class TelemetryAggregator {
 
             // Snapshot scalars
             snapshotSessionStartTime = sessionStartTime
+            snapshotSessionId = sessionId
             snapshotFirstDetectionTimeMs = firstDetectionTimeMs
             snapshotTotalGpsReadings = totalGpsReadings
             snapshotGoodGpsReadings = goodGpsReadings
@@ -415,6 +425,7 @@ internal class TelemetryAggregator {
             detectionTimeP95Ms = detP95,
             gpsAccuracyAvgM = avgAccuracyAtEvent,
             sessionDurationMinutes = sessionDurationMinutes,
+            sessionId = snapshotSessionId,
             errorCounts = snapshotErrorCounts,
             ttfdMs = snapshotFirstDetectionTimeMs ?: 0L,
             hadDetection = totalDetections > 0,
@@ -480,6 +491,7 @@ internal class TelemetryAggregator {
             detectionTimesMs.clear()
             firstDetectionTimeMs = null
             sessionStartTime = System.currentTimeMillis()
+            sessionId = java.util.UUID.randomUUID().toString()
             sessionStartHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
 
             zoneTransitionCount = 0
