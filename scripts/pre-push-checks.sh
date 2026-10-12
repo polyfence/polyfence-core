@@ -64,9 +64,15 @@ cd "$REPO_ROOT"
 #
 # So this catches Swift that does not build. Swift tests that fail still reach
 # CI, which runs them against a real simulator.
+#
+# Not -quiet. Compiling a file that carries warnings prints "error: the
+# following command failed with exit code 0 but produced no further output"
+# under -quiet, so a successful build reads as a failed one and the script then
+# reports that all checks passed. The full output ends in BUILD SUCCEEDED and
+# is 43 lines when there is nothing to recompile.
 if command -v xcodebuild >/dev/null 2>&1; then
   echo "  Building iOS..."
-  xcodebuild build -scheme PolyfenceCore -destination 'generic/platform=iOS' -quiet
+  xcodebuild build -scheme PolyfenceCore -destination 'generic/platform=iOS'
 else
   echo "  Skipping iOS build: xcodebuild not found, so Swift is unchecked until CI."
 fi
