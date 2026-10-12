@@ -11,6 +11,33 @@ class TelemetryAggregatorTests: XCTestCase {
         aggregator.resetTelemetry()
     }
 
+    // MARK: - Session identity
+
+    // The payload is a running total, so a session re-sent while it is still
+    // growing differs from the first send only in its duration. Without an id
+    // the two are indistinguishable at the server.
+
+    func testSessionIdIsStableAcrossReadsOfTheSameSession() {
+        let first = aggregator.getSessionTelemetry()["session_id"] as? String
+        aggregator.recordGeofenceEvent(
+            zoneId: "zone1", eventType: "ENTER",
+            distanceM: 10.0, speedMps: 1.5, accuracyM: 15.0, detectionTimeMs: 2.5
+        )
+        let second = aggregator.getSessionTelemetry()["session_id"] as? String
+
+        XCTAssertNotNil(first)
+        XCTAssertEqual(first, second, "a session keeps one id while it accumulates")
+    }
+
+    func testSessionIdChangesWhenTheSessionIsReset() {
+        let before = aggregator.getSessionTelemetry()["session_id"] as? String
+        aggregator.resetTelemetry()
+        let after = aggregator.getSessionTelemetry()["session_id"] as? String
+
+        XCTAssertNotNil(before)
+        XCTAssertNotEqual(before, after, "a reset starts a new session")
+    }
+
     // MARK: - Activity Distribution
 
     func testActivityDistributionSumsToApproximatelyOne() {

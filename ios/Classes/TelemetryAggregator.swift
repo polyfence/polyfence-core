@@ -49,8 +49,9 @@ internal class TelemetryAggregator {
     // The uploaded payload is a running total: a session re-sent while it is
     // still growing differs only in its duration, so nothing else in it can
     // tell the second copy from a different session. Minted wherever
-    // sessionStartTime is, so the two always describe the same span.
-    private var sessionId: String = UUID().uuidString
+    // sessionStartTime is, and only there, so the two always describe the same
+    // span and neither is minted twice.
+    private var sessionId: String
 
     // --- Zone metrics ---
     private var zoneTransitionCount: Int = 0
