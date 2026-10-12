@@ -44,6 +44,14 @@ internal class TelemetryAggregator {
     private var firstDetectionTimeMs: Int64?
     private var sessionStartTime: Int64
 
+    // Identifies this session for as long as it is being accumulated, so a
+    // bridge can send the same session twice and have the server recognise it.
+    // The uploaded payload is a running total: a session re-sent while it is
+    // still growing differs only in its duration, so nothing else in it can
+    // tell the second copy from a different session. Minted wherever
+    // sessionStartTime is, so the two always describe the same span.
+    private var sessionId: String = UUID().uuidString
+
     // --- Zone metrics ---
     private var zoneTransitionCount: Int = 0
     private var dwellDurations: [Double] = []
@@ -71,6 +79,7 @@ internal class TelemetryAggregator {
         lastActivityChangeTime = now
         lastIntervalChangeTime = now
         sessionStartTime = now
+        sessionId = UUID().uuidString
         osVersionMajor = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
         sessionStartHour = Calendar.current.component(.hour, from: Date())
     }
@@ -313,6 +322,7 @@ internal class TelemetryAggregator {
             telemetry.detectionTimeP95Ms = detP95
             telemetry.gpsAccuracyAvgM = avgAccuracy
             telemetry.sessionDurationMinutes = sessionDurationMinutes
+            telemetry.sessionId = sessionId
             telemetry.errorCounts = errorCounts
             telemetry.ttfdMs = firstDetectionTimeMs ?? 0
             telemetry.hadDetection = totalDetections > 0
@@ -385,6 +395,7 @@ internal class TelemetryAggregator {
             self.detectionTimesMs.removeAll()
             self.firstDetectionTimeMs = nil
             self.sessionStartTime = now
+            self.sessionId = UUID().uuidString
             self.sessionStartHour = Calendar.current.component(.hour, from: Date())
 
             self.zoneTransitionCount = 0

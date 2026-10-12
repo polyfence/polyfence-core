@@ -16,6 +16,33 @@ class TelemetryAggregatorTest {
     }
 
     // ========================================================================
+    // Session identity
+    // ========================================================================
+
+    // The payload is a running total, so a session re-sent while it is still
+    // growing differs from the first send only in its duration. Without a
+    // session id the two are indistinguishable at the server, which is how
+    // 75% of one app's sessions came to be duplicates of each other.
+
+    @Test
+    fun `session id is stable across reads of the same session`() {
+        val first = aggregator.getSessionTelemetry()["session_id"] as String
+        aggregator.recordGeofenceEvent("zone-1", "enter", 10.0, 1.0, 5.0, 100.0)
+        val second = aggregator.getSessionTelemetry()["session_id"] as String
+
+        assertEquals("a session keeps one id while it accumulates", first, second)
+    }
+
+    @Test
+    fun `session id changes when the session is reset`() {
+        val before = aggregator.getSessionTelemetry()["session_id"] as String
+        aggregator.resetTelemetry()
+        val after = aggregator.getSessionTelemetry()["session_id"] as String
+
+        assertNotEquals("a reset starts a new session", before, after)
+    }
+
+    // ========================================================================
     // Activity Distribution Tests
     // ========================================================================
 

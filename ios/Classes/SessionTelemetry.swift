@@ -19,6 +19,8 @@ struct SessionTelemetry {
     var detectionTimeP95Ms: Double = 0.0
     var gpsAccuracyAvgM: Double = 0.0
     var sessionDurationMinutes: Double = 0.0
+    /// Identifies one accumulating session, so a re-send is recognisable as the same one.
+    var sessionId: String?
 
     var zoneUsage: [String: Int] = [:]
     var errorCounts: [String: Int] = [:]
@@ -79,6 +81,7 @@ struct SessionTelemetry {
         map["detection_time_p95_ms"] = detectionTimeP95Ms
         map["gps_accuracy_avg_m"] = gpsAccuracyAvgM
         map["session_duration_minutes"] = sessionDurationMinutes
+        if let v = sessionId { map["session_id"] = v }
 
         map["zone_usage"] = zoneUsage
         map["error_counts"] = errorCounts
