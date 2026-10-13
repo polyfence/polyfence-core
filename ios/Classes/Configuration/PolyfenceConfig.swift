@@ -33,6 +33,66 @@ public class PolyfenceConfig {
     public static let DEFAULT_MAX_UPDATE_DELAY_MS: Int = 6000
     public static let MIN_UPDATE_DISTANCE_METERS: Double = 10.0
 
+    // MARK: - Notification Text
+    //
+    // `{zone}` is replaced with the zone's name, `{hours}` / `{minutes}` with
+    // the time spent inside it. The host app writes each of these as a whole
+    // sentence in its own language rather than us assembling one from parts:
+    // word order and plural rules move between languages, so a sentence built
+    // from a prefix and a unit can only come out as English grammar wearing
+    // other words.
+    //
+    // The three tracking_* values have no iOS surface. Android needs an ongoing
+    // foreground-service notification and iOS does not, showing the system
+    // location indicator instead, which an app cannot rebrand. They are stored
+    // and echoed here anyway so a cross-platform host can round-trip one config
+    // object through `getConfiguration` on either platform without the iOS read
+    // silently dropping the keys the Android build uses.
+    public static let DEFAULT_TRACKING_NOTIFICATION_TITLE = "Polyfence Active"
+    public static let DEFAULT_TRACKING_NOTIFICATION_TEXT = "Monitoring geofence zones"
+    public static let DEFAULT_ALERT_TITLE_ENTER = "Entered {zone}"
+    public static let DEFAULT_ALERT_TITLE_DWELL = "Dwelling in {zone}"
+    public static let DEFAULT_ALERT_TITLE_EXIT = "Exited {zone}"
+    public static let DEFAULT_ALERT_DWELL_BODY_UNDER_MINUTE = "Here under a minute"
+    public static let DEFAULT_ALERT_DWELL_BODY_MINUTES = "Here {minutes} min"
+    public static let DEFAULT_ALERT_DWELL_BODY_HOURS = "Here {hours}h"
+    public static let DEFAULT_ALERT_DWELL_BODY_HOURS_MINUTES = "Here {hours}h {minutes} min"
+
+    // Notification-channel labels. Android has required channels since API 26
+    // and shows these in the phone's Settings app, where they label the switches
+    // that turn each kind of notification off. iOS has no equivalent: its
+    // notification categories carry identifiers the user never sees, and the
+    // system groups an app's notifications under the app itself. Stored and
+    // echoed here for the same round-trip reason as the tracking_* values.
+    /// ASCII whitespace, the characters an "effectively empty" value may be made
+    /// of. Spelled out rather than borrowed from `CharacterSet` because Android
+    /// has to agree exactly, and the obvious choice on each side does not:
+    /// Foundation's `whitespacesAndNewlines` counts U+0085 and not U+001C to
+    /// U+001F, while Kotlin's `isBlank` is the other way round, so the same
+    /// stored value read as unset on one platform and as a name on the other.
+    /// Anything outside this set is kept, including a no-break space, because a
+    /// drawable resource name cannot contain one anyway and a visible resolver
+    /// fallback beats silently discarding what a host set.
+    ///
+    /// Held as scalars and matched over `unicodeScalars`, not `Character`. A
+    /// Character is a grapheme cluster, so "\r\n" is one Character that equals
+    /// neither "\r" nor "\n" and a per-Character check would call a CRLF-only
+    /// value a name. Kotlin iterates UTF-16 units, which agree with scalars for
+    /// every character in this set.
+    private static let asciiWhitespace: Set<Unicode.Scalar> = [
+        " ", "\t", "\n", "\r", "\u{000B}", "\u{000C}"
+    ]
+
+    /// True when `value` is empty or made only of `asciiWhitespace`.
+    internal static func isEffectivelyEmpty(_ value: String) -> Bool {
+        return value.unicodeScalars.allSatisfy { asciiWhitespace.contains($0) }
+    }
+
+    public static let DEFAULT_TRACKING_CHANNEL_NAME = "Location Tracking"
+    public static let DEFAULT_TRACKING_CHANNEL_DESCRIPTION = "Background location tracking"
+    public static let DEFAULT_ALERT_CHANNEL_NAME = "Geofence Alerts"
+    public static let DEFAULT_ALERT_CHANNEL_DESCRIPTION = "Zone entry and exit notifications"
+
     // MARK: - Zone Validation Configuration
     static let DEFAULT_CONFIDENCE_POINTS: Int = 2
     static let DEFAULT_CONFIDENCE_TIMEOUT_MS: Int = 10000
@@ -82,6 +142,95 @@ public class PolyfenceConfig {
     }
 
     // MARK: - GPS Configuration Properties
+
+    // MARK: - Notification Text
+
+    public var trackingNotificationTitle: String {
+        get { defaults.string(forKey: "tracking_notification_title") ?? PolyfenceConfig.DEFAULT_TRACKING_NOTIFICATION_TITLE }
+        set { defaults.set(newValue, forKey: "tracking_notification_title") }
+    }
+
+    public var trackingNotificationText: String {
+        get { defaults.string(forKey: "tracking_notification_text") ?? PolyfenceConfig.DEFAULT_TRACKING_NOTIFICATION_TEXT }
+        set { defaults.set(newValue, forKey: "tracking_notification_text") }
+    }
+
+    // Icon resource NAME, not a resolved id. Android resolves this against the
+    // host app's drawables at call time, because a resource id is assigned at
+    // compile time and moves when the host rebuilds. Android also renders a small
+    // icon from its alpha channel alone, so the name should point at a monochrome,
+    // transparent-background asset or it arrives as a white square. Unused on iOS,
+    // stored for the round-trip parity described above.
+    //
+    // Empty, or only ASCII whitespace, reads as unset, by the same explicit rule
+    // Android uses, so a reset clears the icon on both platforms. The configuration map carries values rather than absences: a map
+    // that omits this key means "leave what is stored alone", which is what a
+    // partial update needs, so a reset has to be able to say "no icon" with a
+    // value. An empty string is that value and cannot name a real drawable.
+    public var trackingNotificationIconName: String? {
+        get {
+            guard let name = defaults.string(forKey: "tracking_notification_icon_name"),
+                  !PolyfenceConfig.isEffectivelyEmpty(name)
+            else { return nil }
+            return name
+        }
+        set { defaults.set(newValue, forKey: "tracking_notification_icon_name") }
+    }
+
+    public var alertTitleEnter: String {
+        get { defaults.string(forKey: "alert_title_enter") ?? PolyfenceConfig.DEFAULT_ALERT_TITLE_ENTER }
+        set { defaults.set(newValue, forKey: "alert_title_enter") }
+    }
+
+    public var alertTitleDwell: String {
+        get { defaults.string(forKey: "alert_title_dwell") ?? PolyfenceConfig.DEFAULT_ALERT_TITLE_DWELL }
+        set { defaults.set(newValue, forKey: "alert_title_dwell") }
+    }
+
+    public var alertTitleExit: String {
+        get { defaults.string(forKey: "alert_title_exit") ?? PolyfenceConfig.DEFAULT_ALERT_TITLE_EXIT }
+        set { defaults.set(newValue, forKey: "alert_title_exit") }
+    }
+
+    public var alertDwellBodyUnderMinute: String {
+        get { defaults.string(forKey: "alert_dwell_body_under_minute") ?? PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_UNDER_MINUTE }
+        set { defaults.set(newValue, forKey: "alert_dwell_body_under_minute") }
+    }
+
+    public var alertDwellBodyMinutes: String {
+        get { defaults.string(forKey: "alert_dwell_body_minutes") ?? PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_MINUTES }
+        set { defaults.set(newValue, forKey: "alert_dwell_body_minutes") }
+    }
+
+    public var alertDwellBodyHours: String {
+        get { defaults.string(forKey: "alert_dwell_body_hours") ?? PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_HOURS }
+        set { defaults.set(newValue, forKey: "alert_dwell_body_hours") }
+    }
+
+    public var alertDwellBodyHoursMinutes: String {
+        get { defaults.string(forKey: "alert_dwell_body_hours_minutes") ?? PolyfenceConfig.DEFAULT_ALERT_DWELL_BODY_HOURS_MINUTES }
+        set { defaults.set(newValue, forKey: "alert_dwell_body_hours_minutes") }
+    }
+
+    public var trackingChannelName: String {
+        get { defaults.string(forKey: "tracking_channel_name") ?? PolyfenceConfig.DEFAULT_TRACKING_CHANNEL_NAME }
+        set { defaults.set(newValue, forKey: "tracking_channel_name") }
+    }
+
+    public var trackingChannelDescription: String {
+        get { defaults.string(forKey: "tracking_channel_description") ?? PolyfenceConfig.DEFAULT_TRACKING_CHANNEL_DESCRIPTION }
+        set { defaults.set(newValue, forKey: "tracking_channel_description") }
+    }
+
+    public var alertChannelName: String {
+        get { defaults.string(forKey: "alert_channel_name") ?? PolyfenceConfig.DEFAULT_ALERT_CHANNEL_NAME }
+        set { defaults.set(newValue, forKey: "alert_channel_name") }
+    }
+
+    public var alertChannelDescription: String {
+        get { defaults.string(forKey: "alert_channel_description") ?? PolyfenceConfig.DEFAULT_ALERT_CHANNEL_DESCRIPTION }
+        set { defaults.set(newValue, forKey: "alert_channel_description") }
+    }
 
     public var gpsIntervalMs: Int {
         get {

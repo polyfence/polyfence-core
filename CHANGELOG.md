@@ -13,6 +13,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Signing is now conditional on `ORG_GRADLE_PROJECT_signingInMemoryKey` being present, which is what the release workflow supplies, so a real publish still signs. Keyed on the credential rather than on a task name, so it covers every local task rather than one. Maven Central rejects unsigned artifacts, so that remains the backstop against a release whose key is missing reaching consumers.
 
 ### Added
+- **Every string Polyfence shows a host app's own users is now the host's to write.** Fourteen of them were fixed in the library, in English: on Android the ongoing tracking notification's title, text and small icon, and a name and a description for each of the two notification channels, and on both platforms the zone-crossing alerts `Entered X`, `Dwelling in X`, `Exited X` and the four dwell bodies from `Here under a minute` to `Here 2h 30 min`. Every default matches the string it replaced, with one exception: the hours-and-minutes body gained a space before `min`, so the minute unit is spaced the same way whether or not an hour has passed. Previously a user read `Here 5 min` early on and `Here 1h 5min` later.
+
+  Set them through `updateConfiguration`, under one `notificationText` object. The keys:
+
+  ```
+  notificationText: {
+    trackingTitle, trackingText, trackingIconName,
+    enterTitle, dwellTitle, exitTitle,
+    dwellBodyUnderMinute, dwellBodyMinutes,
+    dwellBodyHours, dwellBodyHoursMinutes,
+    trackingChannelName, trackingChannelDescription,
+    alertChannelName, alertChannelDescription
+  }
+  ```
+
+  A partial object applies only the keys it carries and leaves the rest stored, `getConfiguration()` reads the whole group back, and `resetConfiguration()` restores every default. The native property names differ (`alertTitleEnter` on `PolyfenceConfig` for `enterTitle`); the keys above are the wire contract and the thing to pass.
+
+  `enterTitle`, `dwellTitle` and `exitTitle` take `{zone}`. The dwell bodies also take `{hours}` and `{minutes}`, and are offered `{zone}` as well. Placeholders rather than a fixed prefix because word order moves between languages: a host writing in Japanese needs `{zone}に到着`, and a prefix could only ever produce English grammar in other words. A placeholder with no value is left exactly as written, so a typo shows up in the tray pointing at the line to fix instead of leaving a hole in the sentence, and a zone legitimately named `Bay {minutes}` keeps that text rather than having it substituted. The four dwell bodies are four whole sentences rather than one template plus unit strings for the same reason, with plural rules on top: English needs `1 minute` against `2 minutes` and Polish needs three forms, and only the host knows which language it is writing. Polyfence ships no translations and does not detect the device language; a host that changes its wording after `initialize` calls `updateConfiguration` again, and the tracking notification already in the tray is reissued in place.
+
+  Polyfence does not translate anything, it stops forcing English. A host needing more control than templates allow can still set `disableAlertNotifications: true` and post its own notification from its event handler, which has always worked.
+
+  Blank is not uniform across the fourteen, on purpose. `trackingIconName` is a resource lookup, so empty or whitespace-only reads as unset, which is what lets a reset clear it. The thirteen sentences are copy, so a blank one is kept and used: an empty title gives a title-less notification, which is the host's choice to make. "Whitespace-only" means ASCII whitespace by an explicit rule in both platforms rather than each language's own predicate, because Kotlin's and Foundation's disagree about which exotic separators count and the same stored value would otherwise read differently on the two platforms.
+
+  `trackingIconName` is a drawable resource **name**, not an `R.drawable` id, because ids are assigned at compile time and move when the host app's resources change: a persisted id silently stops matching after their next release, and this notification goes to `startForeground`, which Android kills the service for when the call does not land. The name is resolved at call time and the result checked, so an icon that no longer resolves degrades to the platform location glyph instead. Android renders a small icon from its alpha channel alone, so point it at a monochrome, transparent-background asset or it arrives as a white square. An **empty string clears it**: the group carries values rather than absences, so a `notificationText` that omits a key means "leave what is stored alone", and a reset needs a value that means "no icon". No drawable can be named `""`, so that is the one.
+
+  The tracking notification is Android only: iOS has no foreground-service notification and shows the system location indicator, which an app cannot rebrand. Its three keys are stored and echoed on iOS anyway so a cross-platform host can round-trip one configuration object through either platform without the iOS read dropping them.
+
+  The four channel keys are Android only. Android has required notification channels since API 26 and shows their name and description in the phone's own Settings app, under the host app's notification settings, where they label the switches that turn tracking or zone alerts off independently. A host that ships in French had two English rows there. Changing one takes effect immediately: Android updates an existing channel's name and description when it is re-created under the same id, and declines to override importance, sound or vibration once the user has adjusted those themselves, which is the behaviour a host wants. iOS has no equivalent, since its notification categories carry identifiers the user never sees, so there the four are stored and echoed for the round-trip reason below.
+
+  **The React Native and Flutter configuration types do not carry `notificationText` yet, so this is reachable from native Kotlin and Swift only until each bridge adds it and picks up this release.** React Native rejects an unrecognised configuration key rather than ignoring it, so passing `notificationText` from JavaScript before that throws.
+
 - **Reading one zone's stored metadata back out: `ZonePersistence.loadZoneData(zoneId)` and `loadZoneName(zoneId)`, on both platforms.** Whatever a caller attaches to a zone through `saveZone` is persisted, and until now it only came back out through `loadAllZones`. A caller holding one zone id, which is what a crossing hands it, had to read the whole stored set to answer a question about one zone. Both accessors return null when no zone is stored under that id, which is a different answer from a zone saved with nothing attached: that reads back as an empty map.
 
   The saving differs by platform because the storage does. iOS keeps each zone under its own key, so the single read touches only the zone asked for. Android keeps all zones in one preferences string, so the JSON parse is shared either way and what is avoided is converting every other zone's data to a map. On Android it is also the more robust read: `loadAllZones` wraps the whole set in one try, so one unparseable zone costs the caller every zone, while a single-zone read fails only for the zone asked for. iOS already catches per zone. Both behaviours are asserted, so neither note can quietly stop being true.

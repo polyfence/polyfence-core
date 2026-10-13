@@ -28,6 +28,56 @@ class PolyfenceConfig(context: Context) {
 
     companion object {
         private const val TAG = "PolyfenceConfig"
+        const val DEFAULT_TRACKING_NOTIFICATION_TITLE = "Polyfence Active"
+        const val DEFAULT_TRACKING_NOTIFICATION_TEXT = "Monitoring geofence zones"
+
+        // Crossing-alert text. `{zone}` is replaced with the zone's name, and
+        // `{hours}` / `{minutes}` with the time spent inside it. The host app
+        // writes each of these as a whole sentence in its own language, rather
+        // than us assembling one from parts: word order and plural rules move
+        // between languages, so a sentence built from a prefix and a unit can
+        // only ever come out as English grammar wearing other words.
+        const val DEFAULT_ALERT_TITLE_ENTER = "Entered {zone}"
+        const val DEFAULT_ALERT_TITLE_DWELL = "Dwelling in {zone}"
+        const val DEFAULT_ALERT_TITLE_EXIT = "Exited {zone}"
+        const val DEFAULT_ALERT_DWELL_BODY_UNDER_MINUTE = "Here under a minute"
+        const val DEFAULT_ALERT_DWELL_BODY_MINUTES = "Here {minutes} min"
+        const val DEFAULT_ALERT_DWELL_BODY_HOURS = "Here {hours}h"
+        const val DEFAULT_ALERT_DWELL_BODY_HOURS_MINUTES = "Here {hours}h {minutes} min"
+
+        // Blank is not uniform across these fourteen, deliberately. The icon
+        // name is a resource lookup, so an empty or whitespace-only value is
+        // the same as having none and reads as unset, which is what lets a
+        // reset clear it. The thirteen sentences are copy, so a blank one is
+        // kept and used: an empty title gives a title-less notification, which
+        // is a host's choice to make and not ours to second-guess.
+        //
+        // Notification-channel labels. Android has required channels since API
+        // 26 and shows these in the phone's own Settings app, under the host
+        // app's notification settings, where they label the switches that turn
+        // each kind of notification off. Not a tray string, but still Polyfence
+        // writing English into someone else's app.
+        /**
+         * ASCII whitespace, the characters an "effectively empty" value may be
+         * made of. Spelled out rather than borrowed from a standard predicate
+         * because iOS has to agree exactly, and the obvious choice on each side
+         * does not: Kotlin's `isBlank` counts U+001C to U+001F and not U+0085,
+         * while Foundation's `whitespacesAndNewlines` is the other way round, so
+         * the same stored value read as unset on one platform and as a name on
+         * the other. Anything outside this set is kept, including a no-break
+         * space, because a drawable resource name cannot contain one anyway and
+         * a visible resolver fallback beats silently discarding what a host set.
+         */
+        private const val ASCII_WHITESPACE = " \t\n\r\u000B\u000C"
+
+        /** True when [value] is empty or made only of [ASCII_WHITESPACE]. */
+        internal fun isEffectivelyEmpty(value: String): Boolean =
+            value.all { it in ASCII_WHITESPACE }
+
+        const val DEFAULT_TRACKING_CHANNEL_NAME = "Location Tracking"
+        const val DEFAULT_TRACKING_CHANNEL_DESCRIPTION = "Background location tracking"
+        const val DEFAULT_ALERT_CHANNEL_NAME = "Geofence Alerts"
+        const val DEFAULT_ALERT_CHANNEL_DESCRIPTION = "Zone entry and exit notifications"
         private const val PREFS_NAME = "polyfence_config"
 
         // Default GPS Configuration
@@ -135,6 +185,133 @@ class PolyfenceConfig(context: Context) {
         get() = prefs.getInt("pending_events_queue_size", 0)
         set(value) {
             prefs.edit().putInt("pending_events_queue_size", value).apply()
+        }
+
+    // Text of the ongoing foreground-service notification Android requires while
+    // background location tracking runs. It names the app doing the tracking to
+    // that app's own users, so the host app has to be able to say who it is. The
+    // defaults describe Polyfence because an integrator who sets nothing is
+    // running Polyfence; any integrator shipping to their own users will set
+    // them.
+    var trackingNotificationTitle: String
+        get() = prefs.getString("tracking_notification_title", null)
+            ?: DEFAULT_TRACKING_NOTIFICATION_TITLE
+        set(value) {
+            prefs.edit().putString("tracking_notification_title", value).apply()
+        }
+
+    var trackingNotificationText: String
+        get() = prefs.getString("tracking_notification_text", null)
+            ?: DEFAULT_TRACKING_NOTIFICATION_TEXT
+        set(value) {
+            prefs.edit().putString("tracking_notification_text", value).apply()
+        }
+
+    // Drawable resource NAME for the same notification's small icon, for example
+    // "ic_tracking". Null means unset, and the tracker falls back to the platform
+    // location glyph, so a host app that does not set this shows a generic Android
+    // pin in its own notification tray.
+    //
+    // A name rather than an R.drawable id on purpose. Resource ids are assigned at
+    // compile time and move when the host app's resources change, so a persisted
+    // id silently stops matching after their next release. It would then reach
+    // setSmallIcon and from there startForeground, which Android kills the service
+    // for if it does not land. A name survives a rebuild and is resolved at call
+    // time instead.
+    //
+    // Android renders a notification's small icon from its alpha channel alone,
+    // so a full-colour drawable arrives as a white square. The name should point
+    // at a monochrome, transparent-background asset.
+    //
+    // Empty reads as unset, which is how a reset clears it. The configuration map
+    // carries values, not absences: a map that omits this key means "leave what is
+    // stored alone", which is what a partial update needs, so the reset payload
+    // has to be able to say "no icon" with a value. An empty string is that value,
+    // and it cannot collide with a real drawable, since no resource can be named
+    // "". iOS applies the same rule so a reset clears the icon on both platforms.
+    var trackingNotificationIconName: String?
+        get() = prefs.getString("tracking_notification_icon_name", null)
+            ?.takeIf { !isEffectivelyEmpty(it) }
+        set(value) {
+            prefs.edit().putString("tracking_notification_icon_name", value).apply()
+        }
+
+    // Title of the notification shown when someone crosses a zone boundary.
+    // Unset reads as the English default, so a host app that configures nothing
+    // sees exactly today's text. ENTER and RECOVERY_ENTER share the enter title,
+    // EXIT and RECOVERY_EXIT the exit one, which is the behaviour these replace.
+    var alertTitleEnter: String
+        get() = prefs.getString("alert_title_enter", null) ?: DEFAULT_ALERT_TITLE_ENTER
+        set(value) {
+            prefs.edit().putString("alert_title_enter", value).apply()
+        }
+
+    var alertTitleDwell: String
+        get() = prefs.getString("alert_title_dwell", null) ?: DEFAULT_ALERT_TITLE_DWELL
+        set(value) {
+            prefs.edit().putString("alert_title_dwell", value).apply()
+        }
+
+    var alertTitleExit: String
+        get() = prefs.getString("alert_title_exit", null) ?: DEFAULT_ALERT_TITLE_EXIT
+        set(value) {
+            prefs.edit().putString("alert_title_exit", value).apply()
+        }
+
+    // Body of the dwell notification. Four separate sentences rather than one
+    // template plus unit strings, because which one applies depends on the
+    // duration and each reads differently in a given language.
+    var alertDwellBodyUnderMinute: String
+        get() = prefs.getString("alert_dwell_body_under_minute", null) ?: DEFAULT_ALERT_DWELL_BODY_UNDER_MINUTE
+        set(value) {
+            prefs.edit().putString("alert_dwell_body_under_minute", value).apply()
+        }
+
+    var alertDwellBodyMinutes: String
+        get() = prefs.getString("alert_dwell_body_minutes", null) ?: DEFAULT_ALERT_DWELL_BODY_MINUTES
+        set(value) {
+            prefs.edit().putString("alert_dwell_body_minutes", value).apply()
+        }
+
+    var alertDwellBodyHours: String
+        get() = prefs.getString("alert_dwell_body_hours", null) ?: DEFAULT_ALERT_DWELL_BODY_HOURS
+        set(value) {
+            prefs.edit().putString("alert_dwell_body_hours", value).apply()
+        }
+
+    var alertDwellBodyHoursMinutes: String
+        get() = prefs.getString("alert_dwell_body_hours_minutes", null) ?: DEFAULT_ALERT_DWELL_BODY_HOURS_MINUTES
+        set(value) {
+            prefs.edit().putString("alert_dwell_body_hours_minutes", value).apply()
+        }
+
+    // Labels for the two notification channels, shown in the phone's Settings
+    // app rather than the tray. Changing one takes effect by re-creating the
+    // channel under the same id, which Android treats as an update of its name
+    // and description; it declines to override importance or sound once the user
+    // has adjusted those themselves, which is the behaviour a host wants anyway.
+    var trackingChannelName: String
+        get() = prefs.getString("tracking_channel_name", null) ?: DEFAULT_TRACKING_CHANNEL_NAME
+        set(value) {
+            prefs.edit().putString("tracking_channel_name", value).apply()
+        }
+
+    var trackingChannelDescription: String
+        get() = prefs.getString("tracking_channel_description", null) ?: DEFAULT_TRACKING_CHANNEL_DESCRIPTION
+        set(value) {
+            prefs.edit().putString("tracking_channel_description", value).apply()
+        }
+
+    var alertChannelName: String
+        get() = prefs.getString("alert_channel_name", null) ?: DEFAULT_ALERT_CHANNEL_NAME
+        set(value) {
+            prefs.edit().putString("alert_channel_name", value).apply()
+        }
+
+    var alertChannelDescription: String
+        get() = prefs.getString("alert_channel_description", null) ?: DEFAULT_ALERT_CHANNEL_DESCRIPTION
+        set(value) {
+            prefs.edit().putString("alert_channel_description", value).apply()
         }
 
     // Automatic delivery of queued events. true = on (default) — the moment a
