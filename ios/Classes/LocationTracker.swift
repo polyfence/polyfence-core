@@ -1769,7 +1769,7 @@ extension LocationTracker: CLLocationManagerDelegate {
         // lookup misses and the raw id would reach the consumer as the display
         // name. Disk is the only source that survives the process.
         let zoneName = geofenceEngine.getZoneName(zoneId)
-            ?? zonePersistence?.loadAllZones()[zoneId]?.1
+            ?? zonePersistence?.loadZoneName(zoneId: zoneId)
             ?? zoneId
         let coord = (region as? CLCircularRegion)?.center
 

@@ -108,6 +108,69 @@ class ZonePersistence(private val context: Context) {
     }
 
     /**
+     * The data a caller passed to [saveZone] for one zone, or null when no zone
+     * is stored under that id.
+     *
+     * Cheaper and more robust than reading the whole set for one answer. All
+     * zones live in a single preferences string, so the JSON parse is shared
+     * with [loadAllZones], but the per-zone conversion to a map is not. And
+     * [loadAllZones] wraps the whole set in one try, so a zone whose own stored
+     * data will not parse costs the caller every zone, where here it costs only
+     * that zone.
+     *
+     * The limit of that: corruption of the outer string itself is not scoped,
+     * because [getSavedZones] wraps its key loop in one try and returns what it
+     * accumulated before failing. An entry that is not an object therefore
+     * hides every zone stored after it, from this read and from
+     * [getZoneCount] alike, while zones stored before it still answer.
+     *
+     * A value stored as null comes back as [org.json.JSONObject.NULL], at any
+     * depth, including inside a nested map or list. The map's value type is
+     * non-null, so a Java null cannot travel in it, and that sentinel is how the
+     * underlying JSON object represents one. A caller that forwards these values
+     * somewhere null is expressible, a bridge for instance, has to translate it:
+     * `JSONObject.NULL` is a live object, so an `== null` check does not see it,
+     * though `equals(null)` answers true.
+     *
+     * @param zoneId the id given to [saveZone].
+     * @return the stored data map, or null when the zone is absent or its stored
+     *   form cannot be read.
+     */
+    fun loadZoneData(zoneId: String): Map<String, Any>? {
+        synchronized(lock) {
+            return try {
+                val zoneJson = getSavedZones()[zoneId] ?: return null
+                jsonToMap(zoneJson.getJSONObject("data"))
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load data for zone $zoneId: ${e.message}")
+                null
+            }
+        }
+    }
+
+    /**
+     * The display name stored for one zone, or null when no zone is stored under
+     * that id.
+     *
+     * Separate from [loadZoneData] rather than one call returning both, so
+     * neither caller has to index into a tuple to say which it wanted.
+     *
+     * @param zoneId the id given to [saveZone].
+     * @return the stored name, or null when the zone is absent or its stored
+     *   form cannot be read.
+     */
+    fun loadZoneName(zoneId: String): String? {
+        synchronized(lock) {
+            return try {
+                getSavedZones()[zoneId]?.getString("name")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load name for zone $zoneId: ${e.message}")
+                null
+            }
+        }
+    }
+
+    /**
      * Get count of saved zones
      * Thread-safe: Uses synchronization for consistent reads
      */
