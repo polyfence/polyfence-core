@@ -78,7 +78,26 @@ dependencies {
 
 mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
-    signAllPublications()
+
+    // Sign only when there is a key to sign with. Maven Central requires signed
+    // artifacts, and the release workflow supplies the key as
+    // ORG_GRADLE_PROJECT_signingInMemoryKey, so a real publish still signs.
+    //
+    // Unconditional signing made the library unbuildable by anyone else: a clone
+    // running `./gradlew publishToMavenLocal`, or any task that builds the
+    // publication, failed asking for a key only the maintainer has. The library
+    // is MIT and the privacy policy invites readers to verify its claims in the
+    // code, which means being able to build it.
+    //
+    // Keyed on the credential rather than on a task name so it covers every
+    // local task rather than one, and so it cannot silently skip signing on a
+    // release: a release without the key fails at publish time, loudly, rather
+    // than uploading an unsigned artifact.
+    val hasSigningKey = providers.gradleProperty("signingInMemoryKey").isPresent ||
+        System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKey") != null
+    if (hasSigningKey) {
+        signAllPublications()
+    }
 
     coordinates(
         groupId = "io.polyfence",
