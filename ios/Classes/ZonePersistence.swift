@@ -145,6 +145,63 @@ public class ZonePersistence {
     }
 
     /**
+     * The data a caller passed to `saveZone` for one zone, or nil when no zone
+     * is stored under that id.
+     *
+     * Cheaper than reading the whole set for one answer: each zone has its own
+     * UserDefaults key, so only the one asked for is touched. Matches Kotlin's
+     * `loadZoneData`, which pays a shared JSON parse because Android keeps all
+     * zones in one string.
+     *
+     * - Parameter zoneId: the id given to `saveZone`.
+     * - Returns: the stored data map, or nil when the zone is absent or its
+     *   stored form cannot be read.
+     */
+    public func loadZoneData(zoneId: String) -> [String: Any]? {
+        return persistenceQueue.sync {
+            let zoneDataKey = "\(ZonePersistence.ZONES_KEY)_\(zoneId)"
+            guard let data = self.userDefaults.data(forKey: zoneDataKey) else {
+                return nil
+            }
+            do {
+                return try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            } catch {
+                NSLog("[\(ZonePersistence.TAG)] Failed to load data for zone \(zoneId)")
+                return nil
+            }
+        }
+    }
+
+    /**
+     * The display name stored for one zone, or nil when no zone is stored under
+     * that id.
+     *
+     * Separate from `loadZoneData` rather than one call returning both, so
+     * neither caller has to index into a tuple to say which it wanted. Matches
+     * Kotlin's `loadZoneName`.
+     *
+     * - Parameter zoneId: the id given to `saveZone`.
+     * - Returns: the stored name, or nil when the zone is absent.
+     */
+    public func loadZoneName(zoneId: String) -> String? {
+        return persistenceQueue.sync {
+            // Membership in the stored id list first, which is what
+            // loadAllZones, zoneExists and getZoneCount all treat as
+            // authoritative, and what Kotlin's loadZoneName gets for free by
+            // going through getSavedZones. Reading the name key alone would
+            // answer for a zone this store no longer considers present: a name
+            // orphaned by a removal that could not rewrite the id list, or by a
+            // caller writing the key directly. Those are the same cases every
+            // other read here already refuses to answer for.
+            let ids = self.userDefaults.stringArray(forKey: ZonePersistence.ZONES_KEY) ?? []
+            guard ids.contains(zoneId) else { return nil }
+            return self.userDefaults.string(
+                forKey: "\(ZonePersistence.ZONE_NAMES_KEY)_\(zoneId)"
+            )
+        }
+    }
+
+    /**
      * Check if zone exists in storage
      * Thread-safe: Uses sync to ensure consistent reads
      */
