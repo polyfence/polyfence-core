@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-14
+
 ### Fixed
 - **`publishToMavenLocal` works without the maintainer's signing key.** `signAllPublications()` ran unconditionally, so any task that built the publication failed with "Cannot perform signing task because it has no configured signatory". `./gradlew build` was never affected, because signing attaches to the publication tasks rather than to `build`; the task that was broken is `publishToMavenLocal`, which is how someone builds the library into a local repository to use or verify it. That matters because the library is MIT and the privacy policy invites readers to check its claims in the code.
 
