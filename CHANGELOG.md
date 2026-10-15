@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documented
+- **Privacy wording corrected.** `PRIVACY.md` said this library never collects, transmits or stores location data and includes no vendor telemetry. That was too broad. The library still makes no network calls and sends nothing itself, but it reads positions on the phone to check zones, and it builds telemetry aggregates, some derived from location or motion (average speed at events, average distance to the zone edge at events, activity mix, and dwell-time fields this version leaves empty), which the Flutter and React Native bridges send by default. `README.md` and `SECURITY.md` are corrected to match, and the aggregates are now listed as they are built: battery level rather than battery drain, and zone counts by size rather than zone type counts. It also now says that the optional pending-events queue stores zone events with positions on the device, and which permission prompts the library shows on iOS. Library behaviour is unchanged.
+
 ## [3.1.0] - 2026-10-14
 
 ### Fixed
